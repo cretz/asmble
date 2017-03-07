@@ -3,29 +3,79 @@ package asmble.io
 import asmble.ast.Node
 import asmble.ast.Node.InstrOp
 import asmble.ast.SExpr
+import asmble.ast.Script
 import asmble.util.takeUntilNull
+import asmble.util.takeUntilNullLazy
 
-class SExprToAst {
+open class SExprToAst {
+    data class ImportOrExport(val field: String, val importModule: String?)
+
     fun toBlockSigMaybe(exp: SExpr.Multi, offset: Int): List<Node.Type.Value> {
-        val types = exp.vals.drop(offset).asSequence().map {
-            if (it is SExpr.Symbol) toTypeMaybe(it) else null
-        }.takeUntilNull().toList()
+        val types = exp.vals.drop(offset).takeUntilNullLazy { if (it is SExpr.Symbol) toTypeMaybe(it) else null }
         // We can only handle one type for now
         require(types.size  <= 1)
         return types
     }
 
+    fun toCmd(exp: SExpr.Multi): Script.Cmd {
+        val expName = exp.vals.first().symbolStr()
+        when(expName) {
+            "module" -> return Script.Cmd.Module(toModule(exp).second)
+            "register" -> return toRegister(exp)
+            "invoke", "get" -> return toAction(exp)
+            "assert_return", "assert_return_nan", "assert_trap", "assert_malformed",
+                "assert_invalid", "assert_soft_invalid", "assert_unlinkable" -> return toAssertion(exp)
+            "script", "input", "output" -> return toMeta(exp)
+            else -> throw Exception("Unrecognized cmd expr '$expName'")
+        }
+    }
+
+    fun toData(exp: SExpr.Multi): Pair<String?, Node.Data> {
+        exp.requireFirstSymbol("data")
+        var currIndex = 1
+        val name = exp.maybeName(1)
+        if (name == null) require(toVarMaybe(exp.vals[currIndex]) == null, { "Int name not supported" })
+        else currIndex++
+        val offsetMulti = exp.vals[currIndex] as SExpr.Multi
+        val instrs =
+                if (offsetMulti.vals.firstOrNull()?.symbolStr() == "offset") toInstrs(offsetMulti, 1).first
+                else toExprMaybe(offsetMulti)
+        currIndex++
+        val strs = exp.vals.drop(currIndex + 1).fold("") { str, sym -> str + (sym as SExpr.Symbol).contents }
+        return Pair(name, Node.Data(0, instrs, strs.toByteArray(Charsets.UTF_8)))
+    }
+
+    fun toElem(exp: SExpr.Multi): Pair<String?, Node.Elem> {
+        exp.requireFirstSymbol("elem")
+        var currIndex = 1
+        val name = exp.maybeName(1)
+        if (name == null) require(toVarMaybe(exp.vals[currIndex]) == null, { "Int name not supported" })
+        else currIndex++
+        val offsetMulti = exp.vals[currIndex] as SExpr.Multi
+        val instrs =
+            if (offsetMulti.vals.firstOrNull()?.symbolStr() == "offset") toInstrs(offsetMulti, 1).first
+            else toExprMaybe(offsetMulti)
+        currIndex++
+        val vars = exp.vals.drop(currIndex + 1).map { toVar(it as SExpr.Symbol) }
+        return Pair(name, Node.Elem(0, instrs, vars))
+    }
+
     fun toElemType(exp: SExpr.Multi, offset: Int): Node.ElemType {
-        exp.vals[offset].requireSymbol("anyfunc")
+        exp.requireFirstSymbol("anyfunc")
         return Node.ElemType.ANYFUNC
     }
 
+    fun toElemTypeMaybe(exp: SExpr.Multi, offset: Int): Node.ElemType? {
+        if (exp.vals[offset].symbolStr() == "anyfunc") return Node.ElemType.ANYFUNC
+        return null
+    }
+
     fun toExport(exp: SExpr.Multi): Node.Export {
-        exp.vals.first().requireSymbol("export")
-        val field = (exp.vals[1] as SExpr.Symbol).contents
+        exp.requireFirstSymbol("export")
+        val field = exp.vals[1].symbolStr()!!
         val kind = exp.vals[2] as SExpr.Multi
-        val kindIndex = toVar(kind.vals[1] as SExpr.Symbol)
-        val extKind = when((kind.vals[0] as SExpr.Symbol).contents) {
+        val kindIndex = toVar(kind.vals[1].symbol()!!)
+        val extKind = when(kind.vals[0].symbolStr()) {
             "func" -> Node.ExternalKind.FUNCTION
             "global" -> Node.ExternalKind.GLOBAL
             "table" -> Node.ExternalKind.TABLE
@@ -45,7 +95,7 @@ class SExprToAst {
             } + maybeOpAndOffset.first
         }
         // Other blocks take up the rest (ignore names)
-        val blockName = (exp.vals.first() as SExpr.Symbol).contents
+        val blockName = exp.vals.first().symbolStr()
         var opOffset = 1
         if (exp.maybeName(opOffset) != null) opOffset++
         val sigs = toBlockSigMaybe(exp, opOffset)
@@ -62,7 +112,7 @@ class SExprToAst {
                 var ret = emptyList<Node.Instr>()
                 // Try expressions
                 var exprMulti = exp.vals[opOffset] as SExpr.Multi
-                var exprs = toExprMaybe(exprMulti)
+                val exprs = toExprMaybe(exprMulti)
                 // Conditional?
                 if (exprs.isNotEmpty()) {
                     // First expression means it's the conditional, so push on stack
@@ -72,17 +122,15 @@ class SExprToAst {
                 }
                 ret += Node.Instr.If(sigs.firstOrNull())
                 // Is it a "then"?
-                if (exprMulti.vals[0] is SExpr.Symbol && (exprMulti.vals[0] as SExpr.Symbol).contents == "then") {
-                    ret += toInstrs(exprMulti, 1).first
-                } else ret += toExprMaybe(exprMulti)
+                if (exprMulti.vals.firstOrNull()?.symbolStr() == "then") ret += toInstrs(exprMulti, 1).first
+                else ret += toExprMaybe(exprMulti)
                 // Now check for "else"
                 opOffset++
                 if (opOffset < exp.vals.size) {
                     ret += Node.Instr.Else
                     exprMulti = exp.vals[opOffset] as SExpr.Multi
-                    if (exprMulti.vals[0] is SExpr.Symbol && (exprMulti.vals[0] as SExpr.Symbol).contents == "else") {
-                        ret += toInstrs(exprMulti, 1).first
-                    } else ret += toExprMaybe(exprMulti)
+                    if (exprMulti.vals.firstOrNull()?.symbolStr() == "else") ret += toInstrs(exprMulti, 1).first
+                    else ret += toExprMaybe(exprMulti)
                 }
                 return ret + Node.Instr.End
             }
@@ -90,18 +138,21 @@ class SExprToAst {
         }
     }
 
-    fun toFunc(exp: SExpr.Multi): Pair<String?, Node.Func> {
-        exp.vals.first().requireSymbol("func")
-        // TODO: export/import
+    fun toFunc(exp: SExpr.Multi): Triple<String?, Node.Func, ImportOrExport?> {
+        exp.requireFirstSymbol("func")
         var currentIndex = 1
         val name = exp.maybeName(currentIndex)
         if (name != null) currentIndex++
+        val maybeImpExp = toImportOrExportMaybe(exp, currentIndex)
+        if (maybeImpExp != null) currentIndex++
         val sig = toFuncSig(exp.vals[currentIndex] as SExpr.Multi)
         currentIndex++
         val locals = exp.repeated("local", currentIndex, { toLocals(it).second }).flatten()
         currentIndex += locals.size
         val (instrs, _) = toInstrs(exp, currentIndex)
-        return Pair(name, Node.Func(sig, locals, instrs))
+        // Imports can't have locals or instructions
+        require((maybeImpExp?.importModule != null) == (locals.isEmpty() && instrs.isEmpty()))
+        return Triple(name, Node.Func(sig, locals, instrs), maybeImpExp)
     }
 
     fun toFuncSig(exp: SExpr.Multi): Node.Type.Func {
@@ -121,11 +172,11 @@ class SExprToAst {
     }
 
     fun toImport(exp: SExpr.Multi): Triple<String, String, Node.Type> {
-        exp.vals.first().requireSymbol("import")
-        val module = (exp.vals[1] as SExpr.Symbol).contents
-        val field = (exp.vals[2] as SExpr.Symbol).contents
+        exp.requireFirstSymbol("import")
+        val module = exp.vals[1].symbolStr()!!
+        val field = exp.vals[2].symbolStr()!!
         val kind = exp.vals[3] as SExpr.Multi
-        val kindName = (kind.vals[0] as SExpr.Symbol).contents
+        val kindName = kind.vals.firstOrNull()?.symbolStr()
         val kindSubOffset = if (kind.maybeName(1) == null) 1 else 2
         return Triple(module, field, when(kindName) {
             "func" -> toFuncSig(kind.vals[kindSubOffset] as SExpr.Multi)
@@ -134,6 +185,17 @@ class SExprToAst {
             "memory" -> toMemorySig(kind, kindSubOffset)
             else -> throw Exception("Unrecognized type: $kindName")
         })
+    }
+
+    fun toImportOrExportMaybe(exp: SExpr.Multi, offset: Int): ImportOrExport? {
+        if (offset >= exp.vals.size) return null
+        val multi = exp.vals[offset] as? SExpr.Multi ?: return null
+        val multiHead = multi.vals[0] as? SExpr.Symbol ?: return null
+        return when (multiHead.contents) {
+            "export" -> ImportOrExport(multi.vals[1].symbolStr()!!, null)
+            "import" -> ImportOrExport(multi.vals[1].symbolStr()!!, multi.vals[2].symbolStr()!!)
+            else -> null
+        }
     }
 
     fun toInstrs(exp: SExpr.Multi, offset: Int): Pair<List<Node.Instr>, Int> {
@@ -160,8 +222,7 @@ class SExprToAst {
             return Pair(listOf(maybeOpAndOffset.first), maybeOpAndOffset.second)
         }
         // Other blocks (ignore names)
-        if (exp.vals[offset] !is SExpr.Symbol) return Pair(emptyList(), 0)
-        val blockName = (exp.vals[offset] as SExpr.Symbol).contents
+        val blockName = exp.vals[offset].symbolStr() ?: return Pair(emptyList(), 0)
         var opOffset = 1
         if (exp.maybeName(offset + opOffset) != null) opOffset++
         val sigs = toBlockSigMaybe(exp, offset + opOffset)
@@ -190,7 +251,7 @@ class SExprToAst {
                 }
                 // Else?
                 if (offset + opOffset < exp.vals.size) {
-                    if ((exp.vals[offset + opOffset] as? SExpr.Symbol)?.contents == "else") {
+                    if (exp.vals[offset + opOffset].symbolStr() == "else") {
                         ret += Node.Instr.Else
                         opOffset++
                         if (exp.maybeName(offset + opOffset) != null) opOffset++
@@ -203,17 +264,29 @@ class SExprToAst {
             }
             else -> return Pair(emptyList(), 0)
         }
-        require((exp.vals[offset + opOffset] as? SExpr.Symbol)?.contents == "end")
+        require(exp.vals[offset + opOffset].symbolStr() == "end")
         opOffset++
         if (exp.maybeName(offset + opOffset) != null) opOffset++
         return Pair(ret, opOffset)
     }
 
     fun toLocals(exp: SExpr.Multi): Pair<String?, List<Node.Type.Value>> {
-        exp.vals.first().requireSymbol("local")
+        exp.requireFirstSymbol("local")
         val name = exp.maybeName(1)
-        if (name != null) return Pair(name, listOf(toType(exp.vals[2] as SExpr.Symbol)))
-        return Pair(null, exp.vals.drop(1).map { toType(it as SExpr.Symbol) })
+        if (name != null) return Pair(name, listOf(toType(exp.vals[2].symbol()!!)))
+        return Pair(null, exp.vals.drop(1).map { toType(it.symbol()!!) })
+    }
+
+    fun toMemory(exp: SExpr.Multi): Triple<String?, Node.Type.Memory, ImportOrExport?> {
+        exp.requireFirstSymbol("memory")
+        var currIndex = 1
+        val name = exp.maybeName(currIndex)
+        if (name != null) currIndex++
+        val maybeImpExp = toImportOrExportMaybe(exp, currIndex)
+        if (maybeImpExp == null) currIndex++
+        // Try data approach
+        if (exp.vals[currIndex] is SExpr.Multi) throw Exception("Data string not yet supported for memory")
+        return Triple(name, toMemorySig(exp, currIndex), maybeImpExp)
     }
 
     fun toMemorySig(exp: SExpr.Multi, offset: Int): Node.Type.Memory {
@@ -221,15 +294,35 @@ class SExprToAst {
     }
 
     fun toModule(exp: SExpr.Multi): Pair<String?, Node.Module> {
-        exp.vals.first().requireSymbol("module")
+        exp.requireFirstSymbol("module")
         var currIndex = 1
         val name = exp.maybeName(currIndex)
         if (name != null) currIndex++
+
+        // Func sigs
         var types = exp.repeated("type", currIndex, { toTypeDef(it).second })
         currIndex += types.size
-        val funcs = exp.repeated("func", currIndex, { toFunc(it).second })
-        currIndex += funcs.size
-        val imports = exp.repeated("import", currIndex, this::toImport).map {
+
+        // Func defs including imports/exports
+        val (importFuncs, otherFuncs) = exp.repeated("func", currIndex, this::toFunc).
+                partition { (_, _, impExp) -> impExp?.importModule != null }
+        currIndex += importFuncs.size + otherFuncs.size
+        // Add function imports
+        var imports = importFuncs.mapNotNull { (_, fn, impExp) ->
+            impExp?.importModule?.let {
+                types += fn.type
+                Node.Import(it, impExp.field, Node.Import.Kind.Func(types.lastIndex))
+            }
+        }
+        // Add other funcs
+        var exports = emptyList<Node.Export>()
+        val funcs = otherFuncs.mapIndexedNotNull { index, (_, fn, impExp) ->
+            if (impExp != null) exports += Node.Export(impExp.field, Node.ExternalKind.FUNCTION, index)
+            fn
+        }
+
+        // Import defs
+        val explicitImports = exp.repeated("import", currIndex, this::toImport).map {
             when(it.third) {
                 is Node.Type.Func -> {
                     // TODO: why does smart cast not work here?
@@ -246,15 +339,63 @@ class SExprToAst {
                     throw Exception("Unrecognized import kind: ${it.third}")
             }
         }
-        currIndex += imports.size
-        val exports = exp.repeated("export", currIndex, this::toExport)
-        currIndex += exports.size
+        currIndex += explicitImports.size
+        imports += explicitImports
+
+        // Export defs
+        val explicitExports = exp.repeated("export", currIndex, this::toExport)
+        currIndex += explicitExports.size
+        exports += explicitExports
+
+        // Table defs
+        val (importTables, otherTables) = exp.repeated("table", currIndex, this::toTable).
+                partition { (_, _, impExp) -> impExp?.importModule != null }
+        currIndex += importTables.size + otherTables.size
+        // Add table imports
+        imports += importTables.mapNotNull { (_, tbl, impExp) ->
+            impExp?.importModule?.let { Node.Import(it, impExp.field, Node.Import.Kind.Table(tbl)) }
+        }
+        // Add other tables
+        val tables = otherTables.mapIndexedNotNull { index, (_, tbl, impExp) ->
+            if (impExp != null) exports += Node.Export(impExp.field, Node.ExternalKind.TABLE, index)
+            tbl
+        }
+
+        // Memory defs
+        val (importMemories, otherMemories) = exp.repeated("memory", currIndex, this::toMemory).
+                partition { (_, _, impExp) -> impExp?.importModule != null }
+        currIndex += importMemories.size + otherMemories.size
+        // Add memory imports
+        imports += importMemories.mapNotNull { (_, mem, impExp) ->
+            impExp?.importModule?.let { Node.Import(it, impExp.field, Node.Import.Kind.Memory(mem)) }
+        }
+        // Add other tables
+        val memories = otherMemories.mapIndexedNotNull { index, (_, mem, impExp) ->
+            if (impExp != null) exports += Node.Export(impExp.field, Node.ExternalKind.MEMORY, index)
+            mem
+        }
+
+        // Elems
+        val elems = exp.repeated("elem", currIndex, this::toElem).map { it.second }
+        currIndex += elems.size
+
+        // Data
+        val data = exp.repeated("data", currIndex, this::toData).map { it.second }
+        currIndex += data.size
+
+        // Start index
+        val start = if (currIndex < exp.vals.size) toStart(exp.vals[0] as SExpr.Multi) else null
+
+        val globals = emptyList<Node.Global>()
+        val customSections = emptyList<Node.CustomSection>()
+        return Pair(name, Node.Module(types, imports, tables, memories, globals,
+            exports, start, elems, funcs, data, customSections))
     }
 
     fun toOpMaybe(exp: SExpr.Multi, offset: Int): Pair<Node.Instr, Int>? {
         if (offset >= exp.vals.size) return null
-        val head = exp.vals[offset] as SExpr.Symbol
-        fun oneVar() = toVar(exp.vals[offset + 1] as SExpr.Symbol)
+        val head = exp.vals[offset].symbol()!!
+        fun oneVar() = toVar(exp.vals[offset + 1].symbol()!!)
         val op = InstrOp.strToOpMap[head.contents]
         return when(op) {
             null -> null
@@ -262,7 +403,7 @@ class SExprToAst {
             is InstrOp.ControlFlowOp.TypeArg -> return null // Type not handled here
             is InstrOp.ControlFlowOp.DepthArg -> Pair(op.create(oneVar()), 2)
             is InstrOp.ControlFlowOp.TableArg -> {
-                val vars = exp.vals.drop(offset + 1).asSequence().map(this::toVarMaybe).takeUntilNull().toList()
+                val vars = exp.vals.drop(offset + 1).takeUntilNullLazy(this::toVarMaybe)
                 Pair(op.create(vars.drop(1), vars.first()), offset + vars.size)
             }
             is InstrOp.CallOp.IndexArg -> Pair(op.create(oneVar()), 2)
@@ -273,27 +414,25 @@ class SExprToAst {
                 var count = 1
                 var instrOffset = 0
                 var instrAlign = 0
-                if (exp.vals.size > offset + count) {
-                    val maybeSym = exp.vals[offset + count] as? SExpr.Symbol
-                    if (maybeSym != null && maybeSym.contents.startsWith("offset=")) {
-                        instrOffset = maybeSym.contents.substring(7).toInt()
+                if (exp.vals.size > offset + count) exp.vals[offset + count].symbolStr().also {
+                    if (it != null && it.startsWith("offset=")) {
+                        instrOffset = it.substring(7).toInt()
                         count++
                     }
                 }
-                if (exp.vals.size > offset + count) {
-                    val maybeSym = exp.vals[offset + count] as? SExpr.Symbol
-                    if (maybeSym != null && maybeSym.contents.startsWith("align=")) {
-                        instrAlign = maybeSym.contents.substring(6).toInt()
+                if (exp.vals.size > offset + count) exp.vals[offset + count].symbolStr().also {
+                    if (it != null && it.startsWith("align=")) {
+                        instrAlign = it.substring(6).toInt()
                         count++
                     }
                 }
                 Pair(op.create(instrAlign, instrOffset), count)
             }
             is InstrOp.MemOp.ReservedArg -> Pair(op.create(false), 1)
-            is InstrOp.ConstOp.IntArg -> Pair(op.create((exp.vals[offset + 1] as SExpr.Symbol).contents.toInt()), 2)
-            is InstrOp.ConstOp.LongArg -> Pair(op.create((exp.vals[offset + 1] as SExpr.Symbol).contents.toLong()), 2)
-            is InstrOp.ConstOp.FloatArg -> Pair(op.create((exp.vals[offset + 1] as SExpr.Symbol).contents.toFloat()), 2)
-            is InstrOp.ConstOp.DoubleArg -> Pair(op.create((exp.vals[offset + 1] as SExpr.Symbol).contents.toDouble()), 2)
+            is InstrOp.ConstOp.IntArg -> Pair(op.create(exp.vals[offset + 1].symbol()!!.contents.toInt()), 2)
+            is InstrOp.ConstOp.LongArg -> Pair(op.create(exp.vals[offset + 1].symbol()!!.contents.toLong()), 2)
+            is InstrOp.ConstOp.FloatArg -> Pair(op.create(exp.vals[offset + 1].symbol()!!.contents.toFloat()), 2)
+            is InstrOp.ConstOp.DoubleArg -> Pair(op.create(exp.vals[offset + 1].symbol()!!.contents.toDouble()), 2)
             is InstrOp.CompareOp.NoArg -> Pair(op.create, 1)
             is InstrOp.NumOp.NoArg -> Pair(op.create, 1)
             is InstrOp.ConvertOp.NoArg -> Pair(op.create, 1)
@@ -302,23 +441,49 @@ class SExprToAst {
     }
 
     fun toParams(exp: SExpr.Multi): Pair<String?, List<Node.Type.Value>> {
-        exp.vals.first().requireSymbol("param")
+        exp.requireFirstSymbol("param")
         val name = exp.maybeName(1)
-        if (name != null) return Pair(name, listOf(toType(exp.vals[2] as SExpr.Symbol)))
-        return Pair(null, exp.vals.drop(1).map { toType(it as SExpr.Symbol) })
+        if (name != null) return Pair(name, listOf(toType(exp.vals[2].symbol()!!)))
+        return Pair(null, exp.vals.drop(1).map { toType(it.symbol()!!) })
+    }
+
+    fun toRegister(exp: SExpr.Multi): Script.Cmd.Register {
+        exp.requireFirstSymbol("register")
+        TODO()
     }
 
     fun toResizeableLimits(exp: SExpr.Multi, offset: Int): Node.ResizableLimits {
         var max: Int? = null
         if (offset + 1 < exp.vals.size && exp.vals[offset + 1] is SExpr.Symbol) {
-            max = (exp.vals[offset + 1] as SExpr.Symbol).contents.toIntOrNull()
+            max = exp.vals[offset + 1].symbolStr()?.toIntOrNull()
         }
-        return Node.ResizableLimits((exp.vals[offset] as SExpr.Symbol).contents.toInt(), max)
+        return Node.ResizableLimits(exp.vals[offset].symbolStr()!!.toInt(), max)
     }
 
     fun toResult(exp: SExpr.Multi): Node.Type.Value {
-        exp.vals.first().requireSymbol("result")
-        return toType(exp.vals[1] as SExpr.Symbol)
+        exp.requireFirstSymbol("result")
+        return toType(exp.vals[1].symbol()!!)
+    }
+
+    fun toStart(exp: SExpr.Multi): Int {
+        exp.requireFirstSymbol("start")
+        return toVar(exp.vals[1].symbol()!!)
+    }
+
+    fun toTable(exp: SExpr.Multi): Triple<String?, Node.Type.Table, ImportOrExport?> {
+        exp.requireFirstSymbol("table")
+        var currIndex = 1
+        val name = exp.maybeName(currIndex)
+        if (name != null) currIndex++
+        val maybeImpExp = toImportOrExportMaybe(exp, currIndex)
+        if (maybeImpExp == null) currIndex++
+        // Try elem type approach
+        val elemType = toElemTypeMaybe(exp, currIndex)
+        if (elemType != null) {
+            require(maybeImpExp?.importModule == null)
+            throw Exception("Elem type not yet supported for table")
+        }
+        return Triple(name, toTableSig(exp, currIndex), maybeImpExp)
     }
 
     fun toTableSig(exp: SExpr.Multi, offset: Int): Node.Type.Table {
@@ -339,12 +504,12 @@ class SExprToAst {
     }
 
     fun toTypeDef(exp: SExpr.Multi): Pair<String?, Node.Type.Func> {
-        exp.vals.first().requireSymbol("typedef")
+        exp.requireFirstSymbol("typedef")
         var currIndex = 1
         val name = exp.maybeName(currIndex)
         if (name != null) currIndex++
         val funcSigExp = exp.vals[currIndex] as SExpr.Multi
-        funcSigExp.vals[0].requireSymbol("func")
+        funcSigExp.requireFirstSymbol("func")
         return Pair(name, toFuncSig(funcSigExp.vals[1] as SExpr.Multi))
     }
 
@@ -355,8 +520,7 @@ class SExprToAst {
 
     fun toVarMaybe(exp: SExpr): Int? {
         // TODO: what about name?
-        if (exp !is SExpr.Symbol) return null
-        return exp.contents.toIntOrNull()
+        return exp.symbolStr()?.toIntOrNull()
     }
 
     private fun SExpr.requireSymbol(contents: String, quotedCheck: Boolean? = null) {
@@ -366,6 +530,10 @@ class SExprToAst {
         }
         throw Exception("Expected symbol of $contents, got $this")
     }
+
+
+    private fun SExpr.symbol() = this as? SExpr.Symbol
+    private fun SExpr.symbolStr() = this.symbol()?.let { it.contents }
 
     private fun SExpr.Multi.maybeName(index: Int): String? {
         if (this.vals.size > index && this.vals[index] is SExpr.Symbol) {
@@ -379,16 +547,19 @@ class SExprToAst {
         var offset = startOffset
         var ret = emptyList<T>()
         while (this.vals.size > offset) {
-            if (this.vals[offset] !is SExpr.Multi) break
-            val expMulti = this.vals[offset] as SExpr.Multi
-            if (expMulti.vals[0] !is SExpr.Symbol) break
-            val expName = expMulti.vals[0] as SExpr.Symbol
+            val expMulti = this.vals[offset] as? SExpr.Multi ?: break
+            val expName = expMulti.vals[0] as? SExpr.Symbol ?: break
             if (expName.quoted || expName.contents != name) break
             ret += fn(expMulti)
             offset++
         }
         return ret
     }
+
+    private fun SExpr.Multi.requireFirstSymbol(contents: String, quotedCheck: Boolean? = null) {
+        if (this.vals.isEmpty()) throw Exception("Expected symbol of $contents, got empty")
+        return this.vals.first().requireSymbol(contents, quotedCheck)
+    }
+
+    companion object : SExprToAst()
 }
-
-

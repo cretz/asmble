@@ -98,13 +98,13 @@ sealed class Node {
     data class Data(
         val index: Int,
         val offset: List<Instr>,
-        val data: Array<Byte>
+        val data: ByteArray
     ) : Node()
 
     data class CustomSection(
         val sectionIndex: Int,
         val name: String,
-        val payload: Array<Byte>
+        val payload: ByteArray
     ) : Node()
 
     sealed class Instr : Node() {
