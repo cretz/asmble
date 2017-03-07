@@ -4,17 +4,17 @@ import kotlin.reflect.KClass
 
 sealed class Node {
     data class Module(
-        val types: List<Type.Func>,
-        val imports: List<Import>,
-        val tables: List<Type.Table>,
-        val memories: List<Type.Memory>,
-        val globals: List<Global>,
-        val exports: List<Export>,
-        val startFuncIndex: Int?,
-        val elems: List<Elem>,
-        val funcs: List<Func>,
-        val data: List<Data>,
-        val customSections: List<CustomSection>
+        val types: List<Type.Func> = emptyList(),
+        val imports: List<Import> = emptyList(),
+        val tables: List<Type.Table> = emptyList(),
+        val memories: List<Type.Memory> = emptyList(),
+        val globals: List<Global> = emptyList(),
+        val exports: List<Export> = emptyList(),
+        val startFuncIndex: Int? = null,
+        val elems: List<Elem> = emptyList(),
+        val funcs: List<Func> = emptyList(),
+        val data: List<Data> = emptyList(),
+        val customSections: List<CustomSection> = emptyList()
     ) : Node()
 
     enum class ExternalKind {

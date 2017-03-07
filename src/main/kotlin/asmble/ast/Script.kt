@@ -12,11 +12,11 @@ data class Script(val commands: List<Cmd>) {
             data class Return(val action: Action, val exprs: List<Node.Instr>): Assertion()
             data class ReturnNan(val action: Action): Assertion()
             data class Trap(val action: Action, val failure: String): Assertion()
-            data class Malformed(val action: Action, val failure: String): Assertion()
-            data class Invalid(val action: Action, val failure: String): Assertion()
-            data class SoftInvalid(val action: Action, val failure: String): Assertion()
-            data class Unlinkable(val action: Action, val failure: String): Assertion()
-            data class TrapModule(val module: Module, val failure: String): Assertion()
+            data class Malformed(val module: Node.Module, val failure: String): Assertion()
+            data class Invalid(val module: Node.Module, val failure: String): Assertion()
+            data class SoftInvalid(val module: Node.Module, val failure: String): Assertion()
+            data class Unlinkable(val module: Node.Module, val failure: String): Assertion()
+            data class TrapModule(val module: Node.Module, val failure: String): Assertion()
         }
         sealed class Meta: Cmd() {
             data class Script(val name: String?, val script: asmble.ast.Script): Meta()
