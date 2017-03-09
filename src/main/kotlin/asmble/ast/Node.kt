@@ -108,286 +108,309 @@ sealed class Node {
     ) : Node()
 
     sealed class Instr : Node() {
+
+        fun op() = InstrOp.classToOpMap[this::class] ?: throw Exception("No op found for ${this::class}")
+
+        // Interfaces to help extraction
+        interface Args {
+            interface None : Args
+            interface Type : Args { val type: Node.Type.Value? }
+            interface RelativeDepth : Args { val relativeDepth: Int }
+            interface Table : Args { val targetTable: List<Int>; val default: Int }
+            interface Index : Args { val index: Int }
+            interface Reserved : Args { val reserved: Boolean }
+            interface ReservedIndex : Index, Reserved
+            interface AlignOffset : Args { val align: Int; val offset: Int }
+            interface Const<out T : Number> : Args { val value: T }
+        }
+
         // Control flow
-        object Unreachable : Instr()
-        object Nop : Instr()
-        data class Block(val type: Type.Value?) : Instr()
-        data class Loop(val type: Type.Value?) : Instr()
-        data class If(val type: Type.Value?) : Instr()
-        object Else : Instr()
-        object End : Instr()
-        data class Br(val relativeDepth: Int) : Instr()
-        data class BrIf(val relativeDepth: Int) : Instr()
+        object Unreachable : Instr(), Args.None
+        object Nop : Instr(), Args.None
+        data class Block(override val type: Type.Value?) : Instr(), Args.Type
+        data class Loop(override val type: Type.Value?) : Instr(), Args.Type
+        data class If(override val type: Type.Value?) : Instr(), Args.Type
+        object Else : Instr(), Args.None
+        object End : Instr(), Args.None
+        data class Br(override val relativeDepth: Int) : Instr(), Args.RelativeDepth
+        data class BrIf(override val relativeDepth: Int) : Instr(), Args.RelativeDepth
         data class BrTable(
-            val targetTable: List<Int>,
-            val default: Int
-        ) : Instr()
+            override val targetTable: List<Int>,
+            override val default: Int
+        ) : Instr(), Args.Table
         object Return : Instr()
 
         // Call operators
-        data class Call(val funcIndex: Int) : Instr()
+        data class Call(override val index: Int) : Instr(), Args.Index
         data class CallIndirect(
-            val typeIndex: Int,
-            val reserved: Boolean
-        ) : Instr()
+            override val index: Int,
+            override val reserved: Boolean
+        ) : Instr(), Args.ReservedIndex
 
         // Parametric operators
-        object Drop : Instr()
-        object Select : Instr()
+        object Drop : Instr(), Args.None
+        object Select : Instr(), Args.None
 
         // Variable access
-        data class GetLocal(val index: Int) : Instr()
-        data class SetLocal(val index: Int) : Instr()
-        data class TeeLocal(val index: Int) : Instr()
-        data class GetGlobal(val index: Int) : Instr()
-        data class SetGlobal(val index: Int) : Instr()
+        data class GetLocal(override val index: Int) : Instr(), Args.Index
+        data class SetLocal(override val index: Int) : Instr(), Args.Index
+        data class TeeLocal(override val index: Int) : Instr(), Args.Index
+        data class GetGlobal(override val index: Int) : Instr(), Args.Index
+        data class SetGlobal(override val index: Int) : Instr(), Args.Index
 
         // Memory operators
-        data class I32Load(val flags: Int, val offset: Int) : Instr()
-        data class I64Load(val flags: Int, val offset: Int) : Instr()
-        data class F32Load(val flags: Int, val offset: Int) : Instr()
-        data class F64Load(val flags: Int, val offset: Int) : Instr()
-        data class I32Load8S(val flags: Int, val offset: Int) : Instr()
-        data class I32Load8U(val flags: Int, val offset: Int) : Instr()
-        data class I32Load16S(val flags: Int, val offset: Int) : Instr()
-        data class I32Load16U(val flags: Int, val offset: Int) : Instr()
-        data class I64Load8S(val flags: Int, val offset: Int) : Instr()
-        data class I64Load8U(val flags: Int, val offset: Int) : Instr()
-        data class I64Load16S(val flags: Int, val offset: Int) : Instr()
-        data class I64Load16U(val flags: Int, val offset: Int) : Instr()
-        data class I64Load32S(val flags: Int, val offset: Int) : Instr()
-        data class I64Load32U(val flags: Int, val offset: Int) : Instr()
-        data class I32Store(val flags: Int, val offset: Int) : Instr()
-        data class I64Store(val flags: Int, val offset: Int) : Instr()
-        data class F32Store(val flags: Int, val offset: Int) : Instr()
-        data class F64Store(val flags: Int, val offset: Int) : Instr()
-        data class I32Store8(val flags: Int, val offset: Int) : Instr()
-        data class I32Store16(val flags: Int, val offset: Int) : Instr()
-        data class I64Store8(val flags: Int, val offset: Int) : Instr()
-        data class I64Store16(val flags: Int, val offset: Int) : Instr()
-        data class I64Store32(val flags: Int, val offset: Int) : Instr()
-        data class CurrentMemory(val reserved: Boolean) : Instr()
-        data class GrowMemory(val reserved: Boolean) : Instr()
+        data class I32Load(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
+        data class I64Load(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
+        data class F32Load(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
+        data class F64Load(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
+        data class I32Load8S(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
+        data class I32Load8U(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
+        data class I32Load16S(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
+        data class I32Load16U(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
+        data class I64Load8S(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
+        data class I64Load8U(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
+        data class I64Load16S(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
+        data class I64Load16U(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
+        data class I64Load32S(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
+        data class I64Load32U(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
+        data class I32Store(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
+        data class I64Store(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
+        data class F32Store(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
+        data class F64Store(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
+        data class I32Store8(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
+        data class I32Store16(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
+        data class I64Store8(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
+        data class I64Store16(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
+        data class I64Store32(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
+        data class CurrentMemory(override val reserved: Boolean) : Instr(), Args.Reserved
+        data class GrowMemory(override val reserved: Boolean) : Instr(), Args.Reserved
 
         // Constants
-        data class I32Const(val value: Int) : Instr()
-        data class I64Const(val value: Long) : Instr()
-        data class F32Const(val value: Float) : Instr()
-        data class F64Const(val value: Double) : Instr()
+        data class I32Const(override val value: Int) : Instr(), Args.Const<Int>
+        data class I64Const(override val value: Long) : Instr(), Args.Const<Long>
+        data class F32Const(override val value: Float) : Instr(), Args.Const<Float>
+        data class F64Const(override val value: Double) : Instr(), Args.Const<Double>
 
         // Comparison operators
-        object I32Eqz : Instr()
-        object I32Eq : Instr()
-        object I32Ne : Instr()
-        object I32LtS : Instr()
-        object I32LtU : Instr()
-        object I32GtS : Instr()
-        object I32GtU : Instr()
-        object I32LeS : Instr()
-        object I32LeU : Instr()
-        object I32GeS : Instr()
-        object I32GeU : Instr()
-        object I64Eqz : Instr()
-        object I64Eq : Instr()
-        object I64Ne : Instr()
-        object I64LtS : Instr()
-        object I64LtU : Instr()
-        object I64GtS : Instr()
-        object I64GtU : Instr()
-        object I64LeS : Instr()
-        object I64LeU : Instr()
-        object I64GeS : Instr()
-        object I64GeU : Instr()
-        object F32Eq : Instr()
-        object F32Ne : Instr()
-        object F32Lt : Instr()
-        object F32Gt : Instr()
-        object F32Le : Instr()
-        object F32Ge : Instr()
-        object F64Eq : Instr()
-        object F64Ne : Instr()
-        object F64Lt : Instr()
-        object F64Gt : Instr()
-        object F64Le : Instr()
-        object F64Ge : Instr()
+        object I32Eqz : Instr(), Args.None
+        object I32Eq : Instr(), Args.None
+        object I32Ne : Instr(), Args.None
+        object I32LtS : Instr(), Args.None
+        object I32LtU : Instr(), Args.None
+        object I32GtS : Instr(), Args.None
+        object I32GtU : Instr(), Args.None
+        object I32LeS : Instr(), Args.None
+        object I32LeU : Instr(), Args.None
+        object I32GeS : Instr(), Args.None
+        object I32GeU : Instr(), Args.None
+        object I64Eqz : Instr(), Args.None
+        object I64Eq : Instr(), Args.None
+        object I64Ne : Instr(), Args.None
+        object I64LtS : Instr(), Args.None
+        object I64LtU : Instr(), Args.None
+        object I64GtS : Instr(), Args.None
+        object I64GtU : Instr(), Args.None
+        object I64LeS : Instr(), Args.None
+        object I64LeU : Instr(), Args.None
+        object I64GeS : Instr(), Args.None
+        object I64GeU : Instr(), Args.None
+        object F32Eq : Instr(), Args.None
+        object F32Ne : Instr(), Args.None
+        object F32Lt : Instr(), Args.None
+        object F32Gt : Instr(), Args.None
+        object F32Le : Instr(), Args.None
+        object F32Ge : Instr(), Args.None
+        object F64Eq : Instr(), Args.None
+        object F64Ne : Instr(), Args.None
+        object F64Lt : Instr(), Args.None
+        object F64Gt : Instr(), Args.None
+        object F64Le : Instr(), Args.None
+        object F64Ge : Instr(), Args.None
 
         // Numeric operators
-        object I32Clz : Instr()
-        object I32Ctz : Instr()
-        object I32Popcnt : Instr()
-        object I32Add : Instr()
-        object I32Sub : Instr()
-        object I32Mul : Instr()
-        object I32DivS : Instr()
-        object I32DivU : Instr()
-        object I32RemS : Instr()
-        object I32RemU : Instr()
-        object I32And : Instr()
-        object I32Or : Instr()
-        object I32Xor : Instr()
-        object I32Shl : Instr()
-        object I32ShrS : Instr()
-        object I32ShrU : Instr()
-        object I32Rotl : Instr()
-        object I32Rotr : Instr()
-        object I64Clz : Instr()
-        object I64Ctz : Instr()
-        object I64Popcnt : Instr()
-        object I64Add : Instr()
-        object I64Sub : Instr()
-        object I64Mul : Instr()
-        object I64DivS : Instr()
-        object I64DivU : Instr()
-        object I64RemS : Instr()
-        object I64RemU : Instr()
-        object I64And : Instr()
-        object I64Or : Instr()
-        object I64Xor : Instr()
-        object I64Shl : Instr()
-        object I64ShrS : Instr()
-        object I64ShrU : Instr()
-        object I64Rotl : Instr()
-        object I64Rotr : Instr()
-        object F32Abs : Instr()
-        object F32Neg : Instr()
-        object F32Ceil : Instr()
-        object F32Floor : Instr()
-        object F32Trunc : Instr()
-        object F32Nearest : Instr()
-        object F32Sqrt : Instr()
-        object F32Add : Instr()
-        object F32Sub : Instr()
-        object F32Mul : Instr()
-        object F32Div : Instr()
-        object F32Min : Instr()
-        object F32Max : Instr()
-        object F32CopySign : Instr()
-        object F64Abs : Instr()
-        object F64Neg : Instr()
-        object F64Ceil : Instr()
-        object F64Floor : Instr()
-        object F64Trunc : Instr()
-        object F64Nearest : Instr()
-        object F64Sqrt : Instr()
-        object F64Add : Instr()
-        object F64Sub : Instr()
-        object F64Mul : Instr()
-        object F64Div : Instr()
-        object F64Min : Instr()
-        object F64Max : Instr()
-        object F64CopySign : Instr()
+        object I32Clz : Instr(), Args.None
+        object I32Ctz : Instr(), Args.None
+        object I32Popcnt : Instr(), Args.None
+        object I32Add : Instr(), Args.None
+        object I32Sub : Instr(), Args.None
+        object I32Mul : Instr(), Args.None
+        object I32DivS : Instr(), Args.None
+        object I32DivU : Instr(), Args.None
+        object I32RemS : Instr(), Args.None
+        object I32RemU : Instr(), Args.None
+        object I32And : Instr(), Args.None
+        object I32Or : Instr(), Args.None
+        object I32Xor : Instr(), Args.None
+        object I32Shl : Instr(), Args.None
+        object I32ShrS : Instr(), Args.None
+        object I32ShrU : Instr(), Args.None
+        object I32Rotl : Instr(), Args.None
+        object I32Rotr : Instr(), Args.None
+        object I64Clz : Instr(), Args.None
+        object I64Ctz : Instr(), Args.None
+        object I64Popcnt : Instr(), Args.None
+        object I64Add : Instr(), Args.None
+        object I64Sub : Instr(), Args.None
+        object I64Mul : Instr(), Args.None
+        object I64DivS : Instr(), Args.None
+        object I64DivU : Instr(), Args.None
+        object I64RemS : Instr(), Args.None
+        object I64RemU : Instr(), Args.None
+        object I64And : Instr(), Args.None
+        object I64Or : Instr(), Args.None
+        object I64Xor : Instr(), Args.None
+        object I64Shl : Instr(), Args.None
+        object I64ShrS : Instr(), Args.None
+        object I64ShrU : Instr(), Args.None
+        object I64Rotl : Instr(), Args.None
+        object I64Rotr : Instr(), Args.None
+        object F32Abs : Instr(), Args.None
+        object F32Neg : Instr(), Args.None
+        object F32Ceil : Instr(), Args.None
+        object F32Floor : Instr(), Args.None
+        object F32Trunc : Instr(), Args.None
+        object F32Nearest : Instr(), Args.None
+        object F32Sqrt : Instr(), Args.None
+        object F32Add : Instr(), Args.None
+        object F32Sub : Instr(), Args.None
+        object F32Mul : Instr(), Args.None
+        object F32Div : Instr(), Args.None
+        object F32Min : Instr(), Args.None
+        object F32Max : Instr(), Args.None
+        object F32CopySign : Instr(), Args.None
+        object F64Abs : Instr(), Args.None
+        object F64Neg : Instr(), Args.None
+        object F64Ceil : Instr(), Args.None
+        object F64Floor : Instr(), Args.None
+        object F64Trunc : Instr(), Args.None
+        object F64Nearest : Instr(), Args.None
+        object F64Sqrt : Instr(), Args.None
+        object F64Add : Instr(), Args.None
+        object F64Sub : Instr(), Args.None
+        object F64Mul : Instr(), Args.None
+        object F64Div : Instr(), Args.None
+        object F64Min : Instr(), Args.None
+        object F64Max : Instr(), Args.None
+        object F64CopySign : Instr(), Args.None
 
         // Conversions
-        object I32WrapI64 : Instr()
-        object I32TruncSF32 : Instr()
-        object I32TruncUF32 : Instr()
-        object I32TruncSF64 : Instr()
-        object I32TruncUF64 : Instr()
-        object I64ExtendSI32 : Instr()
-        object I64ExtendUI32 : Instr()
-        object I64TruncSF32 : Instr()
-        object I64TruncUF32 : Instr()
-        object I64TruncSF64 : Instr()
-        object I64TruncUF64 : Instr()
-        object F32ConvertSI32 : Instr()
-        object F32ConvertUI32 : Instr()
-        object F32ConvertSI64 : Instr()
-        object F32ConvertUI64 : Instr()
-        object F32DemoteF64 : Instr()
-        object F64ConvertSI32 : Instr()
-        object F64ConvertUI32 : Instr()
-        object F64ConvertSI64 : Instr()
-        object F64ConvertUI64 : Instr()
-        object F64PromoteF32 : Instr()
+        object I32WrapI64 : Instr(), Args.None
+        object I32TruncSF32 : Instr(), Args.None
+        object I32TruncUF32 : Instr(), Args.None
+        object I32TruncSF64 : Instr(), Args.None
+        object I32TruncUF64 : Instr(), Args.None
+        object I64ExtendSI32 : Instr(), Args.None
+        object I64ExtendUI32 : Instr(), Args.None
+        object I64TruncSF32 : Instr(), Args.None
+        object I64TruncUF32 : Instr(), Args.None
+        object I64TruncSF64 : Instr(), Args.None
+        object I64TruncUF64 : Instr(), Args.None
+        object F32ConvertSI32 : Instr(), Args.None
+        object F32ConvertUI32 : Instr(), Args.None
+        object F32ConvertSI64 : Instr(), Args.None
+        object F32ConvertUI64 : Instr(), Args.None
+        object F32DemoteF64 : Instr(), Args.None
+        object F64ConvertSI32 : Instr(), Args.None
+        object F64ConvertUI32 : Instr(), Args.None
+        object F64ConvertSI64 : Instr(), Args.None
+        object F64ConvertUI64 : Instr(), Args.None
+        object F64PromoteF32 : Instr(), Args.None
 
         // Reinterpretations
-        object I32ReinterpretF32 : Instr()
-        object I64ReinterpretF64 : Instr()
-        object F32ReinterpretI32 : Instr()
-        object F64ReinterpretI64 : Instr()
+        object I32ReinterpretF32 : Instr(), Args.None
+        object I64ReinterpretF64 : Instr(), Args.None
+        object F32ReinterpretI32 : Instr(), Args.None
+        object F64ReinterpretI64 : Instr(), Args.None
     }
 
-    sealed class InstrOp(name: String) {
+    sealed class InstrOp<out A : Instr.Args> {
 
-        sealed class ControlFlowOp(name: String) : InstrOp(name) {
-            data class NoArg(val name: String, val create: Instr) : ControlFlowOp(name)
-            data class TypeArg(val name: String, val create: (Type.Value?) -> Instr) : ControlFlowOp(name)
-            data class DepthArg(val name: String, val create: (Int) -> Instr) : ControlFlowOp(name)
-            data class TableArg(val name: String, val create: (List<Int>, Int) -> Instr) : ControlFlowOp(name)
+        abstract val name: String
+
+        @Suppress("UNCHECKED_CAST")
+        fun argsOf(i: Instr): A = i as A
+
+        sealed class ControlFlowOp<out A : Instr.Args> : InstrOp<A>() {
+            data class NoArg(override val name: String, val create: Instr) : ControlFlowOp<Instr.Args.None>()
+            data class TypeArg(override val name: String, val create: (Type.Value?) -> Instr) : ControlFlowOp<Instr.Args.Type>()
+            data class DepthArg(override val name: String, val create: (Int) -> Instr) : ControlFlowOp<Instr.Args.RelativeDepth>()
+            data class TableArg(override val name: String, val create: (List<Int>, Int) -> Instr) : ControlFlowOp<Instr.Args.Table>()
         }
 
-        sealed class CallOp(name: String) : InstrOp(name) {
-            data class IndexArg(val name: String, val create: (Int) -> Instr) : CallOp(name)
-            data class IndexReservedArg(val name: String, val create: (Int, Boolean) -> Instr) : CallOp(name)
+        sealed class CallOp<out A : Instr.Args> : InstrOp<A>() {
+            data class IndexArg(override val name: String, val create: (Int) -> Instr) : CallOp<Instr.Args.Index>()
+            data class IndexReservedArg(override val name: String, val create: (Int, Boolean) -> Instr) : CallOp<Instr.Args.ReservedIndex>()
         }
 
-        sealed class ParamOp(name: String) : InstrOp(name) {
-            data class NoArg(val name: String, val create: Instr) : ParamOp(name)
+        sealed class ParamOp : InstrOp<Instr.Args.None>() {
+            data class NoArg(override val name: String, val create: Instr) : ParamOp()
         }
 
-        sealed class VarOp(name: String) : InstrOp(name) {
-            data class IndexArg(val name: String, val create: (Int) -> Instr) : VarOp(name)
+        sealed class VarOp : InstrOp<Instr.Args.Index>() {
+            data class IndexArg(override val name: String, val create: (Int) -> Instr) : VarOp()
         }
 
-        sealed class MemOp(name: String) : InstrOp(name) {
-            data class FlagsOffsetArg(val name: String, val create: (Int, Int) -> Instr) : MemOp(name)
-            data class ReservedArg(val name: String, val create: (Boolean) -> Instr) : MemOp(name)
+        sealed class MemOp<out A : Instr.Args> : InstrOp<A>() {
+            data class AlignOffsetArg(override val name: String, val create: (Int, Int) -> Instr) : MemOp<Instr.Args.AlignOffset>()
+            data class ReservedArg(override val name: String, val create: (Boolean) -> Instr) : MemOp<Instr.Args.Reserved>()
         }
 
-        sealed class ConstOp(name: String) : InstrOp(name) {
-            data class IntArg(val name: String, val create: (Int) -> Instr) : ConstOp(name)
-            data class LongArg(val name: String, val create: (Long) -> Instr) : ConstOp(name)
-            data class FloatArg(val name: String, val create: (Float) -> Instr) : ConstOp(name)
-            data class DoubleArg(val name: String, val create: (Double) -> Instr) : ConstOp(name)
+        sealed class ConstOp<out T : Number> : InstrOp<Instr.Args.Const<T>>() {
+            data class IntArg(override val name: String, val create: (Int) -> Instr) : ConstOp<Int>()
+            data class LongArg(override val name: String, val create: (Long) -> Instr) : ConstOp<Long>()
+            data class FloatArg(override val name: String, val create: (Float) -> Instr) : ConstOp<Float>()
+            data class DoubleArg(override val name: String, val create: (Double) -> Instr) : ConstOp<Double>()
         }
 
-        sealed class CompareOp(name: String) : InstrOp(name) {
-            data class NoArg(val name: String, val create: Instr) : CompareOp(name)
+        sealed class CompareOp : InstrOp<Instr.Args.None>() {
+            data class NoArg(override val name: String, val create: Instr) : CompareOp()
         }
 
-        sealed class NumOp(name: String) : InstrOp(name) {
-            data class NoArg(val name: String, val create: Instr) : NumOp(name)
+        sealed class NumOp : InstrOp<Instr.Args.None>() {
+            data class NoArg(override val name: String, val create: Instr) : NumOp()
         }
 
-        sealed class ConvertOp(name: String) : InstrOp(name) {
-            data class NoArg(val name: String, val create: Instr) : ConvertOp(name)
+        sealed class ConvertOp : InstrOp<Instr.Args.None>() {
+            data class NoArg(override val name: String, val create: Instr) : ConvertOp()
         }
 
-        sealed class ReinterpretOp(name: String) : InstrOp(name) {
-            data class NoArg(val name: String, val create: Instr) : ReinterpretOp(name)
+        sealed class ReinterpretOp : InstrOp<Instr.Args.None>() {
+            data class NoArg(override val name: String, val create: Instr) : ReinterpretOp()
         }
 
         companion object {
             // TODO: why can't I set a val in init?
-            var strToOpMap = emptyMap<String, InstrOp>(); private set
-            var classToOpMap = emptyMap<KClass<out Instr>, InstrOp>(); private set
+            var strToOpMap = emptyMap<String, InstrOp<*>>(); private set
+            var classToOpMap = emptyMap<KClass<out Instr>, InstrOp<*>>(); private set
 
             init {
                 // Can't use reification here because inline funcs not allowed in nested context :-(
-                fun <T> opMapEntry(name: String, newOp: (String, T) -> InstrOp, create: T, clazz: KClass<out Instr>) {
-                    require(!strToOpMap.contains(name) && !classToOpMap.contains(clazz))
+                fun <T> opMapEntry(name: String, newOp: (String, T) -> InstrOp<*>, create: T, clazz: KClass<out Instr>) {
+                    require(!strToOpMap.contains(name) && !classToOpMap.contains(clazz)) {
+                        "Name '$name' or class '$clazz' already exists"
+                    }
                     val op = newOp(name, create)
                     strToOpMap += name to op
                     classToOpMap += clazz to op
                 }
 
-                opMapEntry("unreachable", ControlFlowOp::NoArg, Instr.Unreachable, Instr.Unreachable::class)
-                opMapEntry("nop", ControlFlowOp::NoArg, Instr.Nop, Instr.Nop::class)
-                opMapEntry("block", ControlFlowOp::TypeArg, Instr::Block, Instr.Block::class)
-                opMapEntry("loop", ControlFlowOp::TypeArg, Instr::Loop, Instr.Loop::class)
-                opMapEntry("if", ControlFlowOp::TypeArg, Instr::If, Instr.If::class)
-                opMapEntry("else", ControlFlowOp::NoArg, Instr.Else, Instr.Else::class)
-                opMapEntry("end", ControlFlowOp::NoArg, Instr.End, Instr.End::class)
-                opMapEntry("br", ControlFlowOp::DepthArg, Instr::Br, Instr.Br::class)
-                opMapEntry("br_if", ControlFlowOp::DepthArg, Instr::BrIf, Instr.BrIf::class)
-                opMapEntry("br_if", ControlFlowOp::TableArg, Instr::BrTable, Instr.BrTable::class)
-                opMapEntry("return", ControlFlowOp::NoArg, Instr.Return, Instr.Return::class)
+                opMapEntry("unreachable", ::ControlFlowOpNoArg, Instr.Unreachable, Instr.Unreachable::class)
+                opMapEntry("nop", ::ControlFlowOpNoArg, Instr.Nop, Instr.Nop::class)
+                opMapEntry("block", ::ControlFlowOpTypeArg, Instr::Block, Instr.Block::class)
+                opMapEntry("loop", ::ControlFlowOpTypeArg, Instr::Loop, Instr.Loop::class)
+                opMapEntry("if", ::ControlFlowOpTypeArg, Instr::If, Instr.If::class)
+                opMapEntry("else", ::ControlFlowOpNoArg, Instr.Else, Instr.Else::class)
+                opMapEntry("end", ::ControlFlowOpNoArg, Instr.End, Instr.End::class)
+                opMapEntry("br", ::ControlFlowOpDepthArg, Instr::Br, Instr.Br::class)
+                opMapEntry("br_if", ::ControlFlowOpDepthArg, Instr::BrIf, Instr.BrIf::class)
+                opMapEntry("br_table", ::ControlFlowOpTableArg, Instr::BrTable, Instr.BrTable::class)
+                opMapEntry("return", ::ControlFlowOpNoArg, Instr.Return, Instr.Return::class)
 
-                opMapEntry("call", CallOp::IndexArg, Instr::Call, Instr.Call::class)
-                opMapEntry("call_indirect", CallOp::IndexReservedArg, Instr::CallIndirect, Instr.CallIndirect::class)
+                opMapEntry("call", ::CallOpIndexArg, Instr::Call, Instr.Call::class)
+                opMapEntry("call_indirect", ::CallOpIndexReservedArg, Instr::CallIndirect, Instr.CallIndirect::class)
 
                 opMapEntry("drop", ParamOp::NoArg, Instr.Drop, Instr.Drop::class)
-                opMapEntry("select", ParamOp::NoArg, Instr.Select, Instr.Drop::class)
+                opMapEntry("select", ParamOp::NoArg, Instr.Select, Instr.Select::class)
 
                 opMapEntry("get_local", VarOp::IndexArg, Instr::GetLocal, Instr.GetLocal::class)
                 opMapEntry("set_local", VarOp::IndexArg, Instr::SetLocal, Instr.SetLocal::class)
@@ -395,36 +418,36 @@ sealed class Node {
                 opMapEntry("get_global", VarOp::IndexArg, Instr::GetGlobal, Instr.GetGlobal::class)
                 opMapEntry("set_global", VarOp::IndexArg, Instr::SetGlobal, Instr.SetGlobal::class)
 
-                opMapEntry("i32.load", MemOp::FlagsOffsetArg, Instr::I32Load, Instr.I32Load::class)
-                opMapEntry("i64.load", MemOp::FlagsOffsetArg, Instr::I64Load, Instr.I64Load::class)
-                opMapEntry("f32.load", MemOp::FlagsOffsetArg, Instr::F32Load, Instr.F32Load::class)
-                opMapEntry("f64.load", MemOp::FlagsOffsetArg, Instr::F64Load, Instr.F64Load::class)
-                opMapEntry("i32.load8_s", MemOp::FlagsOffsetArg, Instr::I32Load8S, Instr.I32Load8S::class)
-                opMapEntry("i32.load8_u", MemOp::FlagsOffsetArg, Instr::I32Load8U, Instr.I32Load8U::class)
-                opMapEntry("i32.load16_s", MemOp::FlagsOffsetArg, Instr::I32Load16S, Instr.I32Load16S::class)
-                opMapEntry("i32.load16_u", MemOp::FlagsOffsetArg, Instr::I32Load16U, Instr.I32Load16U::class)
-                opMapEntry("i64.load8_s", MemOp::FlagsOffsetArg, Instr::I64Load8S, Instr.I64Load8S::class)
-                opMapEntry("i64.load8_u", MemOp::FlagsOffsetArg, Instr::I64Load8U, Instr.I64Load8U::class)
-                opMapEntry("i64.load16_s", MemOp::FlagsOffsetArg, Instr::I64Load16S, Instr.I64Load16S::class)
-                opMapEntry("i64.load16_u", MemOp::FlagsOffsetArg, Instr::I64Load16U, Instr.I64Load16U::class)
-                opMapEntry("i64.load32_s", MemOp::FlagsOffsetArg, Instr::I64Load32S, Instr.I64Load32S::class)
-                opMapEntry("i64.load32_u", MemOp::FlagsOffsetArg, Instr::I64Load32U, Instr.I64Load32U::class)
-                opMapEntry("i32.store", MemOp::FlagsOffsetArg, Instr::I32Store, Instr.I32Store::class)
-                opMapEntry("i64.store", MemOp::FlagsOffsetArg, Instr::I64Store, Instr.I64Store::class)
-                opMapEntry("f32.store", MemOp::FlagsOffsetArg, Instr::F32Store, Instr.F32Store::class)
-                opMapEntry("f64.store", MemOp::FlagsOffsetArg, Instr::F64Store, Instr.F64Store::class)
-                opMapEntry("i32.store8", MemOp::FlagsOffsetArg, Instr::I32Store8, Instr.I32Store8::class)
-                opMapEntry("i32.store16", MemOp::FlagsOffsetArg, Instr::I32Store16, Instr.I32Store16::class)
-                opMapEntry("i64.store8", MemOp::FlagsOffsetArg, Instr::I64Store8, Instr.I64Store8::class)
-                opMapEntry("i64.store16", MemOp::FlagsOffsetArg, Instr::I64Store16, Instr.I64Store16::class)
-                opMapEntry("i64.store32", MemOp::FlagsOffsetArg, Instr::I64Store32, Instr.I64Store32::class)
-                opMapEntry("current_memory", MemOp::ReservedArg, Instr::CurrentMemory, Instr.CurrentMemory::class)
-                opMapEntry("grow_memory", MemOp::ReservedArg, Instr::GrowMemory, Instr.GrowMemory::class)
+                opMapEntry("i32.load", ::MemOpAlignOffsetArg, Instr::I32Load, Instr.I32Load::class)
+                opMapEntry("i64.load", ::MemOpAlignOffsetArg, Instr::I64Load, Instr.I64Load::class)
+                opMapEntry("f32.load", ::MemOpAlignOffsetArg, Instr::F32Load, Instr.F32Load::class)
+                opMapEntry("f64.load", ::MemOpAlignOffsetArg, Instr::F64Load, Instr.F64Load::class)
+                opMapEntry("i32.load8_s", ::MemOpAlignOffsetArg, Instr::I32Load8S, Instr.I32Load8S::class)
+                opMapEntry("i32.load8_u", ::MemOpAlignOffsetArg, Instr::I32Load8U, Instr.I32Load8U::class)
+                opMapEntry("i32.load16_s", ::MemOpAlignOffsetArg, Instr::I32Load16S, Instr.I32Load16S::class)
+                opMapEntry("i32.load16_u", ::MemOpAlignOffsetArg, Instr::I32Load16U, Instr.I32Load16U::class)
+                opMapEntry("i64.load8_s", ::MemOpAlignOffsetArg, Instr::I64Load8S, Instr.I64Load8S::class)
+                opMapEntry("i64.load8_u", ::MemOpAlignOffsetArg, Instr::I64Load8U, Instr.I64Load8U::class)
+                opMapEntry("i64.load16_s", ::MemOpAlignOffsetArg, Instr::I64Load16S, Instr.I64Load16S::class)
+                opMapEntry("i64.load16_u", ::MemOpAlignOffsetArg, Instr::I64Load16U, Instr.I64Load16U::class)
+                opMapEntry("i64.load32_s", ::MemOpAlignOffsetArg, Instr::I64Load32S, Instr.I64Load32S::class)
+                opMapEntry("i64.load32_u", ::MemOpAlignOffsetArg, Instr::I64Load32U, Instr.I64Load32U::class)
+                opMapEntry("i32.store", ::MemOpAlignOffsetArg, Instr::I32Store, Instr.I32Store::class)
+                opMapEntry("i64.store", ::MemOpAlignOffsetArg, Instr::I64Store, Instr.I64Store::class)
+                opMapEntry("f32.store", ::MemOpAlignOffsetArg, Instr::F32Store, Instr.F32Store::class)
+                opMapEntry("f64.store", ::MemOpAlignOffsetArg, Instr::F64Store, Instr.F64Store::class)
+                opMapEntry("i32.store8", ::MemOpAlignOffsetArg, Instr::I32Store8, Instr.I32Store8::class)
+                opMapEntry("i32.store16", ::MemOpAlignOffsetArg, Instr::I32Store16, Instr.I32Store16::class)
+                opMapEntry("i64.store8", ::MemOpAlignOffsetArg, Instr::I64Store8, Instr.I64Store8::class)
+                opMapEntry("i64.store16", ::MemOpAlignOffsetArg, Instr::I64Store16, Instr.I64Store16::class)
+                opMapEntry("i64.store32", ::MemOpAlignOffsetArg, Instr::I64Store32, Instr.I64Store32::class)
+                opMapEntry("current_memory", ::MemOpReservedArg, Instr::CurrentMemory, Instr.CurrentMemory::class)
+                opMapEntry("grow_memory", ::MemOpReservedArg, Instr::GrowMemory, Instr.GrowMemory::class)
 
-                opMapEntry("i32.const", ConstOp::IntArg, Instr::I32Const, Instr.I32Const::class)
-                opMapEntry("i64.const", ConstOp::LongArg, Instr::I64Const, Instr.I64Const::class)
-                opMapEntry("f32.const", ConstOp::FloatArg, Instr::F32Const, Instr.F32Const::class)
-                opMapEntry("f64.const", ConstOp::DoubleArg, Instr::F64Const, Instr.F64Const::class)
+                opMapEntry("i32.const", ::ConstOpIntArg, Instr::I32Const, Instr.I32Const::class)
+                opMapEntry("i64.const", ::ConstOpLongArg, Instr::I64Const, Instr.I64Const::class)
+                opMapEntry("f32.const", ::ConstOpFloatArg, Instr::F32Const, Instr.F32Const::class)
+                opMapEntry("f64.const", ::ConstOpDoubleArg, Instr::F64Const, Instr.F64Const::class)
 
                 opMapEntry("i32.eqz", CompareOp::NoArg, Instr.I32Eqz, Instr.I32Eqz::class)
                 opMapEntry("i32.eq", CompareOp::NoArg, Instr.I32Eq, Instr.I32Eq::class)
@@ -556,3 +579,17 @@ sealed class Node {
         }
     }
 }
+
+// TODO: UG! https://youtrack.jetbrains.com/issue/KT-15952
+typealias ControlFlowOpNoArg = Node.InstrOp.ControlFlowOp.NoArg
+typealias ControlFlowOpTypeArg = Node.InstrOp.ControlFlowOp.TypeArg
+typealias ControlFlowOpDepthArg = Node.InstrOp.ControlFlowOp.DepthArg
+typealias ControlFlowOpTableArg = Node.InstrOp.ControlFlowOp.TableArg
+typealias CallOpIndexArg = Node.InstrOp.CallOp.IndexArg
+typealias CallOpIndexReservedArg = Node.InstrOp.CallOp.IndexReservedArg
+typealias MemOpAlignOffsetArg = Node.InstrOp.MemOp.AlignOffsetArg
+typealias MemOpReservedArg = Node.InstrOp.MemOp.ReservedArg
+typealias ConstOpIntArg = Node.InstrOp.ConstOp.IntArg
+typealias ConstOpLongArg = Node.InstrOp.ConstOp.LongArg
+typealias ConstOpFloatArg = Node.InstrOp.ConstOp.FloatArg
+typealias ConstOpDoubleArg = Node.InstrOp.ConstOp.DoubleArg

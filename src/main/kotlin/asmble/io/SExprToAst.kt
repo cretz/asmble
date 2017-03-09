@@ -9,7 +9,6 @@ import asmble.util.takeUntilNullLazy
 typealias NameMap = Map<String, Int>
 
 open class SExprToAst {
-    data class ImportOrExport(val field: String, val importModule: String?)
     data class ExprContext(val nameMap: NameMap, val blockDepth: Int = 0)
 
     fun toAction(exp: SExpr.Multi): Script.Cmd.Action {
@@ -191,8 +190,8 @@ open class SExprToAst {
         if (name != null) currentIndex++
         val maybeImpExp = toImportOrExportMaybe(exp, currentIndex)
         if (maybeImpExp != null) currentIndex++
-        var (nameMap, sig) = toFuncSig(exp.vals[currentIndex] as SExpr.Multi, origNameMap)
-        currentIndex++
+        var (nameMap, exprsUsed, sig) = toFuncSig(exp, currentIndex, origNameMap)
+        currentIndex += exprsUsed
         val locals = exp.repeated("local", currentIndex, { toLocals(it) }).mapIndexed { index, (nameMaybe, vals) ->
             nameMaybe?.also { require(vals.size == 1); nameMap += it to index }
             vals
@@ -200,19 +199,23 @@ open class SExprToAst {
         currentIndex += locals.size
         val (instrs, _) = toInstrs(exp, currentIndex, ExprContext(nameMap))
         // Imports can't have locals or instructions
-        require((maybeImpExp?.importModule != null) == (locals.isEmpty() && instrs.isEmpty()))
+        if (maybeImpExp?.importModule != null) require(locals.isEmpty() && instrs.isEmpty())
         return Triple(name, Node.Func(sig, locals, instrs), maybeImpExp)
     }
 
-    fun toFuncSig(exp: SExpr.Multi, origNameMap: NameMap): Pair<NameMap, Node.Type.Func> {
+    fun toFuncSig(exp: SExpr.Multi, offset: Int, origNameMap: NameMap): Triple<NameMap, Int, Node.Type.Func> {
+        // TODO: support type version
+        if ((exp.vals.getOrNull(offset) as? SExpr.Multi)?.vals?.firstOrNull()?.symbolStr() == "type") {
+            throw Exception("Func type ref not yet supported")
+        }
         var nameMap = origNameMap
-        val params = exp.repeated("param", 0, { toParams(it) }).mapIndexed { index, (nameMaybe, vals) ->
+        val params = exp.repeated("param", offset, { toParams(it) }).mapIndexed { index, (nameMaybe, vals) ->
             nameMaybe?.also { require(vals.size == 1); nameMap += it to index }
             vals
         }.flatten()
-        val results = exp.vals.drop(params.size).map { toResult(it as SExpr.Multi) }
+        val results = exp.repeated("result", offset + params.size, this::toResult)
         require(results.size <= 1)
-        return nameMap to Node.Type.Func(params, results.firstOrNull())
+        return Triple(nameMap, params.size + results.size, Node.Type.Func(params, results.firstOrNull()))
     }
 
     fun toGlobal(exp: SExpr.Multi, nameMap: NameMap): Triple<String?, Node.Global, ImportOrExport?> {
@@ -246,7 +249,7 @@ open class SExprToAst {
         val kindName = kind.vals.firstOrNull()?.symbolStr()
         val kindSubOffset = if (kind.maybeName(1) == null) 1 else 2
         return Triple(module, field, when(kindName) {
-            "func" -> toFuncSig(kind.vals[kindSubOffset] as SExpr.Multi, emptyMap()).second
+            "func" -> toFuncSig(kind, kindSubOffset, emptyMap()).third
             "global" -> toGlobalSig(kind.vals[kindSubOffset])
             "table" -> toTableSig(kind, kindSubOffset)
             "memory" -> toMemorySig(kind, kindSubOffset)
@@ -526,13 +529,13 @@ open class SExprToAst {
             }
             is InstrOp.ControlFlowOp.TableArg -> {
                 val vars = exp.vals.drop(offset + 1).takeUntilNullLazy { toVarMaybe(it, ctx.nameMap) }
-                Pair(op.create(vars.drop(1), vars.first()), offset + vars.size)
+                Pair(op.create(vars.dropLast(1), vars.last()), offset + vars.size)
             }
             is InstrOp.CallOp.IndexArg -> Pair(op.create(oneVar()), 2)
             is InstrOp.CallOp.IndexReservedArg -> Pair(op.create(oneVar(), false), 2)
             is InstrOp.ParamOp.NoArg -> Pair(op.create, 1)
             is InstrOp.VarOp.IndexArg -> Pair(op.create(oneVar()), 2)
-            is InstrOp.MemOp.FlagsOffsetArg -> {
+            is InstrOp.MemOp.AlignOffsetArg -> {
                 var count = 1
                 var instrOffset = 0
                 var instrAlign = 0
@@ -636,7 +639,7 @@ open class SExprToAst {
         if (name != null) currIndex++
         val funcSigExp = exp.vals[currIndex] as SExpr.Multi
         funcSigExp.requireFirstSymbol("func")
-        return Pair(name, toFuncSig(funcSigExp.vals[1] as SExpr.Multi, nameMap).second)
+        return Pair(name, toFuncSig(funcSigExp, 1, nameMap).third)
     }
 
     fun toVar(exp: SExpr.Symbol, nameMap: NameMap): Int {
