@@ -1,31 +1,38 @@
 package asmble.io
 
 import asmble.ast.SExpr
-import asmble.util.Either
+import asmble.util.IdentityMap
+import asmble.util.plus
 
 open class StrToSExpr {
-    data class ParseError(val line: Int, val char: Int, val msg: String)
+    sealed class ParseResult {
+        data class Pos(val line: Int, val char: Int)
+        data class Success(val vals: List<SExpr>, val exprOffsetMap: IdentityMap<SExpr, Pos>) : ParseResult()
+        data class Error(val pos: Pos, val msg: String) : ParseResult()
+    }
 
-    fun parse(str: CharSequence): Either<SExpr.Multi, ParseError> {
+    fun parse(str: CharSequence): ParseResult {
         val state = ParseState(str)
         var ret = emptyList<SExpr>()
         while (!state.isEof) {
             ret += state.nextSExpr() ?: break
-            if (state.err != null) {
-                val line = str.substring(0, state.offset).substringCount("\n") + 1
-                val char = state.offset - str.lastIndexOf('\n', state.offset)
-                return Either.Right(ParseError(line, char, state.err!!))
-            }
+            if (state.err != null) return ParseResult.Error(str.posFromOffset(state.offset), state.err!!)
         }
-        if (ret.size == 1 && ret[0] is SExpr.Multi) return Either.Left(ret[0] as SExpr.Multi)
-        else return Either.Left(SExpr.Multi(ret))
+        val retVals = if (ret.size == 1 && ret[0] is SExpr.Multi) (ret[0] as SExpr.Multi).vals else ret
+        return ParseResult.Success(retVals, state.exprOffsetMap)
     }
 
-    private class ParseState(val str: CharSequence, var offset: Int = 0, var err: String? = null) {
+    private class ParseState(
+        val str: CharSequence,
+        var exprOffsetMap: IdentityMap<SExpr, ParseResult.Pos> = IdentityMap(),
+        var offset: Int = 0,
+        var err: String? = null
+    ) {
         fun nextSExpr(): SExpr? {
             skipWhitespace()
             if (isEof) return null
             // What type of expr do we have here?
+            val origOffset = offset
             when (str[offset]) {
                 '(' -> {
                     offset++
@@ -37,6 +44,7 @@ open class StrToSExpr {
                     if (err == null) {
                         if (str[offset] == ')') offset++ else err = "EOF when expected ')'"
                     }
+                    exprOffsetMap += ret to str.posFromOffset(origOffset)
                     return ret
                 }
                 '"' -> {
@@ -74,13 +82,17 @@ open class StrToSExpr {
                     }
                     if (err == null && str[offset] != '"') err = "EOF when expected '\"'"
                     else if (err == null) offset++
-                    return SExpr.Symbol(retStr, true)
+                    val ret = SExpr.Symbol(retStr, true)
+                    exprOffsetMap += ret to str.posFromOffset(origOffset)
+                    return ret
                 }
                 else -> {
                     // Go until next quote or whitespace or parens
-                    val origOffset = offset
                     while (!isEof && !"();\"".contains(str[offset]) && !str[offset].isWhitespace()) offset++
-                    return if (origOffset == offset) null else SExpr.Symbol(str.substring(origOffset, offset))
+                    if (origOffset == offset) return null
+                    val ret = SExpr.Symbol(str.substring(origOffset, offset))
+                    exprOffsetMap += ret to str.posFromOffset(origOffset)
+                    return ret
                 }
             }
         }
@@ -114,6 +126,11 @@ open class StrToSExpr {
 
         val isEof: Boolean inline get() = offset >= str.length
     }
+
+    fun CharSequence.posFromOffset(offset: Int) = ParseResult.Pos(
+        line = this.substring(0, offset).substringCount("\n") + 1,
+        char = offset - this.lastIndexOf('\n', offset)
+    )
 
     fun CharSequence.substringCount(str: String): Int {
         var lastIndex = 0

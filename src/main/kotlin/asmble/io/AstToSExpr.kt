@@ -2,8 +2,33 @@ package asmble.io
 
 import asmble.ast.Node
 import asmble.ast.SExpr
+import asmble.ast.Script
 
 open class AstToSExpr {
+
+    fun fromAction(v: Script.Cmd.Action) = when(v) {
+        is Script.Cmd.Action.Invoke -> newMulti("invoke", v.name) + v.string + fromInstrs(v.exprs)
+        is Script.Cmd.Action.Get -> newMulti("get", v.name) + v.string
+    }
+
+    fun fromAssertion(v: Script.Cmd.Assertion) = when(v) {
+        is Script.Cmd.Assertion.Return -> newMulti("assert_return") + fromAction(v.action) + fromInstrs(v.exprs)
+        is Script.Cmd.Assertion.ReturnNan -> newMulti("assert_return_nan") + fromAction(v.action)
+        is Script.Cmd.Assertion.Trap -> newMulti("assert_trap") + fromAction(v.action) + v.failure
+        is Script.Cmd.Assertion.Malformed -> newMulti("assert_malformed") + fromModule(v.module) + v.failure
+        is Script.Cmd.Assertion.Invalid -> newMulti("assert_invalid") + fromModule(v.module) + v.failure
+        is Script.Cmd.Assertion.SoftInvalid -> newMulti("assert_soft_invalid") + fromModule(v.module) + v.failure
+        is Script.Cmd.Assertion.Unlinkable -> newMulti("assert_unlinkable") + fromModule(v.module) + v.failure
+        is Script.Cmd.Assertion.TrapModule -> newMulti("assert_trap") + fromModule(v.module) + v.failure
+    }
+
+    fun fromCmd(v: Script.Cmd): SExpr.Multi = when(v) {
+        is Script.Cmd.Module -> fromModule(v.module)
+        is Script.Cmd.Register -> fromRegister(v)
+        is Script.Cmd.Action -> fromAction(v)
+        is Script.Cmd.Assertion -> fromAssertion(v)
+        is Script.Cmd.Meta -> fromMeta(v)
+    }
 
     fun fromData(v: Node.Data) =
         (newMulti("data") + v.index) + (newMulti("offset") + fromInstrs(v.offset)) + v.data.toString(Charsets.UTF_8)
@@ -100,16 +125,19 @@ open class AstToSExpr {
 
     fun fromMemorySig(v: Node.Type.Memory) = fromResizableLimits(v.limits)
 
+    fun fromMeta(v: Script.Cmd.Meta) = when(v) {
+        is Script.Cmd.Meta.Script -> newMulti("script", v.name) + fromScript(v.script)
+        is Script.Cmd.Meta.Input -> newMulti("input", v.name) + v.str
+        is Script.Cmd.Meta.Output -> newMulti("output", v.name) + v.str
+    }
+
     fun fromModule(v: Node.Module, name: String? = null): SExpr.Multi {
         var ret = newMulti("module", name)
 
         // We only want types that are not referenced in import
-        val ignoreTypeIndices = v.imports.mapNotNull {
-            (it.kind as? Node.Import.Kind.Func)?.let { it.typeIndex }
-        }.toSet()
+        val ignoreTypeIndices = v.imports.mapNotNull { (it.kind as? Node.Import.Kind.Func)?.typeIndex }.toSet()
 
         ret += v.types.filterIndexed { i, _ -> ignoreTypeIndices.contains(i) }.map { fromTypeDef(it) }
-        ret += v.funcs.map { fromFunc(it) }
         ret += v.imports.map { fromImport(it, v.types) }
         ret += v.exports.map(this::fromExport)
         ret += v.tables.map { fromTable(it) }
@@ -118,12 +146,17 @@ open class AstToSExpr {
         ret += v.elems.map(this::fromElem)
         ret += v.data.map(this::fromData)
         ret += v.startFuncIndex?.let(this::fromStart)
+        ret += v.funcs.map { fromFunc(it) }
         return ret
     }
 
     fun fromNum(v: Number) = fromString(v.toString())
 
+    fun fromRegister(v: Script.Cmd.Register) = (newMulti("register") + v.string) + v.name
+
     fun fromResizableLimits(v: Node.ResizableLimits) = listOfNotNull(fromNum(v.initial), v.maximum?.let(this::fromNum))
+
+    fun fromScript(v: Script) = v.commands.map(this::fromCmd)
 
     fun fromStart(v: Int) = newMulti("start") + v
 

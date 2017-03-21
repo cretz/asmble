@@ -9,7 +9,11 @@ class CoreTest(val unit: CoreTestUnit) {
 
     @Test
     fun testName() {
-        println("\nYay: ${unit.name}: ${unit.ast}")
+        println()
+        println("AST SExpr: " + unit.ast)
+        println("AST Str: " + SExprToStr.fromSExpr(*unit.ast.toTypedArray()))
+        println("AST: " + unit.script)
+        println("AST Str: " +  SExprToStr.fromSExpr(*AstToSExpr.fromScript(unit.script).toTypedArray()))
     }
 
     companion object {

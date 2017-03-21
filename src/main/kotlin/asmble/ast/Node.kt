@@ -120,7 +120,7 @@ sealed class Node {
             interface Index : Args { val index: Int }
             interface Reserved : Args { val reserved: Boolean }
             interface ReservedIndex : Index, Reserved
-            interface AlignOffset : Args { val align: Int; val offset: Int }
+            interface AlignOffset : Args { val align: Int; val offset: Long }
             interface Const<out T : Number> : Args { val value: T }
         }
 
@@ -159,29 +159,29 @@ sealed class Node {
         data class SetGlobal(override val index: Int) : Instr(), Args.Index
 
         // Memory operators
-        data class I32Load(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
-        data class I64Load(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
-        data class F32Load(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
-        data class F64Load(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
-        data class I32Load8S(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
-        data class I32Load8U(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
-        data class I32Load16S(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
-        data class I32Load16U(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
-        data class I64Load8S(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
-        data class I64Load8U(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
-        data class I64Load16S(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
-        data class I64Load16U(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
-        data class I64Load32S(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
-        data class I64Load32U(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
-        data class I32Store(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
-        data class I64Store(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
-        data class F32Store(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
-        data class F64Store(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
-        data class I32Store8(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
-        data class I32Store16(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
-        data class I64Store8(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
-        data class I64Store16(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
-        data class I64Store32(override val align: Int, override val offset: Int) : Instr(), Args.AlignOffset
+        data class I32Load(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
+        data class I64Load(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
+        data class F32Load(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
+        data class F64Load(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
+        data class I32Load8S(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
+        data class I32Load8U(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
+        data class I32Load16S(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
+        data class I32Load16U(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
+        data class I64Load8S(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
+        data class I64Load8U(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
+        data class I64Load16S(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
+        data class I64Load16U(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
+        data class I64Load32S(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
+        data class I64Load32U(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
+        data class I32Store(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
+        data class I64Store(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
+        data class F32Store(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
+        data class F64Store(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
+        data class I32Store8(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
+        data class I32Store16(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
+        data class I64Store8(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
+        data class I64Store16(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
+        data class I64Store32(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
         data class CurrentMemory(override val reserved: Boolean) : Instr(), Args.Reserved
         data class GrowMemory(override val reserved: Boolean) : Instr(), Args.Reserved
 
@@ -351,7 +351,7 @@ sealed class Node {
         }
 
         sealed class MemOp<out A : Instr.Args> : InstrOp<A>() {
-            data class AlignOffsetArg(override val name: String, val create: (Int, Int) -> Instr) : MemOp<Instr.Args.AlignOffset>()
+            data class AlignOffsetArg(override val name: String, val create: (Int, Long) -> Instr) : MemOp<Instr.Args.AlignOffset>()
             data class ReservedArg(override val name: String, val create: (Boolean) -> Instr) : MemOp<Instr.Args.Reserved>()
         }
 

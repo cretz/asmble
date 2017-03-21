@@ -224,7 +224,7 @@ open class SExprToAst {
         val name = exp.maybeName(currIndex)
         if (name != null) currIndex++
         val maybeImpExp = toImportOrExportMaybe(exp, currIndex)
-        if (maybeImpExp == null) currIndex++
+        if (maybeImpExp != null) currIndex++
         val sig = toGlobalSig(exp.vals[currIndex])
         currIndex++
         val (instrs, _) = toInstrs(exp, currIndex, ExprContext(nameMap))
@@ -268,7 +268,12 @@ open class SExprToAst {
         }
     }
 
-    fun toInstrs(exp: SExpr.Multi, offset: Int, ctx: ExprContext): Pair<List<Node.Instr>, Int> {
+    fun toInstrs(
+        exp: SExpr.Multi,
+        offset: Int,
+        ctx: ExprContext,
+        mustCompleteExp: Boolean = true
+    ): Pair<List<Node.Instr>, Int> {
         var runningOffset = 0
         var ret = emptyList<Node.Instr>()
         while (offset + runningOffset < exp.vals.size) {
@@ -277,13 +282,16 @@ open class SExprToAst {
             ret += maybeInstrAndOffset.first
             runningOffset += maybeInstrAndOffset.second
         }
+        if (mustCompleteExp) require(offset + runningOffset == exp.vals.size) {
+            "Unrecognized instruction: ${exp.vals[offset + runningOffset]}"
+        }
         return Pair(ret, runningOffset)
     }
 
     fun toInstrMaybe(exp: SExpr.Multi, offset: Int, ctx: ExprContext): Pair<List<Node.Instr>, Int> {
         // <expr>
         if (exp.vals[offset] is SExpr.Multi) {
-            val exprs = toExprMaybe(exp, ctx)
+            val exprs = toExprMaybe(exp.vals[offset] as SExpr.Multi, ctx)
             return Pair(exprs, if (exprs.isEmpty()) 0 else 1)
         }
         // <op>
@@ -364,7 +372,7 @@ open class SExprToAst {
         val name = exp.maybeName(currIndex)
         if (name != null) currIndex++
         val maybeImpExp = toImportOrExportMaybe(exp, currIndex)
-        if (maybeImpExp == null) currIndex++
+        if (maybeImpExp != null) currIndex++
         // Try data approach
         if (exp.vals[currIndex] is SExpr.Multi) throw Exception("Data string not yet supported for memory")
         return Triple(name, toMemorySig(exp, currIndex), maybeImpExp)
@@ -537,11 +545,11 @@ open class SExprToAst {
             is InstrOp.VarOp.IndexArg -> Pair(op.create(oneVar()), 2)
             is InstrOp.MemOp.AlignOffsetArg -> {
                 var count = 1
-                var instrOffset = 0
+                var instrOffset = 0L
                 var instrAlign = 0
                 if (exp.vals.size > offset + count) exp.vals[offset + count].symbolStr().also {
                     if (it != null && it.startsWith("offset=")) {
-                        instrOffset = it.substring(7).toInt()
+                        instrOffset = it.substring(7).toLong()
                         count++
                     }
                 }
@@ -605,7 +613,7 @@ open class SExprToAst {
         val name = exp.maybeName(currIndex)
         if (name != null) currIndex++
         val maybeImpExp = toImportOrExportMaybe(exp, currIndex)
-        if (maybeImpExp == null) currIndex++
+        if (maybeImpExp != null) currIndex++
         // Try elem type approach
         val elemType = toElemTypeMaybe(exp, currIndex)
         if (elemType != null) {

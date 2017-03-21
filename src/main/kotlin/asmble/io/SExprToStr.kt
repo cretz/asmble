@@ -2,7 +2,11 @@ package asmble.io
 
 import asmble.ast.SExpr
 
-open class SExprToStr(val depthBeforeNewline: Int, val indent: String) {
+open class SExprToStr(val depthBeforeNewline: Int, val countBeforeNewlineAll: Int, val indent: String) {
+
+    @Suppress("UNCHECKED_CAST") // TODO: why?
+    fun fromSExpr(vararg exp: SExpr): String = appendAll(exp.asList(), StringBuilder()).trim().toString()
+
     @Suppress("UNCHECKED_CAST") // TODO: why?
     fun <T : Appendable> append(exp: SExpr, sb: T = StringBuilder() as T, indentLevel: Int = 0) = when(exp) {
         is SExpr.Symbol -> appendSymbol(exp, sb)
@@ -16,11 +20,12 @@ open class SExprToStr(val depthBeforeNewline: Int, val indent: String) {
             sb.append('"')
             exp.contents.forEach {
                 sb.append(
-                        if (it in "'\"\\") "\\$it"
-                        else if (it == '\n') "\\n"
-                        else if (it == '\t') "\\t"
-                        else if (!it.requiresQuote) it.toString()
-                        else "\\" + (it.toInt() and 0xFF).toString(16)
+                    if (it in "'\"\\") "\\$it"
+                    else if (it == '\n') "\\n"
+                    else if (it == '\t') "\\t"
+                    else if (it == ' ') " "
+                    else if (!it.requiresQuote) it.toString()
+                    else "\\" + (it.toInt() and 0xFF).toString(16)
                 )
             }
             sb.append('"')
@@ -31,17 +36,32 @@ open class SExprToStr(val depthBeforeNewline: Int, val indent: String) {
     @Suppress("UNCHECKED_CAST") // TODO: why?
     fun <T : Appendable> appendMulti(exp: SExpr.Multi, sb: T = StringBuilder() as T, indentLevel: Int = 0): T {
         sb.append('(')
-        exp.vals.forEachIndexed { index, sub ->
-            if (sub.maxDepth() <= depthBeforeNewline) {
-                if (index > 0) sb.append(' ')
+        appendAll(exp.vals, sb, indentLevel)
+        sb.append(')')
+        return sb
+    }
+
+    @Suppress("UNCHECKED_CAST") // TODO: why?
+    fun <T : Appendable> appendAll(exps: List<SExpr>, sb: T = StringBuilder() as T, indentLevel: Int = 0): T {
+        val newlineAll = exps.sumBy { it.count() } >= countBeforeNewlineAll
+        var wasLastNewline = false
+        exps.forEachIndexed { index, sub ->
+            // No matter what, if the first is a symbol
+            val isFirstAsSymbol = index == 0 && sub is SExpr.Symbol
+            val shouldNewline = !isFirstAsSymbol && (newlineAll || sub.maxDepth() > depthBeforeNewline)
+            if (!shouldNewline) {
+                if (index > 0 && !wasLastNewline) sb.append(' ')
                 append(sub, sb, indentLevel)
+                wasLastNewline = false
             } else {
-                sb.append("\n").append(indent.repeat(indentLevel + 1))
+                if (!wasLastNewline) sb.append("\n").append(indent.repeat(indentLevel))
                 append(sub, sb, indentLevel + 1)
-                sb.append("\n").append(indent.repeat(indentLevel))
+                sb.append("\n")
+                if (index < exps.size - 1) sb.append(indent.repeat(indentLevel))
+                else if (indentLevel > 0) sb.append(indent.repeat(indentLevel - 1))
+                wasLastNewline = true
             }
         }
-        sb.append(')')
         return sb
     }
 
@@ -50,10 +70,17 @@ open class SExprToStr(val depthBeforeNewline: Int, val indent: String) {
     val Char.requiresQuote: Boolean get() =
         this > '~' || (!this.isLetterOrDigit() && this !in "_.+-*/^~=<>!?@#$%&|:'`")
 
+    fun SExpr.count(): Int = when(this) {
+        is SExpr.Symbol -> 1
+        is SExpr.Multi -> this.vals.sumBy { it.count() }
+    }
+
     fun SExpr.maxDepth(): Int = when(this) {
         is SExpr.Symbol -> 0
         is SExpr.Multi -> 1 + (this.vals.map { it.maxDepth() }.max() ?: 0)
     }
 
-    companion object : SExprToStr(depthBeforeNewline = 3, indent = "  ")
+    companion object : SExprToStr(depthBeforeNewline = 3, countBeforeNewlineAll = 10, indent = "  ") {
+        val Compact = SExprToStr(depthBeforeNewline = Int.MAX_VALUE, countBeforeNewlineAll = Int.MAX_VALUE, indent = "")
+    }
 }
