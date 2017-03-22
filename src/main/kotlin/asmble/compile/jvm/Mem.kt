@@ -2,11 +2,13 @@ package asmble.compile.jvm
 
 import asmble.ast.Node
 
-interface Mem<T : Any> {
+interface Mem {
     // The class to accept as "memory"
-    val memClass: Class<T>
+    val memType: TypeRef
 
-    fun create(func: Func, maximum: Int?): Func
+    // Caller can trust the max is on the stack as an i32. The result
+    // must be put on the stack
+    fun create(func: Func): Func
 
     // Caller can trust the mem instance is on the stack and must handle it. If
     // it's already there after call anyways, this can leave the mem inst on the

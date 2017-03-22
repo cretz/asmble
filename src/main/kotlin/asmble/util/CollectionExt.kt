@@ -7,5 +7,3 @@ fun <T : Any> Collection<T?>.takeUntilNull(): List<T> {
 fun <T : Any, R : Any> Collection<T>.takeUntilNullLazy(map: (T) -> R?): List<R> {
     return this.asSequence().map(map).takeUntilNull().toList()
 }
-
-
