@@ -58,6 +58,25 @@ val Int.const: AbstractInsnNode get() = when (this) {
 fun Int.isAccess(access: Int) = (this and access) == access
 val Int.isAccessStatic: Boolean get() = this.isAccess(Opcodes.ACC_STATIC)
 
+val Long.const: AbstractInsnNode get() = when (this) {
+    0L -> InsnNode(Opcodes.LCONST_0)
+    1L -> InsnNode(Opcodes.LCONST_1)
+    else -> LdcInsnNode(this)
+}
+
+val Float.const: AbstractInsnNode get() = when (this) {
+    0F -> InsnNode(Opcodes.FCONST_0)
+    1F -> InsnNode(Opcodes.FCONST_1)
+    2F -> InsnNode(Opcodes.FCONST_2)
+    else -> LdcInsnNode(this)
+}
+
+val Double.const: AbstractInsnNode get() = when (this) {
+    0.0 -> InsnNode(Opcodes.DCONST_0)
+    1.0 -> InsnNode(Opcodes.DCONST_1)
+    else -> LdcInsnNode(this)
+}
+
 val String.const: AbstractInsnNode get() = LdcInsnNode(this)
 
 val Node.Type.Value.kclass: KClass<*> get() = when (this) {

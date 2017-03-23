@@ -221,7 +221,154 @@ open class AstToAsm {
             applyCurrentMemory(ctx, fn)
         is Node.Instr.GrowMemory ->
             applyGrowMemory(ctx, fn, index)
+        is Node.Instr.I32Const ->
+            fn.addInsns(i.value.const).push(Int::class.ref)
+        is Node.Instr.I64Const ->
+            fn.addInsns(i.value.const).push(Long::class.ref)
+        is Node.Instr.F32Const ->
+            fn.addInsns(i.value.const).push(Float::class.ref)
+        is Node.Instr.F64Const ->
+            fn.addInsns(i.value.const).push(Double::class.ref)
+        is Node.Instr.I32Eqz ->
+            applyI32UnaryCmp(ctx, fn, Opcodes.IFEQ)
+        is Node.Instr.I32Eq ->
+            applyI32CmpS(ctx, fn, Opcodes.IF_ICMPEQ)
+        is Node.Instr.I32Ne ->
+            applyI32CmpS(ctx, fn, Opcodes.IF_ICMPNE)
+        is Node.Instr.I32LtS ->
+            applyI32CmpS(ctx, fn, Opcodes.IF_ICMPLT)
+        is Node.Instr.I32LtU ->
+            applyI32CmpU(ctx, fn, Opcodes.IFLT)
+        is Node.Instr.I32GtS ->
+            applyI32CmpS(ctx, fn, Opcodes.IF_ICMPGT)
+        is Node.Instr.I32GtU ->
+            applyI32CmpU(ctx, fn, Opcodes.IFGT)
+        is Node.Instr.I32LeS ->
+            applyI32CmpS(ctx, fn, Opcodes.IF_ICMPLE)
+        is Node.Instr.I32LeU ->
+            applyI32CmpU(ctx, fn, Opcodes.IFLE)
+        is Node.Instr.I32GeS ->
+            applyI32CmpS(ctx, fn, Opcodes.IF_ICMPGE)
+        is Node.Instr.I32GeU ->
+            applyI32CmpU(ctx, fn, Opcodes.IFGE)
+        is Node.Instr.I64Eqz ->
+            fn.addInsns(0L.const).push(Long::class.ref).let { applyI64CmpS(ctx, fn, Opcodes.IFEQ) }
+        is Node.Instr.I64Eq ->
+            applyI64CmpS(ctx, fn, Opcodes.IFEQ)
+        is Node.Instr.I64Ne ->
+            applyI64CmpS(ctx, fn, Opcodes.IFNE)
+        is Node.Instr.I64LtS ->
+            applyI64CmpS(ctx, fn, Opcodes.IFLT)
+        is Node.Instr.I64LtU ->
+            applyI64CmpU(ctx, fn, Opcodes.IFLT)
+        is Node.Instr.I64GtS ->
+            applyI64CmpS(ctx, fn, Opcodes.IFGT)
+        is Node.Instr.I64GtU ->
+            applyI64CmpU(ctx, fn, Opcodes.IFGT)
+        is Node.Instr.I64LeS ->
+            applyI64CmpS(ctx, fn, Opcodes.IFLE)
+        is Node.Instr.I64LeU ->
+            applyI64CmpU(ctx, fn, Opcodes.IFLE)
+        is Node.Instr.I64GeS ->
+            applyI64CmpS(ctx, fn, Opcodes.IFGE)
+        is Node.Instr.I64GeU ->
+            applyI64CmpU(ctx, fn, Opcodes.IFGE)
+        is Node.Instr.F32Eq ->
+            applyF32Cmp(ctx, fn, Opcodes.IFEQ)
+        is Node.Instr.F32Ne ->
+            applyF32Cmp(ctx, fn, Opcodes.IFNE)
+        is Node.Instr.F32Lt ->
+            applyF32Cmp(ctx, fn, Opcodes.IFLT)
+        is Node.Instr.F32Gt ->
+            applyF32Cmp(ctx, fn, Opcodes.IFGT)
+        is Node.Instr.F32Le ->
+            applyF32Cmp(ctx, fn, Opcodes.IFLE)
+        is Node.Instr.F32Ge ->
+            applyF32Cmp(ctx, fn, Opcodes.IFGE)
+        is Node.Instr.F64Eq ->
+            applyF64Cmp(ctx, fn, Opcodes.IFEQ)
+        is Node.Instr.F64Ne ->
+            applyF64Cmp(ctx, fn, Opcodes.IFNE)
+        is Node.Instr.F64Lt ->
+            applyF64Cmp(ctx, fn, Opcodes.IFLT)
+        is Node.Instr.F64Gt ->
+            applyF64Cmp(ctx, fn, Opcodes.IFGT)
+        is Node.Instr.F64Le ->
+            applyF64Cmp(ctx, fn, Opcodes.IFLE)
+        is Node.Instr.F64Ge ->
+            applyF64Cmp(ctx, fn, Opcodes.IFGE)
         else -> TODO()
+    }
+
+    fun applyF32Cmp(ctx: FuncContext, fn: Func, op: Int) =
+        fn.popExpecting(Float::class.ref).
+            popExpecting(Float::class.ref).
+            // TODO: test whether we need FCMPG instead
+            addInsns(InsnNode(Opcodes.FCMPL)).
+            push(Int::class.ref).
+            let { applyI32UnaryCmp(ctx, fn, op) }
+
+    fun applyF64Cmp(ctx: FuncContext, fn: Func, op: Int) =
+        fn.popExpecting(Double::class.ref).
+            popExpecting(Double::class.ref).
+            // TODO: test whether we need DCMPG instead
+            addInsns(InsnNode(Opcodes.DCMPL)).
+            push(Int::class.ref).
+            let { applyI32UnaryCmp(ctx, fn, op) }
+    
+    fun applyI64CmpU(ctx: FuncContext, fn: Func, op: Int) =
+        applyCmpU(ctx, fn, op, Long::class.ref, java.lang.Long::compareUnsigned.invokeStatic())
+
+    fun applyI32CmpU(ctx: FuncContext, fn: Func, op: Int) =
+        applyCmpU(ctx, fn, op, Int::class.ref, Integer::compareUnsigned.invokeStatic())
+
+    fun applyCmpU(ctx: FuncContext, fn: Func, op: Int, inTypes: TypeRef, meth: MethodInsnNode) =
+        // Call the method, then compare with 0
+        fn.popExpecting(inTypes).
+            popExpecting(inTypes).
+            addInsns(meth).
+            push(Int::class.ref).
+            let { applyI32UnaryCmp(ctx, it, op) }
+
+    fun applyI64CmpS(ctx: FuncContext, fn: Func, op: Int) =
+        fn.popExpecting(Long::class.ref).
+            popExpecting(Long::class.ref).
+            addInsns(InsnNode(Opcodes.LCMP)).
+            push(Int::class.ref).
+            let { applyI32UnaryCmp(ctx, fn, op) }
+
+    fun applyI32CmpS(ctx: FuncContext, fn: Func, op: Int) = applyCmpS(ctx, fn, op, Int::class.ref)
+
+    fun applyCmpS(ctx: FuncContext, fn: Func, op: Int, inTypes: TypeRef): Func {
+        val label1 = LabelNode()
+        val label2 = LabelNode()
+        return fn.popExpecting(inTypes).popExpecting(inTypes).addInsns(
+            JumpInsnNode(op, label1),
+            0.const,
+            JumpInsnNode(Opcodes.GOTO, label2),
+            label1,
+            1.const,
+            label2
+        ).push(Int::class.ref)
+    }
+    
+    fun applyI32UnaryCmp(ctx: FuncContext, fn: Func, op: Int): Func {
+        // Ug: http://stackoverflow.com/questions/29131376/why-is-there-no-icmp-instruction
+        // ifeq 0 label1
+        // iconst_0
+        // goto label2
+        // label1: iconst_1
+        // label2:
+        val label1 = LabelNode()
+        val label2 = LabelNode()
+        return fn.popExpecting(Int::class.ref).addInsns(
+            JumpInsnNode(op, label1),
+            0.const,
+            JumpInsnNode(Opcodes.GOTO, label2),
+            label1,
+            1.const,
+            label2
+        ).push(Int::class.ref)
     }
 
     fun applyGrowMemory(ctx: FuncContext, fn: Func, insnIndex: Int) =
@@ -368,7 +515,7 @@ open class AstToAsm {
             // Swap
             InsnNode(if (ref1.stackSize == 2) Opcodes.DUP2 else Opcodes.SWAP),
             // Label and pop
-            LabelNode(lbl.label),
+            lbl,
             InsnNode(if (ref1.stackSize == 2) Opcodes.POP2 else Opcodes.POP)
         )
     }
