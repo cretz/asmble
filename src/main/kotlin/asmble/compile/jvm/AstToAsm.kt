@@ -1,14 +1,14 @@
 package asmble.compile.jvm
 
 import asmble.ast.Node
+import asmble.util.Either
 import org.objectweb.asm.Opcodes
-import org.objectweb.asm.Type
 import org.objectweb.asm.tree.*
 import java.lang.invoke.MethodHandle
 
 open class AstToAsm {
     // Note, the class does not have a name out of here (yet)
-    fun fromModule(ctx: Context) {
+    fun fromModule(ctx: ClsContext) {
         // Invoke dynamic among other things
         ctx.cls.version = Opcodes.V1_7
         ctx.cls.access += Opcodes.ACC_PUBLIC
@@ -19,14 +19,14 @@ open class AstToAsm {
         // TODO: addImportForwarders
     }
 
-    fun addFields(ctx: Context) {
+    fun addFields(ctx: ClsContext) {
         // First field is always a private final memory field
         // Ug, ambiguity on List<?> +=
         ctx.cls.fields.plusAssign(FieldNode(Opcodes.ACC_PRIVATE + Opcodes.ACC_FINAL, "memory",
             ctx.mem.memType.asmDesc, null, null))
         // Now all method imports as method handles
         ctx.cls.fields += ctx.importFuncs.indices.map {
-            FieldNode(Opcodes.ACC_PRIVATE + Opcodes.ACC_FINAL, importFuncFieldName(it),
+            FieldNode(Opcodes.ACC_PRIVATE + Opcodes.ACC_FINAL, funcName(it),
                 MethodHandle::class.ref.asmDesc, null, null)
         }
         // Now all import globals as getter (and maybe setter) method handles
@@ -60,7 +60,7 @@ open class AstToAsm {
         }
     }
 
-    fun addConstructors(ctx: Context) {
+    fun addConstructors(ctx: ClsContext) {
         // We have at least two constructors:
         // <init>(int maxMemory, imports...)
         // <init>(MemClass maxMemory, imports...)
@@ -92,7 +92,7 @@ open class AstToAsm {
                 VarInsnNode(Opcodes.ALOAD, 0),
                 VarInsnNode(Opcodes.ALOAD, importIndex + 1),
                 FieldInsnNode(Opcodes.PUTFIELD, ctx.thisRef.asmName,
-                    importFuncFieldName(importIndex), MethodHandle::class.ref.asmDesc)
+                    funcName(importIndex), MethodHandle::class.ref.asmDesc)
             )
         }.addInsns(InsnNode(Opcodes.RETURN))
 
@@ -104,7 +104,7 @@ open class AstToAsm {
         ).push(ctx.thisRef, Int::class.ref)
         amountCon = ctx.mem.create(amountCon).popExpectingMulti(ctx.thisRef, ctx.mem.memType)
         // In addition to this and mem on the stack, add all imports
-        amountCon = amountCon.params.drop(1).foldIndexed(amountCon) { index, amountCon, param ->
+        amountCon = amountCon.params.drop(1).indices.fold(amountCon) { amountCon, index ->
             amountCon.addInsns(VarInsnNode(Opcodes.ALOAD, 2 + index))
         }
         // Make call
@@ -127,7 +127,7 @@ open class AstToAsm {
         ctx.cls.methods += constructors.map(Func::toMethodNode)
     }
 
-    fun addFuncs(ctx: Context) {
+    fun addFuncs(ctx: ClsContext) {
         ctx.cls.methods += ctx.mod.funcs.mapIndexed { index, func ->
             fromFunc(ctx, func, ctx.importFuncs.size + index)
         }
@@ -136,39 +136,61 @@ open class AstToAsm {
     fun importGlobalGetterFieldName(index: Int) = "import\$get" + globalName(index)
     fun importGlobalSetterFieldName(index: Int) = "import\$set" + globalName(index)
     fun globalName(index: Int) = "\$global$index"
-    fun importFuncFieldName(index: Int) = "import" + funcName(index)
     fun funcName(index: Int) = "\$func$index"
 
-    fun fromFunc(ctx: Context, f: Node.Func, index: Int): Func {
-        // Technically all local funcs are static with "this" as the last param.
-        // This is important because it allows us to call other functions without
-        // reworking the stack. They are private, and if they are exported then
-        // the parameters get turned around as expected.
+    fun fromFunc(ctx: ClsContext, f: Node.Func, index: Int): Func {
         // TODO: validate local size?
         // TODO: initialize non-param locals?
         var func = Func(
-            access = Opcodes.ACC_STATIC + Opcodes.ACC_PRIVATE,
+            access = Opcodes.ACC_PRIVATE,
             name = funcName(index),
-            params = f.type.params.map(Node.Type.Value::typeRef) + ctx.thisRef,
+            params = f.type.params.map(Node.Type.Value::typeRef),
             ret = f.type.ret?.let(Node.Type.Value::typeRef) ?: Void::class.ref
         )
+        // Rework the instructions
+        val funcCtx = FuncContext(ctx, f, ctx.reworker.rework(ctx, f.instructions))
+
         // Add all instructions
-        func = f.instructions.fold(func) { func, insn -> applyInsn(ctx, f, func, insn) }
+        func = funcCtx.insns.foldIndexed(func) { index, func, insn -> applyInsn(funcCtx, func, insn, index) }
+
         return func
     }
 
-    fun applyInsn(ctx: Context, f: Node.Func, fn: Func, i: Node.Instr) = when (i) {
+    fun applyInsn(ctx: FuncContext, fn: Func, i: Insn, index: Int) = when (i) {
+        is Insn.Node ->
+            applyNodeInsn(ctx, fn, i.insn, index)
+        is Insn.ImportFuncRefNeededOnStack ->
+            // Func refs are method handle fields
+            fn.addInsns(
+                VarInsnNode(Opcodes.ALOAD, 0),
+                FieldInsnNode(Opcodes.GETFIELD, ctx.cls.thisRef.asmName,
+                    funcName(i.index), MethodHandle::class.ref.asmDesc)
+            ).push(MethodHandle::class.ref)
+        is Insn.ImportGlobalSetRefNeededOnStack ->
+            // Import setters are method handle fields
+            fn.addInsns(
+                VarInsnNode(Opcodes.ALOAD, 0),
+                FieldInsnNode(Opcodes.GETFIELD, ctx.cls.thisRef.asmName,
+                    importGlobalSetterFieldName(i.index), MethodHandle::class.ref.asmDesc)
+            ).push(MethodHandle::class.ref)
+        is Insn.ThisNeededOnStack ->
+            fn.addInsns(VarInsnNode(Opcodes.ALOAD, 0)).push(ctx.cls.thisRef)
+        is Insn.MemNeededOnStack ->
+            putMemoryOnStackIfNecessary(ctx, fn)
+    }
+
+    fun applyNodeInsn(ctx: FuncContext, fn: Func, i: Node.Instr, index: Int) = when (i) {
         is Node.Instr.Unreachable ->
             fn.addInsns(UnsupportedOperationException::class.athrow("Unreachable"))
         is Node.Instr.Nop ->
             fn.addInsns(InsnNode(Opcodes.NOP))
         // TODO: other control flow...
         is Node.Instr.Return ->
-            applyReturnInsn(ctx, f, fn)
+            applyReturnInsn(ctx, fn)
         is Node.Instr.Call ->
-            applyCallInsn(ctx, f, fn, i.index, false)
+            applyCallInsn(ctx, fn, i.index)
         is Node.Instr.CallIndirect ->
-            applyCallInsn(ctx, f, fn, i.index, true)
+            TODO("To be determined w/ invokedynamic")
         is Node.Instr.Drop ->
             fn.pop().let { (fn, popped) ->
                 fn.addInsns(InsnNode(if (popped.stackSize == 2) Opcodes.POP2 else Opcodes.POP))
@@ -176,94 +198,156 @@ open class AstToAsm {
         is Node.Instr.Select ->
             applySelectInsn(ctx, fn)
         is Node.Instr.GetLocal ->
-            applyGetLocal(ctx, f, fn, i.index)
+            applyGetLocal(ctx, fn, i.index)
         is Node.Instr.SetLocal ->
-            applySetLocal(ctx, f, fn, i.index)
+            applySetLocal(ctx, fn, i.index)
         is Node.Instr.TeeLocal ->
-            applyTeeLocal(ctx, f, fn, i.index)
+            applyTeeLocal(ctx, fn, i.index)
         is Node.Instr.GetGlobal ->
             applyGetGlobal(ctx, fn, i.index)
         is Node.Instr.SetGlobal ->
             applySetGlobal(ctx, fn, i.index)
+        is Node.Instr.I32Load, is Node.Instr.I64Load, is Node.Instr.F32Load, is Node.Instr.F64Load,
+        is Node.Instr.I32Load8S, is Node.Instr.I32Load8U, is Node.Instr.I32Load16U, is Node.Instr.I32Load16S,
+        is Node.Instr.I64Load8S, is Node.Instr.I64Load8U, is Node.Instr.I64Load16U, is Node.Instr.I64Load16S,
+        is Node.Instr.I64Load32S, is Node.Instr.I64Load32U ->
+            // TODO: why do I have to cast?
+            applyLoadOp(ctx, fn, i as Node.Instr.Args.AlignOffset)
+        is Node.Instr.I32Store, is Node.Instr.I64Store, is Node.Instr.F32Store, is Node.Instr.F64Store,
+        is Node.Instr.I32Store8, is Node.Instr.I32Store16, is Node.Instr.I64Store8, is Node.Instr.I64Store16,
+        is Node.Instr.I64Store32 ->
+            applyStoreOp(ctx, fn, i as Node.Instr.Args.AlignOffset, index)
+        is Node.Instr.CurrentMemory ->
+            applyCurrentMemory(ctx, fn)
+        is Node.Instr.GrowMemory ->
+            applyGrowMemory(ctx, fn, index)
         else -> TODO()
     }
 
-    fun applySetGlobal(ctx: Context, fn: Func, index: Int) =
-        // Import is handled completeld differently than self
-        // TODO: check mutability?
-        if (index < ctx.importGlobals.size)
-            applyImportSetGlobal(ctx, fn, index, ctx.importGlobals[index].kind as Node.Import.Kind.Global)
-        else
-            applySelfSetGlobal(ctx, fn, index, ctx.mod.globals[ctx.importGlobals.size - index])
+    fun applyGrowMemory(ctx: FuncContext, fn: Func, insnIndex: Int) =
+        // Grow mem is a special case where the memory ref is already pre-injected on
+        // the stack before this call. But it can have a memory leftover on the stack
+        // so we pop it if we need to
+        ctx.cls.mem.growMemory(fn).let { fn ->
+            popMemoryIfNecessary(ctx, fn, ctx.insns.getOrNull(insnIndex + 1))
+        }
 
-    fun applySelfSetGlobal(ctx: Context, fn: Func, index: Int, global: Node.Global) =
-        // We have to swap "this" with the value on the stack
-        fn.addInsns(VarInsnNode(Opcodes.ALOAD, fn.lastParamLocalVarIndex)).
-            push(ctx.thisRef).
-            stackSwap().
-            popExpecting(global.type.contentType.typeRef).
+    fun applyCurrentMemory(ctx: FuncContext, fn: Func) =
+        // Curr mem is not specially injected, so we have to put the memory on the
+        // stack since we need it
+        putMemoryOnStackIfNecessary(ctx, fn).let { fn -> ctx.cls.mem.currentMemory(fn) }
+
+    fun applyStoreOp(ctx: FuncContext, fn: Func, insn: Node.Instr.Args.AlignOffset, insnIndex: Int) =
+        // Store is a special case where the memory ref is already pre-injected on
+        // the stack before this call. But it can have a memory leftover on the stack
+        // so we pop it if we need to
+        ctx.cls.mem.storeOp(fn, insn).let { fn ->
+            popMemoryIfNecessary(ctx, fn, ctx.insns.getOrNull(insnIndex + 1))
+        }
+
+    fun applyLoadOp(ctx: FuncContext, fn: Func, insn: Node.Instr.Args.AlignOffset) =
+        // Loads are not specially injected, so we have to put the memory on the
+        // stack since we need it
+        putMemoryOnStackIfNecessary(ctx, fn).let { fn -> ctx.cls.mem.loadOp(fn, insn) }
+
+    fun putMemoryOnStackIfNecessary(ctx: FuncContext, fn: Func) =
+        if (fn.stack.lastOrNull() == ctx.cls.mem.memType) fn
+        else if (fn.memIsLocalVar)
+            // Assume it's just past the locals
+            fn.addInsns(VarInsnNode(Opcodes.ALOAD, ctx.actualLocalIndex(ctx.node.locals.size))).
+                push(ctx.cls.mem.memType)
+        else fn.addInsns(
+            VarInsnNode(Opcodes.ALOAD, 0),
+            FieldInsnNode(Opcodes.GETFIELD, ctx.cls.thisRef.asmName, "memory", ctx.cls.mem.memType.asmDesc)
+        ).push(ctx.cls.mem.memType)
+
+    fun popMemoryIfNecessary(ctx: FuncContext, fn: Func, nextInsn: Insn?) =
+        // We pop the mem if it's there and not a mem op next
+        if (fn.stack.lastOrNull() != ctx.cls.mem.memType) fn else {
+            val nextInstrRequiresMemOnStack = when (nextInsn) {
+                is Insn.Node -> nextInsn.insn is Node.Instr.Args.AlignOffset ||
+                    nextInsn.insn is Node.Instr.CurrentMemory || nextInsn.insn is Node.Instr.GrowMemory
+                is Insn.MemNeededOnStack -> true
+                else -> false
+            }
+            if (nextInstrRequiresMemOnStack) fn
+            else fn.popExpecting(ctx.cls.mem.memType).addInsns(InsnNode(Opcodes.POP))
+        }
+
+    fun applySetGlobal(ctx: FuncContext, fn: Func, index: Int) = ctx.cls.globalAtIndex(index).let {
+        when (it) {
+            is Either.Left -> applyImportSetGlobal(ctx, fn, index, it.v.kind as Node.Import.Kind.Global)
+            is Either.Right -> applySelfSetGlobal(ctx, fn, index, it.v)
+        }
+    }
+
+    fun applySelfSetGlobal(ctx: FuncContext, fn: Func, index: Int, global: Node.Global) =
+        // Just call putfield
+        // Note, this is special and "this" has already been injected on the stack for us
+        fn.popExpecting(global.type.contentType.typeRef).
+            popExpecting(MethodHandle::class.ref).
             addInsns(
-                FieldInsnNode(Opcodes.PUTFIELD, ctx.thisRef.asmName, globalName(index),
+                FieldInsnNode(Opcodes.PUTFIELD, ctx.cls.thisRef.asmName, globalName(index),
                     global.type.contentType.typeRef.asmDesc)
             )
 
-    fun applyImportSetGlobal(ctx: Context, fn: Func, index: Int, import: Node.Import.Kind.Global) =
+    fun applyImportSetGlobal(ctx: FuncContext, fn: Func, index: Int, import: Node.Import.Kind.Global) =
         // Load the setter method handle field, then invoke it with stack val
-        fn.popExpecting(import.type.contentType.typeRef).addInsns(
-            VarInsnNode(Opcodes.ALOAD, fn.lastParamLocalVarIndex),
-            FieldInsnNode(Opcodes.GETFIELD, ctx.thisRef.asmName,
-                importGlobalSetterFieldName(index), MethodHandle::class.ref.asmDesc),
-            MethodInsnNode(Opcodes.INVOKEVIRTUAL, MethodHandle::class.ref.asmName, "invokeExact",
-                "(${import.type.contentType.typeRef.asmDesc})V", false)
-        )
+        // Note, this is special and the method handle has already been injected on the stack for us
+        fn.popExpecting(import.type.contentType.typeRef).
+            popExpecting(MethodHandle::class.ref).
+            addInsns(
+                MethodInsnNode(Opcodes.INVOKEVIRTUAL, MethodHandle::class.ref.asmName, "invokeExact",
+                    "(${import.type.contentType.typeRef.asmDesc})V", false)
+            )
 
-    fun applyGetGlobal(ctx: Context, fn: Func, index: Int) =
-        // Import is handled completely different than self
-        if (index < ctx.importGlobals.size)
-            applyImportGetGlobal(ctx, fn, index, ctx.importGlobals[index].kind as Node.Import.Kind.Global)
-        else
-            applySelfGetGlobal(ctx, fn, index, ctx.mod.globals[ctx.importGlobals.size - index])
+    fun applyGetGlobal(ctx: FuncContext, fn: Func, index: Int) = ctx.cls.globalAtIndex(index).let {
+        when (it) {
+            is Either.Left -> applyImportGetGlobal(ctx, fn, index, it.v.kind as Node.Import.Kind.Global)
+            is Either.Right -> applySelfGetGlobal(ctx, fn, index, it.v)
+        }
+    }
 
-    fun applySelfGetGlobal(ctx: Context, fn: Func, index: Int, global: Node.Global) =
+    fun applySelfGetGlobal(ctx: FuncContext, fn: Func, index: Int, global: Node.Global) =
         fn.addInsns(
-            VarInsnNode(Opcodes.ALOAD, fn.lastParamLocalVarIndex),
-            FieldInsnNode(Opcodes.GETFIELD, ctx.thisRef.asmName, globalName(index),
+            VarInsnNode(Opcodes.ALOAD, 0),
+            FieldInsnNode(Opcodes.GETFIELD, ctx.cls.thisRef.asmName, globalName(index),
                 global.type.contentType.typeRef.asmDesc)
         ).push(global.type.contentType.typeRef)
 
-    fun applyImportGetGlobal(ctx: Context, fn: Func, index: Int, import: Node.Import.Kind.Global) =
+    fun applyImportGetGlobal(ctx: FuncContext, fn: Func, index: Int, import: Node.Import.Kind.Global) =
         // Load the getter method handle field, then invoke it with nothing
         fn.addInsns(
-            VarInsnNode(Opcodes.ALOAD, fn.lastParamLocalVarIndex),
-            FieldInsnNode(Opcodes.GETFIELD, ctx.thisRef.asmName,
+            VarInsnNode(Opcodes.ALOAD, 0),
+            FieldInsnNode(Opcodes.GETFIELD, ctx.cls.thisRef.asmName,
                 importGlobalGetterFieldName(index), MethodHandle::class.ref.asmDesc),
             MethodInsnNode(Opcodes.INVOKEVIRTUAL, MethodHandle::class.ref.asmName, "invokeExact",
                 "()" + import.type.contentType.typeRef.asmDesc, false)
         ).push(import.type.contentType.typeRef)
 
-    fun applyTeeLocal(ctx: Context, f: Node.Func, fn: Func, index: Int) = f.locals[index].typeRef.let { typeRef ->
+    fun applyTeeLocal(ctx: FuncContext, fn: Func, index: Int) = ctx.node.locals[index].typeRef.let { typeRef ->
         fn.addInsns(InsnNode(if (typeRef.stackSize == 2) Opcodes.DUP2 else Opcodes.DUP)).
-            push(typeRef).let { applySetLocal(ctx, f, it, index) }
+            push(typeRef).let { applySetLocal(ctx, it, index) }
     }
 
-    fun applySetLocal(ctx: Context, f: Node.Func, fn: Func, index: Int) =
-        fn.popExpecting(f.locals[index].typeRef).let { fn ->
-            when (f.locals[index]) {
-                Node.Type.Value.I32 -> fn.addInsns(VarInsnNode(Opcodes.ISTORE, f.actualLocalIndex(index)))
-                Node.Type.Value.I64 -> fn.addInsns(VarInsnNode(Opcodes.LSTORE, f.actualLocalIndex(index)))
-                Node.Type.Value.F32 -> fn.addInsns(VarInsnNode(Opcodes.FSTORE, f.actualLocalIndex(index)))
-                Node.Type.Value.F64 -> fn.addInsns(VarInsnNode(Opcodes.DSTORE, f.actualLocalIndex(index)))
+    fun applySetLocal(ctx: FuncContext, fn: Func, index: Int) =
+        fn.popExpecting(ctx.node.locals[index].typeRef).let { fn ->
+            when (ctx.node.locals[index]) {
+                Node.Type.Value.I32 -> fn.addInsns(VarInsnNode(Opcodes.ISTORE, ctx.actualLocalIndex(index)))
+                Node.Type.Value.I64 -> fn.addInsns(VarInsnNode(Opcodes.LSTORE, ctx.actualLocalIndex(index)))
+                Node.Type.Value.F32 -> fn.addInsns(VarInsnNode(Opcodes.FSTORE, ctx.actualLocalIndex(index)))
+                Node.Type.Value.F64 -> fn.addInsns(VarInsnNode(Opcodes.DSTORE, ctx.actualLocalIndex(index)))
             }
         }
 
-    fun applyGetLocal(ctx: Context, f: Node.Func, fn: Func, index: Int) = when (f.locals[index]) {
-        Node.Type.Value.I32 -> fn.addInsns(VarInsnNode(Opcodes.ILOAD, f.actualLocalIndex(index)))
-        Node.Type.Value.I64 -> fn.addInsns(VarInsnNode(Opcodes.LLOAD, f.actualLocalIndex(index)))
-        Node.Type.Value.F32 -> fn.addInsns(VarInsnNode(Opcodes.FLOAD, f.actualLocalIndex(index)))
-        Node.Type.Value.F64 -> fn.addInsns(VarInsnNode(Opcodes.DLOAD, f.actualLocalIndex(index)))
-    }.push(f.locals[index].typeRef)
+    fun applyGetLocal(ctx: FuncContext, fn: Func, index: Int) = when (ctx.node.locals[index]) {
+        Node.Type.Value.I32 -> fn.addInsns(VarInsnNode(Opcodes.ILOAD, ctx.actualLocalIndex(index)))
+        Node.Type.Value.I64 -> fn.addInsns(VarInsnNode(Opcodes.LLOAD, ctx.actualLocalIndex(index)))
+        Node.Type.Value.F32 -> fn.addInsns(VarInsnNode(Opcodes.FLOAD, ctx.actualLocalIndex(index)))
+        Node.Type.Value.F64 -> fn.addInsns(VarInsnNode(Opcodes.DLOAD, ctx.actualLocalIndex(index)))
+    }.push(ctx.node.locals[index].typeRef)
 
-    fun applySelectInsn(ctx: Context, origFn: Func): Func {
+    fun applySelectInsn(ctx: FuncContext, origFn: Func): Func {
         var fn = origFn
         // 3 things, first two must have same type, third is 0 check (0 means use second, otherwise use first)
         // What we'll do is:
@@ -289,28 +373,24 @@ open class AstToAsm {
         )
     }
 
-    fun applyCallInsn(ctx: Context, f: Node.Func, origFn: Func, index: Int, indirect: Boolean): Func {
-        // Check whether it's an import or local to get type
-        val funcType = ctx.importFuncs.getOrNull(index).let {
-            when (it) {
-                null -> ctx.mod.funcs.getOrNull(ctx.importFuncs.size - index)?.type
-                else -> (it.kind as? Node.Import.Kind.Func)?.typeIndex?.let(ctx.mod.types::getOrNull)
+    fun applyCallInsn(ctx: FuncContext, fn: Func, index: Int) =
+        // Imports use a MethodHandle field, others call directly
+        ctx.cls.funcTypeAtIndex(index).let { funcType ->
+            fn.popExpectingMulti(funcType.params.map(Node.Type.Value::typeRef)).let { fn ->
+                when (ctx.cls.funcAtIndex(index)) {
+                    is Either.Left -> fn.popExpecting(MethodHandle::class.ref).addInsns(
+                        MethodInsnNode(Opcodes.INVOKEVIRTUAL, MethodHandle::class.ref.asmName,
+                            "invokeExact", funcType.asmDesc, false)
+                    )
+                    is Either.Right -> fn.popExpecting(ctx.cls.thisRef).addInsns(
+                        MethodInsnNode(Opcodes.INVOKESTATIC, ctx.cls.thisRef.asmName,
+                            funcName(index), funcType.asmDesc, false)
+                    )
+                }.let { fn -> funcType.ret?.let { fn.push(it.typeRef) } ?: fn }
             }
-        } ?: throw RuntimeException("Cannot find func at index $index")
-        // Check stack expectations
-        var fn = origFn.popExpectingMulti(funcType.params.map(Node.Type.Value::typeRef))
-        // Add "this" at the end and call statically
-        fn = fn.addInsns(
-            VarInsnNode(Opcodes.ALOAD, fn.lastParamLocalVarIndex),
-            MethodInsnNode(Opcodes.INVOKESTATIC, ctx.thisRef.asmName,
-                funcName(index), funcType.asmDesc, false)
-        )
-        // Return push on stack?
-        funcType.ret?.also { fn = fn.push(it.typeRef) }
-        return fn
-    }
+        }
 
-    fun applyReturnInsn(ctx: Context, f: Node.Func, fn: Func) = when (f.type.ret) {
+    fun applyReturnInsn(ctx: FuncContext, fn: Func) = when (ctx.node.type.ret) {
         null ->
             fn.addInsns(InsnNode(Opcodes.RETURN))
         Node.Type.Value.I32 ->
@@ -322,20 +402,8 @@ open class AstToAsm {
         Node.Type.Value.F64 ->
             fn.popExpecting(Double::class.ref).addInsns(InsnNode(Opcodes.DRETURN))
     }.let {
-        require(it.stack.isEmpty()) { "Stack not empty on void return" }
+        require(it.stack.isEmpty()) { "Stack not empty on return" }
         it
-    }
-
-    data class Context(
-        val packageName: String,
-        val className: String,
-        val mod: Node.Module,
-        val cls: ClassNode,
-        val mem: Mem = ByteBufferMem()
-    ) {
-        val importFuncs: List<Node.Import> by lazy { mod.imports.filter { it.kind is Node.Import.Kind.Func } }
-        val importGlobals: List<Node.Import> by lazy { mod.imports.filter { it.kind is Node.Import.Kind.Global } }
-        val thisRef = TypeRef(Type.getObjectType(packageName.replace('.', '/') + className))
     }
 
     companion object : AstToAsm()

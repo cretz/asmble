@@ -78,6 +78,3 @@ val AbstractInsnNode.isTerminating: Boolean get() = when (this.opcode) {
 
 val Node.Type.Func.asmDesc: String get() =
     (this.ret?.typeRef ?: Void::class.ref).asMethodRetDesc(*this.params.map { it.typeRef }.toTypedArray())
-
-fun Node.Func.actualLocalIndex(givenIndex: Int) =
-    this.locals.take(givenIndex).sumBy { if (it == Node.Type.Value.I64 || it == Node.Type.Value.F64) 2 else 1 }

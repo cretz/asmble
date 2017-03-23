@@ -1,5 +1,6 @@
 package asmble.compile.jvm
 
+import asmble.ast.Node
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
 import org.objectweb.asm.tree.AbstractInsnNode
@@ -12,13 +13,11 @@ data class Func(
     val ret: TypeRef = Void::class.ref,
     val access: Int = Opcodes.ACC_PUBLIC,
     val insns: List<AbstractInsnNode> = emptyList(),
-    val stack: List<TypeRef> = emptyList()
+    val stack: List<TypeRef> = emptyList(),
+    val memIsLocalVar: Boolean = false
 ) {
 
     val desc: String get() = ret.asMethodRetDesc(*params.toTypedArray())
-
-    val lastParamLocalVarIndex: Int get() =
-        params.dropLast(1).fold(if (access.isAccessStatic) 1 else 2) { total, param -> total + param.stackSize }
 
     fun addInsns(insns: List<AbstractInsnNode>) = copy(insns = this.insns + insns)
 
