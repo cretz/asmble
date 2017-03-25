@@ -2,6 +2,7 @@ package asmble.compile.jvm
 
 import asmble.ast.Node
 import asmble.util.Either
+import asmble.util.add
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.tree.*
 import java.lang.invoke.MethodHandle
@@ -184,7 +185,28 @@ open class AstToAsm {
             fn.addInsns(UnsupportedOperationException::class.athrow("Unreachable"))
         is Node.Instr.Nop ->
             fn.addInsns(InsnNode(Opcodes.NOP))
-        // TODO: other control flow...
+        is Node.Instr.Block ->
+            // TODO: check last item on stack?
+            fn.pushBlock(i)
+        is Node.Instr.Loop ->
+            fn.pushBlock(i)
+        is Node.Instr.If ->
+            // The label is set in else or end
+            fn.pushBlock(i).pushIf().addInsns(JumpInsnNode(Opcodes.IFEQ, null))
+        is Node.Instr.Else ->
+            applyElse(ctx, fn)
+        is Node.Instr.End ->
+            applyEnd(ctx, fn)
+        is Node.Instr.Br ->
+            fn.blockAtDepth(i.relativeDepth).let { (fn, block) ->
+                fn.addInsns(JumpInsnNode(Opcodes.GOTO, block.label))
+            }
+        is Node.Instr.BrIf ->
+            fn.blockAtDepth(i.relativeDepth).let { (fn, block) ->
+                fn.addInsns(JumpInsnNode(Opcodes.IFNE, block.label))
+            }
+        is Node.Instr.BrTable ->
+            applyBrTable(ctx, fn, i)
         is Node.Instr.Return ->
             applyReturnInsn(ctx, fn)
         is Node.Instr.Call ->
@@ -297,8 +319,349 @@ open class AstToAsm {
             applyF64Cmp(ctx, fn, Opcodes.IFLE)
         is Node.Instr.F64Ge ->
             applyF64Cmp(ctx, fn, Opcodes.IFGE)
-        else -> TODO()
+        is Node.Instr.I32Clz ->
+            // TODO Should make unsigned?
+            applyI32Unary(ctx, fn, Integer::numberOfLeadingZeros.invokeStatic())
+        is Node.Instr.I32Ctz ->
+            applyI32Unary(ctx, fn, Integer::numberOfTrailingZeros.invokeStatic())
+        is Node.Instr.I32Popcnt ->
+            applyI32Unary(ctx, fn, Integer::bitCount.invokeStatic())
+        is Node.Instr.I32Add ->
+            applyI32Binary(ctx, fn, Opcodes.IADD)
+        is Node.Instr.I32Sub ->
+            applyI32Binary(ctx, fn, Opcodes.ISUB)
+        is Node.Instr.I32Mul ->
+            applyI32Binary(ctx, fn, Opcodes.IMUL)
+        is Node.Instr.I32DivS ->
+            applyI32Binary(ctx, fn, Opcodes.IDIV)
+        is Node.Instr.I32DivU ->
+            applyI32Binary(ctx, fn, Integer::divideUnsigned.invokeStatic())
+        is Node.Instr.I32RemS ->
+            applyI32Binary(ctx, fn, Opcodes.IREM)
+        is Node.Instr.I32RemU ->
+            applyI32Binary(ctx, fn, Integer::remainderUnsigned.invokeStatic())
+        is Node.Instr.I32And ->
+            applyI32Binary(ctx, fn, Opcodes.IAND)
+        is Node.Instr.I32Or ->
+            applyI32Binary(ctx, fn, Opcodes.IOR)
+        is Node.Instr.I32Xor ->
+            applyI32Binary(ctx, fn, Opcodes.IXOR)
+        is Node.Instr.I32Shl ->
+            applyI32Binary(ctx, fn, Opcodes.ISHL)
+        is Node.Instr.I32ShrS ->
+            applyI32Binary(ctx, fn, Opcodes.ISHR)
+        is Node.Instr.I32ShrU ->
+            applyI32Binary(ctx, fn, Opcodes.IUSHR)
+        is Node.Instr.I32Rotl ->
+            applyI32Binary(ctx, fn, Integer::rotateLeft.invokeStatic())
+        is Node.Instr.I32Rotr ->
+            applyI32Binary(ctx, fn, Integer::rotateRight.invokeStatic())
+        is Node.Instr.I64Clz ->
+            applyI64Unary(ctx, fn, java.lang.Long::numberOfLeadingZeros.invokeStatic())
+        is Node.Instr.I64Ctz ->
+            applyI64Unary(ctx, fn, java.lang.Long::numberOfTrailingZeros.invokeStatic())
+        is Node.Instr.I64Popcnt ->
+            applyI64Unary(ctx, fn, java.lang.Long::bitCount.invokeStatic())
+        is Node.Instr.I64Add ->
+            applyI64Binary(ctx, fn, Opcodes.LADD)
+        is Node.Instr.I64Sub ->
+            applyI64Binary(ctx, fn, Opcodes.LSUB)
+        is Node.Instr.I64Mul ->
+            applyI64Binary(ctx, fn, Opcodes.LMUL)
+        is Node.Instr.I64DivS ->
+            applyI64Binary(ctx, fn, Opcodes.LDIV)
+        is Node.Instr.I64DivU ->
+            applyI64Binary(ctx, fn, java.lang.Long::divideUnsigned.invokeStatic())
+        is Node.Instr.I64RemS ->
+            applyI64Binary(ctx, fn, Opcodes.LREM)
+        is Node.Instr.I64RemU ->
+            applyI64Binary(ctx, fn, java.lang.Long::remainderUnsigned.invokeStatic())
+        is Node.Instr.I64And ->
+            applyI64Binary(ctx, fn, Opcodes.LAND)
+        is Node.Instr.I64Or ->
+            applyI64Binary(ctx, fn, Opcodes.LOR)
+        is Node.Instr.I64Xor ->
+            applyI64Binary(ctx, fn, Opcodes.LXOR)
+        is Node.Instr.I64Shl ->
+            applyI64Binary(ctx, fn, Opcodes.LSHL)
+        is Node.Instr.I64ShrS ->
+            applyI64Binary(ctx, fn, Opcodes.LSHR)
+        is Node.Instr.I64ShrU ->
+            applyI64Binary(ctx, fn, Opcodes.LUSHR)
+        is Node.Instr.I64Rotl ->
+            applyI64Binary(ctx, fn, java.lang.Long::rotateLeft.invokeStatic())
+        is Node.Instr.I64Rotr ->
+            applyI64Binary(ctx, fn, java.lang.Long::rotateRight.invokeStatic())
+        is Node.Instr.F32Abs ->
+            applyF32Unary(ctx, fn, forceFnType<(Float) -> Float>(Math::abs).invokeStatic())
+        is Node.Instr.F32Neg ->
+            applyF32Unary(ctx, fn, InsnNode(Opcodes.FNEG))
+        is Node.Instr.F32Ceil ->
+            applyWithF32To64AndBack(ctx, fn) { applyF64Unary(ctx, it, Math::ceil.invokeStatic()) }
+        is Node.Instr.F32Floor ->
+            applyWithF32To64AndBack(ctx, fn) { applyF64Unary(ctx, it, Math::floor.invokeStatic()) }
+        is Node.Instr.F32Trunc ->
+            applyF32Trunc(ctx, fn)
+        is Node.Instr.F32Nearest ->
+            // TODO: this ain't right wrt infinity and other things
+            applyF32Unary(ctx, fn, forceFnType<(Float) -> Int>(Math::round).invokeStatic()).
+                addInsns(InsnNode(Opcodes.I2F))
+        is Node.Instr.F32Sqrt ->
+            applyWithF32To64AndBack(ctx, fn) { applyF64Unary(ctx, it, Math::sqrt.invokeStatic()) }
+        is Node.Instr.F32Add ->
+            applyF32Binary(ctx, fn, Opcodes.FADD)
+        is Node.Instr.F32Sub ->
+            applyF32Binary(ctx, fn, Opcodes.FSUB)
+        is Node.Instr.F32Mul ->
+            applyF32Binary(ctx, fn, Opcodes.FMUL)
+        is Node.Instr.F32Div ->
+            applyF32Binary(ctx, fn, Opcodes.FDIV)
+        is Node.Instr.F32Min ->
+            applyF32Binary(ctx, fn, forceFnType<(Float, Float) -> Float>(Math::min).invokeStatic())
+        is Node.Instr.F32Max ->
+            applyF32Binary(ctx, fn, forceFnType<(Float, Float) -> Float>(Math::max).invokeStatic())
+        is Node.Instr.F32CopySign ->
+            applyF32Binary(ctx, fn, forceFnType<(Float, Float) -> Float>(Math::copySign).invokeStatic())
+        is Node.Instr.F64Abs ->
+            applyF64Unary(ctx, fn, forceFnType<(Double) -> Double>(Math::abs).invokeStatic())
+        is Node.Instr.F64Neg ->
+            applyF64Unary(ctx, fn, InsnNode(Opcodes.DNEG))
+        is Node.Instr.F64Ceil ->
+            applyF64Unary(ctx, fn, Math::ceil.invokeStatic())
+        is Node.Instr.F64Floor ->
+            applyF64Unary(ctx, fn, Math::floor.invokeStatic())
+        is Node.Instr.F64Trunc ->
+            applyF64Trunc(ctx, fn)
+        is Node.Instr.F64Nearest ->
+            // TODO: this ain't right wrt infinity and other things
+            applyF64Unary(ctx, fn, forceFnType<(Double) -> Long>(Math::round).invokeStatic()).
+                addInsns(InsnNode(Opcodes.L2D))
+        is Node.Instr.F64Sqrt ->
+            applyF64Unary(ctx, fn, Math::sqrt.invokeStatic())
+        is Node.Instr.F64Add ->
+            applyF64Binary(ctx, fn, Opcodes.DADD)
+        is Node.Instr.F64Sub ->
+            applyF64Binary(ctx, fn, Opcodes.DSUB)
+        is Node.Instr.F64Mul ->
+            applyF64Binary(ctx, fn, Opcodes.DMUL)
+        is Node.Instr.F64Div ->
+            applyF64Binary(ctx, fn, Opcodes.DDIV)
+        is Node.Instr.F64Min ->
+            applyF64Binary(ctx, fn, forceFnType<(Double, Double) -> Double>(Math::min).invokeStatic())
+        is Node.Instr.F64Max ->
+            applyF64Binary(ctx, fn, forceFnType<(Double, Double) -> Double>(Math::max).invokeStatic())
+        is Node.Instr.F64CopySign ->
+            applyF64Binary(ctx, fn, forceFnType<(Double, Double) -> Double>(Math::copySign).invokeStatic())
+        is Node.Instr.I32WrapI64 ->
+            applyConv(ctx, fn, Long::class.ref, Int::class.ref, Opcodes.L2I)
+        is Node.Instr.I32TruncSF32 ->
+            applyConv(ctx, fn, Float::class.ref, Int::class.ref, Opcodes.F2I)
+        is Node.Instr.I32TruncUF32 ->
+            // TODO: wat?
+            applyConv(ctx, fn, Float::class.ref, Int::class.ref, Opcodes.F2I).
+                addInsns(java.lang.Short::toUnsignedInt.invokeStatic())
+        is Node.Instr.I32TruncSF64 ->
+            applyConv(ctx, fn, Double::class.ref, Int::class.ref, Opcodes.D2I)
+        is Node.Instr.I32TruncUF64 ->
+            applyConv(ctx, fn, Double::class.ref, Int::class.ref, Opcodes.D2I).
+                addInsns(java.lang.Short::toUnsignedInt.invokeStatic())
+        is Node.Instr.I64ExtendSI32 ->
+            applyConv(ctx, fn, Int::class.ref, Long::class.ref, Opcodes.I2L)
+        is Node.Instr.I64ExtendUI32 ->
+            applyConv(ctx, fn, Int::class.ref, Long::class.ref, Integer::toUnsignedLong.invokeStatic())
+        is Node.Instr.I64TruncSF32 ->
+            applyConv(ctx, fn, Float::class.ref, Long::class.ref, Opcodes.F2L)
+        is Node.Instr.I64TruncUF32 ->
+            applyConv(ctx, fn, Float::class.ref, Long::class.ref, Opcodes.F2L).
+                addInsns(0xffL.const, InsnNode(Opcodes.LAND))
+        is Node.Instr.I64TruncSF64 ->
+            applyConv(ctx, fn, Double::class.ref, Long::class.ref, Opcodes.D2L)
+        is Node.Instr.I64TruncUF64 ->
+            // TODO: so wrong
+            applyConv(ctx, fn, Double::class.ref, Long::class.ref, Opcodes.D2L).
+                addInsns(0xffL.const, InsnNode(Opcodes.LAND))
+        is Node.Instr.F32ConvertSI32 ->
+            applyConv(ctx, fn, Int::class.ref, Float::class.ref, Opcodes.I2F)
+        is Node.Instr.F32ConvertUI32 ->
+            fn.addInsns(Integer::toUnsignedLong.invokeStatic()).
+                let { applyConv(ctx, it, Int::class.ref, Float::class.ref, Opcodes.L2F) }
+        is Node.Instr.F32ConvertSI64 ->
+            applyConv(ctx, fn, Long::class.ref, Float::class.ref, Opcodes.L2F)
+        is Node.Instr.F32ConvertUI64 ->
+            fn.addInsns(0xffL.const, InsnNode(Opcodes.LAND)).
+                let { applyConv(ctx, it, Long::class.ref, Float::class.ref, Opcodes.L2F) }
+        is Node.Instr.F32DemoteF64 ->
+            applyConv(ctx, fn, Double::class.ref, Float::class.ref, Opcodes.D2F)
+        is Node.Instr.F64ConvertSI32 ->
+            applyConv(ctx, fn, Int::class.ref, Double::class.ref, Opcodes.I2D)
+        is Node.Instr.F64ConvertUI32 ->
+            fn.addInsns(Integer::toUnsignedLong.invokeStatic()).
+                let { applyConv(ctx, it, Int::class.ref, Double::class.ref, Opcodes.L2D) }
+        is Node.Instr.F64ConvertSI64 ->
+            applyConv(ctx, fn, Long::class.ref, Double::class.ref, Opcodes.L2D)
+        is Node.Instr.F64ConvertUI64 ->
+            fn.addInsns(0xffL.const, InsnNode(Opcodes.LAND)).
+                let { applyConv(ctx, it, Long::class.ref, Double::class.ref, Opcodes.L2D) }
+        is Node.Instr.F64PromoteF32 ->
+            applyConv(ctx, fn, Float::class.ref, Double::class.ref, Opcodes.F2D)
+        is Node.Instr.I32ReinterpretF32 ->
+            applyConv(ctx, fn, Float::class.ref, Int::class.ref, java.lang.Float::floatToRawIntBits.invokeStatic())
+        is Node.Instr.I64ReinterpretF64 ->
+            applyConv(ctx, fn, Double::class.ref, Long::class.ref, java.lang.Double::doubleToRawLongBits.invokeStatic())
+        is Node.Instr.F32ReinterpretI32 ->
+            applyConv(ctx, fn, Int::class.ref, Float::class.ref, java.lang.Float::intBitsToFloat.invokeStatic())
+        is Node.Instr.F64ReinterpretI64 ->
+            applyConv(ctx, fn, Double::class.ref, Long::class.ref, java.lang.Double::longBitsToDouble.invokeStatic())
     }
+
+    // Can compile quite cleanly as a table switch on the JVM
+    fun applyBrTable(ctx: FuncContext, fn: Func, insn: Node.Instr.BrTable) =
+        fn.blockAtDepth(insn.default).let { (fn, defaultBlock) ->
+            insn.targetTable.fold(fn to emptyList<LabelNode>()) { (fn, labels), targetDepth ->
+                fn.blockAtDepth(targetDepth).let { (fn, targetBlock) -> fn to (labels + targetBlock.label) }
+            }.let { (fn, targetLabels) ->
+                fn.addInsns(TableSwitchInsnNode(0, targetLabels.size - 1,
+                    defaultBlock.label, *targetLabels.toTypedArray()))
+            }
+        }
+
+    fun applyElse(ctx: FuncContext, fn: Func) = fn.blockAtDepth(0).let { (fn, block) ->
+        // Do a goto the end, and then add a fresh label to the initial "if" that jumps here
+        val label = LabelNode()
+        fn.peekIf().label = label
+        fn.addInsns(JumpInsnNode(Opcodes.GOTO, block.label), label)
+    }
+
+    fun applyEnd(ctx: FuncContext, fn: Func) = fn.popBlock().let { (fn, block) ->
+        when (block.insn) {
+            is Node.Instr.Block ->
+                // Add label to end of block if it's there
+                block.maybeLabel?.let { fn.addInsns(it) } ?: fn
+            is Node.Instr.Loop ->
+                // Add label to beginning of loop if it's there
+                block.maybeLabel?.let { fn.copy(insns = fn.insns.add(block.startIndex, it)) } ?: fn
+            is Node.Instr.If -> fn.popIf().let { (fn, jumpNode) ->
+                when (block.maybeLabel) {
+                    // If there is no existing break label, add one to initial
+                    // "if" only if it isn't there from an "else"
+                    null -> if (jumpNode.label != null) fn else {
+                        jumpNode.label = LabelNode()
+                        fn.addInsns(jumpNode.label)
+                    }
+                    // If there is one, add it to the initial "if"
+                    // if the "else" didn't set one on there...then push it
+                    else -> {
+                        if (jumpNode.label == null) jumpNode.label = block.maybeLabel
+                        fn.addInsns(block.maybeLabel!!)
+                    }
+                }
+            }
+            else -> error("Unrecognized end for ${block.insn}")
+        }
+    }
+
+    fun applyConv(ctx: FuncContext, fn: Func, from: TypeRef, to: TypeRef, op: Int) =
+        applyConv(ctx, fn, from, to, InsnNode(op))
+
+    fun applyConv(ctx: FuncContext, fn: Func, from: TypeRef, to: TypeRef, insn: AbstractInsnNode) =
+        fn.popExpecting(from).addInsns(insn).push(to)
+
+
+    fun applyF64Trunc(ctx: FuncContext, fn: Func): Func {
+        // The best way for now is a comparison and jump to ceil or floor sadly
+        // So with it on the stack:
+        // dup2
+        // dconst 0
+        // dcmpg
+        // ifge label1
+        // Math::ceil
+        // goto label2
+        // label1: Math::floor
+        // label2
+        val label1 = LabelNode()
+        val label2 = LabelNode()
+        return fn.popExpecting(Double::class.ref).addInsns(
+            InsnNode(Opcodes.DUP2),
+            0.0.const,
+            InsnNode(Opcodes.DCMPG),
+            JumpInsnNode(Opcodes.IFGE, label1),
+            Math::ceil.invokeStatic(),
+            JumpInsnNode(Opcodes.GOTO, label2),
+            label1,
+            Math::floor.invokeStatic(),
+            label2
+        ).push(Double::class.ref)
+    }
+
+    fun applyF32Trunc(ctx: FuncContext, fn: Func): Func {
+        // Do the same as applyF64Trunc but convert where needed
+        val label1 = LabelNode()
+        val label2 = LabelNode()
+        return fn.popExpecting(Float::class.ref).addInsns(
+            InsnNode(Opcodes.DUP),
+            0.0F.const,
+            InsnNode(Opcodes.FCMPG),
+            JumpInsnNode(Opcodes.IFGE, label1),
+            InsnNode(Opcodes.F2D),
+            Math::ceil.invokeStatic(),
+            JumpInsnNode(Opcodes.GOTO, label2),
+            label1,
+            InsnNode(Opcodes.F2D),
+            Math::floor.invokeStatic(),
+            label2,
+            InsnNode(Opcodes.D2F)
+        ).push(Float::class.ref)
+    }
+
+    fun applyWithF32To64AndBack(ctx: FuncContext, fn: Func, f: (Func) -> Func) =
+        fn.popExpecting(Float::class.ref).
+            addInsns(InsnNode(Opcodes.F2D)).
+            push(Double::class.ref).let(f).
+            popExpecting(Double::class.ref).
+            addInsns(InsnNode(Opcodes.D2F)).
+            push(Float::class.ref)
+
+    fun applyF64Binary(ctx: FuncContext, fn: Func, op: Int) =
+        applyF64Binary(ctx, fn, InsnNode(op))
+
+    fun applyF64Binary(ctx: FuncContext, fn: Func, insn: AbstractInsnNode) =
+        applyBinary(ctx, fn, Double::class.ref, insn)
+
+    fun applyF32Binary(ctx: FuncContext, fn: Func, op: Int) =
+        applyF32Binary(ctx, fn, InsnNode(op))
+
+    fun applyF32Binary(ctx: FuncContext, fn: Func, insn: AbstractInsnNode) =
+        applyBinary(ctx, fn, Float::class.ref, insn)
+
+    fun applyI64Binary(ctx: FuncContext, fn: Func, op: Int) =
+        applyI64Binary(ctx, fn, InsnNode(op))
+
+    fun applyI64Binary(ctx: FuncContext, fn: Func, insn: AbstractInsnNode) =
+        applyBinary(ctx, fn, Long::class.ref, insn)
+
+    fun applyI32Binary(ctx: FuncContext, fn: Func, op: Int) =
+        applyI32Binary(ctx, fn, InsnNode(op))
+
+    fun applyI32Binary(ctx: FuncContext, fn: Func, insn: AbstractInsnNode) =
+        applyBinary(ctx, fn, Int::class.ref, insn)
+
+    fun applyBinary(ctx: FuncContext, fn: Func, type: TypeRef, insn: AbstractInsnNode) =
+        fn.popExpectingMulti(type, type).addInsns(insn).push(type)
+
+    fun applyF64Unary(ctx: FuncContext, fn: Func, insn: AbstractInsnNode) =
+        applyUnary(ctx, fn, Double::class.ref, insn)
+
+    fun applyF32Unary(ctx: FuncContext, fn: Func, insn: AbstractInsnNode) =
+        applyUnary(ctx, fn, Float::class.ref, insn)
+
+    fun applyI64Unary(ctx: FuncContext, fn: Func, insn: AbstractInsnNode) =
+        applyUnary(ctx, fn, Long::class.ref, insn)
+
+    fun applyI32Unary(ctx: FuncContext, fn: Func, insn: AbstractInsnNode) =
+        applyUnary(ctx, fn, Int::class.ref, insn)
+
+    fun applyUnary(ctx: FuncContext, fn: Func, type: TypeRef, insn: AbstractInsnNode) =
+        fn.popExpecting(type).addInsns(insn).push(type)
 
     fun applyF32Cmp(ctx: FuncContext, fn: Func, op: Int) =
         fn.popExpecting(Float::class.ref).
