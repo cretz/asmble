@@ -13,11 +13,9 @@ open class AstToAsm {
         // Invoke dynamic among other things
         ctx.cls.version = Opcodes.V1_7
         ctx.cls.access += Opcodes.ACC_PUBLIC
-        // TODO: make sure the imports are sorted as we expect
         addFields(ctx)
         addConstructors(ctx)
         addFuncs(ctx)
-        // TODO: addImportForwarders
     }
 
     fun addFields(ctx: ClsContext) {
@@ -86,12 +84,30 @@ open class AstToAsm {
         ).push(ctx.mem.memType)
         // Do mem init and remove it from the stack if it's still there afterwards
         memCon = ctx.mem.init(memCon, ctx.mod.memories.first().limits.initial)
+        // Add all data loads
+        memCon = ctx.mod.data.fold(memCon) { origMemCon, data ->
+            // Add the mem on the stack if it's not already there
+            val memCon =
+                if (origMemCon.stack.lastOrNull() == ctx.mem.memType) origMemCon
+                else origMemCon.addInsns(VarInsnNode(Opcodes.ALOAD, 1)).push(ctx.mem.memType)
+            // Ask mem to build the data, giving it a callback to put the offset on the stack
+            ctx.mem.data(memCon, data.data) { memCon ->
+                val funcCtx = FuncContext(ctx, Node.Func(
+                    Node.Type.Func(emptyList(), null), emptyList(), data.offset),
+                    ctx.reworker.rework(ctx, data.offset))
+                funcCtx.insns.foldIndexed(memCon) { index, memCon, insn ->
+                    applyInsn(funcCtx, memCon, insn, index)
+                }
+            }
+        }
+        // Take the mem off the stack if it's still left
         if (memCon.stack.lastOrNull() == ctx.mem.memType) memCon = memCon.popExpecting(ctx.mem.memType)
+
         // Set all import functions
         memCon = ctx.importFuncs.indices.fold(memCon) { memCon, importIndex ->
             memCon.addInsns(
                 VarInsnNode(Opcodes.ALOAD, 0),
-                VarInsnNode(Opcodes.ALOAD, importIndex + 1),
+                VarInsnNode(Opcodes.ALOAD, importIndex + 2),
                 FieldInsnNode(Opcodes.PUTFIELD, ctx.thisRef.asmName,
                     funcName(importIndex), MethodHandle::class.ref.asmDesc)
             )
@@ -130,7 +146,7 @@ open class AstToAsm {
 
     fun addFuncs(ctx: ClsContext) {
         ctx.cls.methods += ctx.mod.funcs.mapIndexed { index, func ->
-            fromFunc(ctx, func, ctx.importFuncs.size + index)
+            fromFunc(ctx, func, ctx.importFuncs.size + index).toMethodNode()
         }
     }
 
@@ -142,6 +158,7 @@ open class AstToAsm {
     fun fromFunc(ctx: ClsContext, f: Node.Func, index: Int): Func {
         // TODO: validate local size?
         // TODO: initialize non-param locals?
+        ctx.debug { "Building function ${funcName(index)}" }
         var func = Func(
             access = Opcodes.ACC_PRIVATE,
             name = funcName(index),
@@ -149,10 +166,35 @@ open class AstToAsm {
             ret = f.type.ret?.let(Node.Type.Value::typeRef) ?: Void::class.ref
         )
         // Rework the instructions
-        val funcCtx = FuncContext(ctx, f, ctx.reworker.rework(ctx, f.instructions))
+        val reworkedInsns = ctx.reworker.rework(ctx, f.instructions)
+        val funcCtx = FuncContext(
+            cls = ctx,
+            node = f,
+            insns = reworkedInsns,
+            memIsLocalVar =
+                ctx.reworker.nonAdjacentMemAccesses(reworkedInsns) >= ctx.nonAdjacentMemAccessesRequiringLocalVar
+        )
+
+        // Add the mem as a local variable if necessary
+        if (funcCtx.memIsLocalVar) func = func.addInsns(
+            VarInsnNode(Opcodes.ALOAD, 0),
+            FieldInsnNode(Opcodes.GETFIELD, ctx.thisRef.asmName, "memory", ctx.mem.memType.asmDesc),
+            VarInsnNode(Opcodes.ASTORE, funcCtx.actualLocalIndex(funcCtx.node.localsSize))
+        )
 
         // Add all instructions
-        func = funcCtx.insns.foldIndexed(func) { index, func, insn -> applyInsn(funcCtx, func, insn, index) }
+        ctx.debug { "Applying insns for function ${funcName(index)}" }
+        func = funcCtx.insns.foldIndexed(func) { index, func, insn ->
+            ctx.debug { "Applying insn $insn" }
+            val ret = applyInsn(funcCtx, func, insn, index)
+            ctx.trace { "Resulting stack: ${ret.stack}"}
+            ret
+        }
+
+        // If the last instruction does not terminate and we are a void
+        // method, we'll just add a return
+        if (f.type.ret == null && !(func.insns.lastOrNull()?.isTerminating ?: false))
+            func = func.addInsns(InsnNode(Opcodes.RETURN))
 
         return func
     }
@@ -738,33 +780,33 @@ open class AstToAsm {
         // Grow mem is a special case where the memory ref is already pre-injected on
         // the stack before this call. But it can have a memory leftover on the stack
         // so we pop it if we need to
-        ctx.cls.mem.growMemory(fn).let { fn ->
+        ctx.cls.mem.growMemory(ctx, fn).let { fn ->
             popMemoryIfNecessary(ctx, fn, ctx.insns.getOrNull(insnIndex + 1))
         }
 
     fun applyCurrentMemory(ctx: FuncContext, fn: Func) =
         // Curr mem is not specially injected, so we have to put the memory on the
         // stack since we need it
-        putMemoryOnStackIfNecessary(ctx, fn).let { fn -> ctx.cls.mem.currentMemory(fn) }
+        putMemoryOnStackIfNecessary(ctx, fn).let { fn -> ctx.cls.mem.currentMemory(ctx, fn) }
 
     fun applyStoreOp(ctx: FuncContext, fn: Func, insn: Node.Instr.Args.AlignOffset, insnIndex: Int) =
         // Store is a special case where the memory ref is already pre-injected on
         // the stack before this call. But it can have a memory leftover on the stack
         // so we pop it if we need to
-        ctx.cls.mem.storeOp(fn, insn).let { fn ->
+        ctx.cls.mem.storeOp(ctx, fn, insn).let { fn ->
             popMemoryIfNecessary(ctx, fn, ctx.insns.getOrNull(insnIndex + 1))
         }
 
     fun applyLoadOp(ctx: FuncContext, fn: Func, insn: Node.Instr.Args.AlignOffset) =
-        // Loads are not specially injected, so we have to put the memory on the
-        // stack since we need it
-        putMemoryOnStackIfNecessary(ctx, fn).let { fn -> ctx.cls.mem.loadOp(fn, insn) }
+        // Load is a special case where the memory ref is already pre-injected on
+        // the stack before this call
+        ctx.cls.mem.loadOp(ctx, fn, insn)
 
     fun putMemoryOnStackIfNecessary(ctx: FuncContext, fn: Func) =
         if (fn.stack.lastOrNull() == ctx.cls.mem.memType) fn
-        else if (fn.memIsLocalVar)
+        else if (ctx.memIsLocalVar)
             // Assume it's just past the locals
-            fn.addInsns(VarInsnNode(Opcodes.ALOAD, ctx.actualLocalIndex(ctx.node.locals.size))).
+            fn.addInsns(VarInsnNode(Opcodes.ALOAD, ctx.actualLocalIndex(ctx.node.localsSize))).
                 push(ctx.cls.mem.memType)
         else fn.addInsns(
             VarInsnNode(Opcodes.ALOAD, 0),
@@ -835,14 +877,14 @@ open class AstToAsm {
                 "()" + import.type.contentType.typeRef.asmDesc, false)
         ).push(import.type.contentType.typeRef)
 
-    fun applyTeeLocal(ctx: FuncContext, fn: Func, index: Int) = ctx.node.locals[index].typeRef.let { typeRef ->
+    fun applyTeeLocal(ctx: FuncContext, fn: Func, index: Int) = ctx.node.localByIndex(index).typeRef.let { typeRef ->
         fn.addInsns(InsnNode(if (typeRef.stackSize == 2) Opcodes.DUP2 else Opcodes.DUP)).
             push(typeRef).let { applySetLocal(ctx, it, index) }
     }
 
     fun applySetLocal(ctx: FuncContext, fn: Func, index: Int) =
-        fn.popExpecting(ctx.node.locals[index].typeRef).let { fn ->
-            when (ctx.node.locals[index]) {
+        fn.popExpecting(ctx.node.localByIndex(index).typeRef).let { fn ->
+            when (ctx.node.localByIndex(index)) {
                 Node.Type.Value.I32 -> fn.addInsns(VarInsnNode(Opcodes.ISTORE, ctx.actualLocalIndex(index)))
                 Node.Type.Value.I64 -> fn.addInsns(VarInsnNode(Opcodes.LSTORE, ctx.actualLocalIndex(index)))
                 Node.Type.Value.F32 -> fn.addInsns(VarInsnNode(Opcodes.FSTORE, ctx.actualLocalIndex(index)))
@@ -850,12 +892,12 @@ open class AstToAsm {
             }
         }
 
-    fun applyGetLocal(ctx: FuncContext, fn: Func, index: Int) = when (ctx.node.locals[index]) {
+    fun applyGetLocal(ctx: FuncContext, fn: Func, index: Int) = when (ctx.node.localByIndex(index)) {
         Node.Type.Value.I32 -> fn.addInsns(VarInsnNode(Opcodes.ILOAD, ctx.actualLocalIndex(index)))
         Node.Type.Value.I64 -> fn.addInsns(VarInsnNode(Opcodes.LLOAD, ctx.actualLocalIndex(index)))
         Node.Type.Value.F32 -> fn.addInsns(VarInsnNode(Opcodes.FLOAD, ctx.actualLocalIndex(index)))
         Node.Type.Value.F64 -> fn.addInsns(VarInsnNode(Opcodes.DLOAD, ctx.actualLocalIndex(index)))
-    }.push(ctx.node.locals[index].typeRef)
+    }.push(ctx.node.localByIndex(index).typeRef)
 
     fun applySelectInsn(ctx: FuncContext, origFn: Func): Func {
         var fn = origFn
@@ -886,6 +928,7 @@ open class AstToAsm {
     fun applyCallInsn(ctx: FuncContext, fn: Func, index: Int) =
         // Imports use a MethodHandle field, others call directly
         ctx.cls.funcTypeAtIndex(index).let { funcType ->
+            ctx.debug { "Applying call to ${funcName(index)} of type $funcType with stack ${fn.stack}" }
             fn.popExpectingMulti(funcType.params.map(Node.Type.Value::typeRef)).let { fn ->
                 when (ctx.cls.funcAtIndex(index)) {
                     is Either.Left -> fn.popExpecting(MethodHandle::class.ref).addInsns(

@@ -26,11 +26,12 @@ open class InsnReworker {
         // multiple for the same index
         var insnsToInject = emptyMap<Int, List<Insn>>()
         fun injectBeforeLastStackCount(insn: Insn, count: Int) {
+            ctx.trace { "Injecting $insn back $count stack values" }
             var countSoFar = 0
             for ((amountChanged, insnIndex) in stackManips.asReversed()) {
                 countSoFar += amountChanged
                 if (countSoFar == count) {
-                    insnsToInject += insnIndex to (insnsToInject[insnIndex]?.let { it + insn } ?: listOf(insn))
+                    insnsToInject += insnIndex to (insnsToInject[insnIndex]?.let { listOf(insn) + it } ?: listOf(insn))
                     return
                 }
             }
@@ -56,6 +57,12 @@ open class InsnReworker {
                         else Insn.ThisNeededOnStack
                     injectBeforeLastStackCount(inject, 1)
                 }
+                // Loads require "mem" before the single param
+                is Node.Instr.I32Load, is Node.Instr.I64Load, is Node.Instr.F32Load, is Node.Instr.F64Load,
+                is Node.Instr.I32Load8S, is Node.Instr.I32Load8U, is Node.Instr.I32Load16U, is Node.Instr.I32Load16S,
+                is Node.Instr.I64Load8S, is Node.Instr.I64Load8U, is Node.Instr.I64Load16U, is Node.Instr.I64Load16S,
+                is Node.Instr.I64Load32S, is Node.Instr.I64Load32U ->
+                    injectBeforeLastStackCount(Insn.MemNeededOnStack, 1)
                 // Storage requires "mem" before the single param
                 is Node.Instr.I32Store, is Node.Instr.I64Store, is Node.Instr.F32Store, is Node.Instr.F64Store,
                 is Node.Instr.I32Store8, is Node.Instr.I32Store16, is Node.Instr.I64Store8, is Node.Instr.I64Store16,
@@ -68,6 +75,7 @@ open class InsnReworker {
             }
 
             // Add the current diff
+            ctx.trace { "Stack diff is ${insnStackDiff(ctx, insn)} for $insn" }
             stackManips += insnStackDiff(ctx, insn) to index
         }
 
@@ -88,7 +96,7 @@ open class InsnReworker {
         }
         is Node.Instr.Drop -> POP_PARAM
         is Node.Instr.Select -> (POP_PARAM * 3) + PUSH_RESULT
-        is Node.Instr.GetLocal -> POP_PARAM + PUSH_RESULT
+        is Node.Instr.GetLocal -> PUSH_RESULT
         is Node.Instr.SetLocal -> POP_PARAM
         is Node.Instr.TeeLocal -> POP_PARAM + PUSH_RESULT
         is Node.Instr.GetGlobal -> POP_THIS + PUSH_RESULT
@@ -96,12 +104,12 @@ open class InsnReworker {
         is Node.Instr.I32Load, is Node.Instr.I64Load, is Node.Instr.F32Load, is Node.Instr.F64Load,
         is Node.Instr.I32Load8S, is Node.Instr.I32Load8U, is Node.Instr.I32Load16U, is Node.Instr.I32Load16S,
         is Node.Instr.I64Load8S, is Node.Instr.I64Load8U, is Node.Instr.I64Load16U, is Node.Instr.I64Load16S,
-        is Node.Instr.I64Load32S, is Node.Instr.I64Load32U -> POP_MEM + PUSH_RESULT
+        is Node.Instr.I64Load32S, is Node.Instr.I64Load32U -> POP_PARAM + PUSH_RESULT
         is Node.Instr.I32Store, is Node.Instr.I64Store, is Node.Instr.F32Store, is Node.Instr.F64Store,
         is Node.Instr.I32Store8, is Node.Instr.I32Store16, is Node.Instr.I64Store8, is Node.Instr.I64Store16,
-        is Node.Instr.I64Store32 -> POP_MEM + POP_PARAM
-        is Node.Instr.CurrentMemory -> POP_MEM + PUSH_RESULT
-        is Node.Instr.GrowMemory -> POP_MEM + POP_PARAM
+        is Node.Instr.I64Store32 -> POP_PARAM
+        is Node.Instr.CurrentMemory -> PUSH_RESULT
+        is Node.Instr.GrowMemory -> POP_PARAM
         is Node.Instr.I32Const, is Node.Instr.I64Const,
         is Node.Instr.F32Const, is Node.Instr.F64Const -> PUSH_RESULT
         is Node.Instr.I32Add, is Node.Instr.I32Sub, is Node.Instr.I32Mul, is Node.Instr.I32DivS,
@@ -146,10 +154,24 @@ open class InsnReworker {
         else -> TODO()
     }
 
+    fun nonAdjacentMemAccesses(insns: List<Insn>) = insns.fold(0 to false) { (count, lastCouldHaveMem), insn ->
+        val inc =
+            if (lastCouldHaveMem) 0
+            else if (insn == Insn.MemNeededOnStack) 1
+            else if (insn is Insn.Node && insn.insn is Node.Instr.CurrentMemory) 1
+            else 0
+        val couldSetMemNext = if (insn !is Insn.Node) false else when (insn.insn) {
+            is Node.Instr.I32Store, is Node.Instr.I64Store, is Node.Instr.F32Store, is Node.Instr.F64Store,
+            is Node.Instr.I32Store8, is Node.Instr.I32Store16, is Node.Instr.I64Store8, is Node.Instr.I64Store16,
+            is Node.Instr.I64Store32, is Node.Instr.GrowMemory -> true
+            else -> false
+        }
+        (count + inc) to couldSetMemNext
+    }.let { (count, _) -> count }
+
     companion object : InsnReworker() {
         const val POP_THIS = -1
         const val POP_PARAM = -1
-        const val POP_MEM = -1
         const val PUSH_RESULT = 1
         const val NOP = 0
     }

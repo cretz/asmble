@@ -11,7 +11,6 @@ data class Func(
     val access: Int = Opcodes.ACC_PUBLIC,
     val insns: List<AbstractInsnNode> = emptyList(),
     val stack: List<TypeRef> = emptyList(),
-    val memIsLocalVar: Boolean = false,
     val blockStack: List<Block> = emptyList(),
     // Contains index of JumpInsnNode that has a null label
     val ifStack: List<Int> = emptyList()

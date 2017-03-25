@@ -1,6 +1,8 @@
 package asmble.compile.jvm
 
 import asmble.ast.Node
+import org.objectweb.asm.ClassReader
+import org.objectweb.asm.ClassWriter
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
 import org.objectweb.asm.tree.*
@@ -21,10 +23,9 @@ fun KFunction<*>.invokeStatic() =
 fun KFunction<*>.invokeVirtual() =
     MethodInsnNode(Opcodes.INVOKEVIRTUAL, this.declarer.ref.asmName, this.name, this.asmDesc, false)
 
-inline fun <T> forceType(fn: T) = fn
-inline fun <T : Function<*>> forceFnType(fn: T) = fn.reflect()!!
+inline fun <T : Function<*>> forceFnType(fn: T) = fn as KFunction<*>
 
-val KClass<*>.ref: TypeRef get() = this.java.ref
+val KClass<*>.ref: TypeRef get() = (if (this == Void::class) Void.TYPE else this.java).ref
 
 fun <T : Exception> KClass<T>.athrow(msg: String) = listOf(
     TypeInsnNode(Opcodes.NEW, this.ref.asmName),
@@ -79,6 +80,10 @@ val Double.const: AbstractInsnNode get() = when (this) {
 
 val String.const: AbstractInsnNode get() = LdcInsnNode(this)
 
+fun Node.Func.localByIndex(index: Int) =
+    this.type.params.getOrNull(index) ?: this.locals.getOrNull(index) ?: error("No local at index $index")
+val Node.Func.localsSize: Int get() = this.type.params.size + this.locals.size
+
 val Node.Type.Value.kclass: KClass<*> get() = when (this) {
     Node.Type.Value.I32 -> Int::class
     Node.Type.Value.I64 -> Long::class
@@ -97,3 +102,11 @@ val AbstractInsnNode.isTerminating: Boolean get() = when (this.opcode) {
 
 val Node.Type.Func.asmDesc: String get() =
     (this.ret?.typeRef ?: Void::class.ref).asMethodRetDesc(*this.params.map { it.typeRef }.toTypedArray())
+
+fun ClassNode.withComputedFramesAndMaxs(): ClassNode {
+    val cw = ClassWriter(ClassWriter.COMPUTE_FRAMES + ClassWriter.COMPUTE_MAXS)
+    this.accept(cw)
+    val newNode = ClassNode()
+    ClassReader(cw.toByteArray()).accept(newNode, 0)
+    return newNode
+}

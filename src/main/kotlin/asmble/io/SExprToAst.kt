@@ -82,7 +82,7 @@ open class SExprToAst {
             toInstrs(offsetMulti, 1, ExprContext(nameMap)).first
         } else toExprMaybe(offsetMulti, ExprContext(nameMap))
         currIndex++
-        val strs = exp.vals.drop(currIndex + 1).fold("") { str, sym -> str + (sym as SExpr.Symbol).contents }
+        val strs = exp.vals.drop(currIndex).fold("") { str, sym -> str + (sym as SExpr.Symbol).contents }
         return Node.Data(index ?: 0, instrs, strs.toByteArray(Charsets.UTF_8))
     }
 

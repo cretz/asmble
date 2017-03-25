@@ -1,7 +1,9 @@
-package asmble.io
+package asmble
 
 import asmble.ast.SExpr
 import asmble.ast.Script
+import asmble.io.SExprToAst
+import asmble.io.StrToSExpr
 import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.nio.file.Paths

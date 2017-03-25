@@ -2,6 +2,7 @@ package asmble.compile.jvm
 
 import asmble.ast.Node
 import asmble.util.Either
+import asmble.util.Logger
 import org.objectweb.asm.Type
 import org.objectweb.asm.tree.ClassNode
 
@@ -9,14 +10,17 @@ data class ClsContext(
     val packageName: String,
     val className: String,
     val mod: Node.Module,
-    val cls: ClassNode,
+    val cls: ClassNode = ClassNode().let { it.name = className; it },
     val mem: Mem = ByteBufferMem,
     val reworker: InsnReworker = InsnReworker,
-    val nonAdjacentMemAccessesRequiringLocalVar: Int = 3
-) {
+    val nonAdjacentMemAccessesRequiringLocalVar: Int = 3,
+    val logger: Logger = Logger.Print(Logger.Level.OFF),
+    val eagerFailLargeMemOffset: Boolean = true,
+    val preventMemIndexOverflow: Boolean = false
+) : Logger by logger {
     val importFuncs: List<Node.Import> by lazy { mod.imports.filter { it.kind is Node.Import.Kind.Func } }
     val importGlobals: List<Node.Import> by lazy { mod.imports.filter { it.kind is Node.Import.Kind.Global } }
-    val thisRef = TypeRef(Type.getObjectType(packageName.replace('.', '/') + className))
+    val thisRef = TypeRef(Type.getObjectType(packageName.replace('.', '/') + "/$className"))
 
     fun funcAtIndex(index: Int) = importFuncs.getOrNull(index).let {
         when (it) {
