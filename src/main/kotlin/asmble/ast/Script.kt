@@ -9,7 +9,7 @@ data class Script(val commands: List<Cmd>) {
             data class Get(val name: String?, val string: String): Action()
         }
         sealed class Assertion: Cmd() {
-            data class Return(val action: Action, val exprs: List<Node.Instr>): Assertion()
+            data class Return(val action: Action, val exprs: List<List<Node.Instr>>): Assertion()
             data class ReturnNan(val action: Action): Assertion()
             data class Trap(val action: Action, val failure: String): Assertion()
             data class Malformed(val module: Node.Module, val failure: String): Assertion()

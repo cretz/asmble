@@ -18,8 +18,8 @@ open class StrToSExpr {
             ret += state.nextSExpr() ?: break
             if (state.err != null) return ParseResult.Error(str.posFromOffset(state.offset), state.err!!)
         }
-        val retVals = if (ret.size == 1 && ret[0] is SExpr.Multi) (ret[0] as SExpr.Multi).vals else ret
-        return ParseResult.Success(retVals, state.exprOffsetMap)
+//        val retVals = if (ret.size == 1 && ret[0] is SExpr.Multi) (ret[0] as SExpr.Multi).vals else ret
+        return ParseResult.Success(ret, state.exprOffsetMap)
     }
 
     private class ParseState(

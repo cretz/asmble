@@ -1,5 +1,6 @@
 package asmble
 
+import asmble.ast.SExpr
 import asmble.io.AstToSExpr
 import asmble.io.SExprToStr
 import asmble.run.jvm.ScriptContext
@@ -12,7 +13,7 @@ import java.io.StringWriter
 import kotlin.test.assertEquals
 
 @RunWith(Parameterized::class)
-class CoreTest(val unit: CoreTestUnit) : Logger by Logger.Print(Logger.Level.INFO) {
+class CoreTest(val unit: CoreTestUnit) : Logger by Logger.Print(Logger.Level.TRACE) {
 
     @Test
     fun testName() {
@@ -32,7 +33,7 @@ class CoreTest(val unit: CoreTestUnit) : Logger by Logger.Print(Logger.Level.INF
         // This will fail assertions as necessary
         unit.script.commands.fold(scriptContext, ScriptContext::runCommand)
 
-        assertEquals(unit.expectedOutput, out.toString())
+        unit.expectedOutput?.let { assertEquals(it, out.toString()) }
     }
 
     companion object {

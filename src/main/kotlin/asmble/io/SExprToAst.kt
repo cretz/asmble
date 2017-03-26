@@ -33,7 +33,7 @@ open class SExprToAst {
         return when(exp.vals.first().symbolStr()) {
             "assert_return" ->
                 Script.Cmd.Assertion.Return(toAction(mult),
-                    exp.vals.drop(2).flatMap { toExprMaybe(it as SExpr.Multi, ExprContext(emptyMap())) })
+                    exp.vals.drop(2).map { toExprMaybe(it as SExpr.Multi, ExprContext(emptyMap())) })
             "assert_return_nan" ->
                 Script.Cmd.Assertion.ReturnNan(toAction(mult))
             "assert_trap" ->
@@ -525,6 +525,7 @@ open class SExprToAst {
     fun toOpMaybe(exp: SExpr.Multi, offset: Int, ctx: ExprContext): Pair<Node.Instr, Int>? {
         if (offset >= exp.vals.size) return null
         val head = exp.vals[offset].symbol()!!
+        fun varIsStringRef() = exp.vals[offset + 1].symbolStr()?.firstOrNull() == '$'
         fun oneVar() = toVar(exp.vals[offset + 1].symbol()!!, ctx.nameMap)
         val op = InstrOp.strToOpMap[head.contents]
         return when(op) {
@@ -532,12 +533,14 @@ open class SExprToAst {
             is InstrOp.ControlFlowOp.NoArg -> Pair(op.create, 1)
             is InstrOp.ControlFlowOp.TypeArg -> return null // Type not handled here
             is InstrOp.ControlFlowOp.DepthArg -> {
-                // Depth is special, because we actually subtract from our current depth
-                Pair(op.create(ctx.blockDepth - oneVar()), 2)
+                // Named depth is special, because we actually subtract from our current depth
+                if (varIsStringRef()) Pair(op.create(ctx.blockDepth - oneVar()), 2)
+                else Pair(op.create(oneVar()), 2)
             }
             is InstrOp.ControlFlowOp.TableArg -> {
+                require(!varIsStringRef()) { "String refs not supported in br_table yet" }
                 val vars = exp.vals.drop(offset + 1).takeUntilNullLazy { toVarMaybe(it, ctx.nameMap) }
-                Pair(op.create(vars.dropLast(1), vars.last()), offset + vars.size)
+                Pair(op.create(vars.dropLast(1), vars.last()), offset + 1 + vars.size)
             }
             is InstrOp.CallOp.IndexArg -> Pair(op.create(oneVar()), 2)
             is InstrOp.CallOp.IndexReservedArg -> Pair(op.create(oneVar(), false), 2)
@@ -562,8 +565,8 @@ open class SExprToAst {
                 Pair(op.create(instrAlign, instrOffset), count)
             }
             is InstrOp.MemOp.ReservedArg -> Pair(op.create(false), 1)
-            is InstrOp.ConstOp.IntArg -> Pair(op.create(exp.vals[offset + 1].symbol()!!.contents.toInt()), 2)
-            is InstrOp.ConstOp.LongArg -> Pair(op.create(exp.vals[offset + 1].symbol()!!.contents.toLong()), 2)
+            is InstrOp.ConstOp.IntArg -> Pair(op.create(exp.vals[offset + 1].symbol()!!.contents.toIntConst()), 2)
+            is InstrOp.ConstOp.LongArg -> Pair(op.create(exp.vals[offset + 1].symbol()!!.contents.toLongConst()), 2)
             is InstrOp.ConstOp.FloatArg -> Pair(op.create(exp.vals[offset + 1].symbol()!!.contents.toFloat()), 2)
             is InstrOp.ConstOp.DoubleArg -> Pair(op.create(exp.vals[offset + 1].symbol()!!.contents.toDouble()), 2)
             is InstrOp.CompareOp.NoArg -> Pair(op.create, 1)
@@ -661,6 +664,11 @@ open class SExprToAst {
             }
         }
     }
+
+    private fun String.toIntConst() =
+        if (this.startsWith("0x")) this.substring(2).toInt(16) else this.toInt()
+    private fun String.toLongConst() =
+        if (this.startsWith("0x")) this.substring(2).toLong(16) else this.toLong()
 
     private fun SExpr.requireSymbol(contents: String, quotedCheck: Boolean? = null) {
         if (this is SExpr.Symbol && this.contents == contents &&

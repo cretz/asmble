@@ -39,7 +39,7 @@ class CoreTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             val fs = if (uri.scheme == "jar") FileSystems.newFileSystem(uri, emptyMap<String, Any>()) else null
             fs.use { fs ->
                 val path = fs?.getPath(basePath) ?: Paths.get(uri)
-                return Files.walk(path, 1).filter { it.toString().endsWith("address.wast") }.map {
+                return Files.walk(path, 1).filter { it.toString().endsWith("block.wast") }.map {
                     val name = it.fileName.toString().substringBeforeLast(".wast")
                     CoreTestUnit(
                         name = name,

@@ -74,19 +74,19 @@ data class Func(
         }
     }
 
-    fun pushBlock(insn: Node.Instr) = copy(blockStack = blockStack + Block.NoLabel(insn, insns.size))
+    fun pushBlock(insn: Node.Instr) = copy(blockStack = blockStack + Block(insn, insns.size, stack))
 
     fun popBlock() = copy(blockStack = blockStack.dropLast(1)) to blockStack.last()
 
-    fun blockAtDepth(depth: Int) = blockStack[blockStack.size - depth].let { block ->
+    fun blockAtDepth(depth: Int) = blockStack[blockStack.size - depth - 1].let { block ->
         when (block) {
+            is Block.WithLabel -> this to block
             // We have to lazily create it here
-            is Block.NoLabel -> blockStack.toMutableList().let {
+            else -> blockStack.toMutableList().let {
                 val newBlock = block.withLabel(LabelNode())
-                it[blockStack.size - depth] = newBlock
+                it[blockStack.size - depth - 1] = newBlock
                 copy(blockStack = it) to newBlock
             }
-            is Block.WithLabel -> this to block
         }
     }
 
@@ -96,25 +96,23 @@ data class Func(
 
     fun popIf() = copy(ifStack = ifStack.dropLast(1)) to peekIf()
 
-    sealed class Block {
-        abstract val insn: Node.Instr
-        abstract val startIndex: Int
-        abstract val maybeLabel: LabelNode?
+    open class Block(
+        val insn: Node.Instr,
+        val startIndex: Int,
+        val origStack: List<TypeRef>
+    ) {
+        open val label: LabelNode? get() = null
+        open val blockExitVals: List<TypeRef?> = emptyList()
+        fun withLabel(label: LabelNode) = WithLabel(insn, startIndex, origStack, label)
+        val insnType: Node.Type.Value? get() = (insn as? Node.Instr.Args.Type)?.type
 
-        data class NoLabel(
-            override val insn: Node.Instr,
-            override val startIndex: Int
-        ) : Block() {
-            override val maybeLabel: LabelNode? get() = null
-            fun withLabel(label: LabelNode) = WithLabel(insn, startIndex, label)
-        }
-
-        data class WithLabel(
-            override val insn: Node.Instr,
-            override val startIndex: Int,
-            val label: LabelNode
-        ) : Block() {
-            override val maybeLabel: LabelNode? get() = label
+        class WithLabel(
+            insn: Node.Instr,
+            startIndex: Int,
+            origStack: List<TypeRef>,
+            override val label: LabelNode
+        ) : Block(insn, startIndex, origStack) {
+            override var blockExitVals: List<TypeRef?> = emptyList()
         }
     }
 }

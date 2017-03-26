@@ -38,6 +38,11 @@ fun <T : Exception> KClass<T>.athrow(msg: String) = listOf(
         Void::class.ref.asMethodRetDesc(String::class.ref), false)
 )
 
+// Ug: https://youtrack.jetbrains.com/issue/KT-17064
+fun KClass<*>.invokeStatic(name: String, retType: KClass<*>, vararg params: KClass<*>) =
+    MethodInsnNode(Opcodes.INVOKESTATIC, this.javaObjectType.ref.asmName, name,
+        retType.ref.asMethodRetDesc(*params.map { it.ref }.toTypedArray()), false)
+
 val Class<*>.ref: TypeRef get() = TypeRef(Type.getType(this))
 
 val Class<*>.valueType: Node.Type.Value? get() = when (this) {

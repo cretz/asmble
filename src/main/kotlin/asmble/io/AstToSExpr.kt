@@ -12,14 +12,22 @@ open class AstToSExpr {
     }
 
     fun fromAssertion(v: Script.Cmd.Assertion) = when(v) {
-        is Script.Cmd.Assertion.Return -> newMulti("assert_return") + fromAction(v.action) + fromInstrs(v.exprs)
-        is Script.Cmd.Assertion.ReturnNan -> newMulti("assert_return_nan") + fromAction(v.action)
-        is Script.Cmd.Assertion.Trap -> newMulti("assert_trap") + fromAction(v.action) + v.failure
-        is Script.Cmd.Assertion.Malformed -> newMulti("assert_malformed") + fromModule(v.module) + v.failure
-        is Script.Cmd.Assertion.Invalid -> newMulti("assert_invalid") + fromModule(v.module) + v.failure
-        is Script.Cmd.Assertion.SoftInvalid -> newMulti("assert_soft_invalid") + fromModule(v.module) + v.failure
-        is Script.Cmd.Assertion.Unlinkable -> newMulti("assert_unlinkable") + fromModule(v.module) + v.failure
-        is Script.Cmd.Assertion.TrapModule -> newMulti("assert_trap") + fromModule(v.module) + v.failure
+        is Script.Cmd.Assertion.Return ->
+            newMulti("assert_return") + fromAction(v.action) + v.exprs.flatMap(this::fromInstrs)
+        is Script.Cmd.Assertion.ReturnNan ->
+            newMulti("assert_return_nan") + fromAction(v.action)
+        is Script.Cmd.Assertion.Trap ->
+            newMulti("assert_trap") + fromAction(v.action) + v.failure
+        is Script.Cmd.Assertion.Malformed ->
+            newMulti("assert_malformed") + fromModule(v.module) + v.failure
+        is Script.Cmd.Assertion.Invalid ->
+            newMulti("assert_invalid") + fromModule(v.module) + v.failure
+        is Script.Cmd.Assertion.SoftInvalid ->
+            newMulti("assert_soft_invalid") + fromModule(v.module) + v.failure
+        is Script.Cmd.Assertion.Unlinkable ->
+            newMulti("assert_unlinkable") + fromModule(v.module) + v.failure
+        is Script.Cmd.Assertion.TrapModule ->
+            newMulti("assert_trap") + fromModule(v.module) + v.failure
     }
 
     fun fromCmd(v: Script.Cmd): SExpr.Multi = when(v) {

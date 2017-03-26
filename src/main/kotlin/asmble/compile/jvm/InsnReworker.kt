@@ -27,13 +27,14 @@ open class InsnReworker {
         var insnsToInject = emptyMap<Int, List<Insn>>()
         fun injectBeforeLastStackCount(insn: Insn, count: Int) {
             ctx.trace { "Injecting $insn back $count stack values" }
+            fun inject(index: Int) {
+                insnsToInject += index to (insnsToInject[index]?.let { listOf(insn) + it } ?: listOf(insn))
+            }
+            if (count == 0) return inject(stackManips.size)
             var countSoFar = 0
             for ((amountChanged, insnIndex) in stackManips.asReversed()) {
                 countSoFar += amountChanged
-                if (countSoFar == count) {
-                    insnsToInject += insnIndex to (insnsToInject[insnIndex]?.let { listOf(insn) + it } ?: listOf(insn))
-                    return
-                }
+                if (countSoFar == count) return inject(insnIndex)
             }
             error("Unable to find place to inject $insn")
         }
@@ -87,6 +88,10 @@ open class InsnReworker {
     }
 
     fun insnStackDiff(ctx: ClsContext, insn: Node.Instr) = when (insn) {
+        is Node.Instr.Unreachable, is Node.Instr.Nop, is Node.Instr.Block,
+        is Node.Instr.Loop, is Node.Instr.If, is Node.Instr.Else,
+        is Node.Instr.End, is Node.Instr.Br, is Node.Instr.BrIf,
+        is Node.Instr.BrTable, is Node.Instr.Return -> NOP
         is Node.Instr.Call -> ctx.funcTypeAtIndex(insn.index).let {
             // All calls pop "this" + params, and any return is a push
             POP_THIS + (POP_PARAM + it.params.size) + (if (it.ret == null) NOP else PUSH_RESULT)
@@ -151,7 +156,6 @@ open class InsnReworker {
         is Node.Instr.F64ConvertSI64, is Node.Instr.F64ConvertUI64, is Node.Instr.F64PromoteF32,
         is Node.Instr.I32ReinterpretF32, is Node.Instr.I64ReinterpretF64, is Node.Instr.F32ReinterpretI32,
         is Node.Instr.F64ReinterpretI64 -> POP_PARAM + PUSH_RESULT
-        else -> TODO()
     }
 
     fun nonAdjacentMemAccesses(insns: List<Insn>) = insns.fold(0 to false) { (count, lastCouldHaveMem), insn ->

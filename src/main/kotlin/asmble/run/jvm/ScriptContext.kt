@@ -17,7 +17,8 @@ data class ScriptContext(
     val registrations: Map<String, Module> = emptyMap(),
     val logger: Logger = Logger.Print(Logger.Level.OFF),
     val adjustContext: (ClsContext) -> ClsContext = { it },
-    val classLoader: SimpleClassLoader = ScriptContext.SimpleClassLoader(ScriptContext::class.java.classLoader),
+    val classLoader: SimpleClassLoader =
+        ScriptContext.SimpleClassLoader(ScriptContext::class.java.classLoader, logger),
     val exceptionTranslator: ExceptionTranslator = ExceptionTranslator
 ) {
     fun withHarnessRegistered(out: PrintWriter = PrintWriter(System.out, true)) =
@@ -37,8 +38,23 @@ data class ScriptContext(
 
     fun doAssertion(cmd: Script.Cmd.Assertion) {
         when (cmd) {
+            is Script.Cmd.Assertion.Return -> assertReturn(cmd)
             is Script.Cmd.Assertion.Trap -> assertTrap(cmd)
+            is Script.Cmd.Assertion.Invalid -> assertInvalid(cmd)
             else -> TODO()
+        }
+    }
+
+    fun assertReturn(ret: Script.Cmd.Assertion.Return) {
+        require(ret.exprs.size < 2)
+        val (retType, retVal) = doAction(ret.action)
+        when (retType) {
+            null -> if (ret.exprs.isNotEmpty()) throw AssertionError("Got empty return, expected not empty")
+            else -> {
+                if (ret.exprs.isEmpty()) throw AssertionError("Got return, expected empty")
+                val expectedVal = runExpr(ret.exprs.first(), retType)
+                if (retVal != expectedVal) throw AssertionError("Expected $expectedVal, got $retVal")
+            }
         }
     }
 
@@ -48,6 +64,19 @@ data class ScriptContext(
             val innerEx = if (e is InvocationTargetException) e.targetException else e
             exceptionTranslator.translateOrRethrow(innerEx).let {
                 if (it != trap.failure) throw AssertionError("Expected failure '${trap.failure}' got '$it'")
+            }
+        }
+    }
+
+    fun assertInvalid(invalid: Script.Cmd.Assertion.Invalid) {
+        try {
+            val className = "invalid" + UUID.randomUUID().toString().replace("-", "")
+            compileModule(invalid.module, className, null)
+            throw AssertionError("Expected invalid module with error '${invalid.failure}', was valid")
+        } catch (e: Throwable) {
+            val innerEx = if (e is InvocationTargetException) e.targetException else e
+            exceptionTranslator.translateOrRethrow(innerEx).let {
+                if (it != invalid.failure) throw AssertionError("Expected invalid '${invalid.failure}' got '$it'")
             }
         }
     }
@@ -99,8 +128,8 @@ data class ScriptContext(
                 instructions = insns
             ))
         )
-        val name = "expr" + UUID.randomUUID().toString().replace("-", "")
-        val compiled = compileModule(mod, name, null)
+        val className = "expr" + UUID.randomUUID().toString().replace("-", "")
+        val compiled = compileModule(mod, className, null)
         return MethodHandles.lookup().bind(compiled.instance, "expr",
             MethodType.methodType(retType?.jclass ?: Void.TYPE))
     }
@@ -163,10 +192,13 @@ data class ScriptContext(
         }
     }
 
-    open class SimpleClassLoader(parent: ClassLoader) : ClassLoader(parent) {
-        fun fromBuiltContext(ctx: ClsContext) = ctx.cls.withComputedFramesAndMaxs().let { bytes ->
-            ctx.debug { "ASM Class:\n" + bytes.asClassNode().toAsmString() }
-            defineClass("${ctx.packageName}.${ctx.className}",  bytes, 0, bytes.size)
+    open class SimpleClassLoader(parent: ClassLoader, logger: Logger) : ClassLoader(parent), Logger by logger {
+        fun fromBuiltContext(ctx: ClsContext): Class<*> {
+            ctx.trace { "Computing frames for ASM class:\n" + ctx.cls.toAsmString() }
+            return ctx.cls.withComputedFramesAndMaxs().let { bytes ->
+                ctx.debug { "ASM class:\n" + bytes.asClassNode().toAsmString() }
+                defineClass("${ctx.packageName}.${ctx.className}",  bytes, 0, bytes.size)
+            }
         }
     }
 }
