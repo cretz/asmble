@@ -48,7 +48,7 @@ data class Func(
 
     fun toMethodNode(): MethodNode {
         require(stack.isEmpty(), { "Stack not empty for $name when compiling" })
-        require(insns.lastOrNull()?.isTerminating ?: false, { "Last insn for $name is not terminating" })
+        require(insns.lastOrNull()?.isTerminating ?: false, { "Last insn for $name$desc is not terminating" })
         val ret = MethodNode(access, name, desc, null, null)
         insns.forEach(ret.instructions::add)
         return ret

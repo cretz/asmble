@@ -19,7 +19,7 @@ open class SExprToAst {
         index++
         return when(exp.vals.first().symbolStr()) {
             "invoke" ->
-                Script.Cmd.Action.Invoke(name, str, exp.vals.drop(index).flatMap {
+                Script.Cmd.Action.Invoke(name, str, exp.vals.drop(index).map {
                     toExprMaybe(it as SExpr.Multi, ExprContext(emptyMap()))
                 })
             "get" ->
@@ -61,14 +61,14 @@ open class SExprToAst {
 
     fun toCmd(exp: SExpr.Multi): Script.Cmd {
         val expName = exp.vals.first().symbolStr()
-        when(expName) {
-            "module" -> return Script.Cmd.Module(toModule(exp).second)
-            "register" -> return toRegister(exp)
-            "invoke", "get" -> return toAction(exp)
+        return when(expName) {
+            "module" -> toModule(exp).let { Script.Cmd.Module(it.second, it.first) }
+            "register" -> toRegister(exp)
+            "invoke", "get" -> toAction(exp)
             "assert_return", "assert_return_nan", "assert_trap", "assert_malformed",
-                "assert_invalid", "assert_soft_invalid", "assert_unlinkable" -> return toAssertion(exp)
-            "script", "input", "output" -> return toMeta(exp)
-            else -> throw Exception("Unrecognized cmd expr '$expName'")
+                "assert_invalid", "assert_soft_invalid", "assert_unlinkable" -> toAssertion(exp)
+            "script", "input", "output" -> toMeta(exp)
+            else -> error("Unrecognized cmd expr '$expName'")
         }
     }
 

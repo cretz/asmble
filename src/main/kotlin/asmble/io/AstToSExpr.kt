@@ -7,7 +7,7 @@ import asmble.ast.Script
 open class AstToSExpr {
 
     fun fromAction(v: Script.Cmd.Action) = when(v) {
-        is Script.Cmd.Action.Invoke -> newMulti("invoke", v.name) + v.string + fromInstrs(v.exprs)
+        is Script.Cmd.Action.Invoke -> newMulti("invoke", v.name) + v.string + v.exprs.flatMap(this::fromInstrs)
         is Script.Cmd.Action.Get -> newMulti("get", v.name) + v.string
     }
 

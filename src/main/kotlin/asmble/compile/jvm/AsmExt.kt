@@ -6,6 +6,9 @@ import org.objectweb.asm.ClassWriter
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
 import org.objectweb.asm.tree.*
+import org.objectweb.asm.util.TraceClassVisitor
+import java.io.PrintWriter
+import java.io.StringWriter
 import kotlin.reflect.KClass
 import kotlin.reflect.KFunction
 import kotlin.reflect.KProperty
@@ -37,11 +40,20 @@ fun <T : Exception> KClass<T>.athrow(msg: String) = listOf(
 
 val Class<*>.ref: TypeRef get() = TypeRef(Type.getType(this))
 
+val Class<*>.valueType: Node.Type.Value? get() = when (this) {
+    Void.TYPE -> null
+    Int::class.java -> Node.Type.Value.I32
+    Long::class.java -> Node.Type.Value.I64
+    Float::class.java -> Node.Type.Value.F32
+    Double::class.java -> Node.Type.Value.F64
+    else -> error("Unrecognized value type class: $this")
+}
+
 val KProperty<*>.declarer: Class<*> get() = this.javaField!!.declaringClass
 val KProperty<*>.asmDesc: String get() = Type.getDescriptor(this.javaField!!.type)
 
 fun KProperty<*>.getStatic() =
-    FieldInsnNode(Opcodes.GETSTATIC, this.declarer.ref.asmDesc, this.name, this.asmDesc)
+    FieldInsnNode(Opcodes.GETSTATIC, this.declarer.ref.asmName, this.name, this.asmDesc)
 
 val Int.const: AbstractInsnNode get() = when (this) {
     -1 -> InsnNode(Opcodes.ICONST_M1)
@@ -103,10 +115,20 @@ val AbstractInsnNode.isTerminating: Boolean get() = when (this.opcode) {
 val Node.Type.Func.asmDesc: String get() =
     (this.ret?.typeRef ?: Void::class.ref).asMethodRetDesc(*this.params.map { it.typeRef }.toTypedArray())
 
-fun ClassNode.withComputedFramesAndMaxs(): ClassNode {
+fun ClassNode.withComputedFramesAndMaxs(): ByteArray {
     val cw = ClassWriter(ClassWriter.COMPUTE_FRAMES + ClassWriter.COMPUTE_MAXS)
     this.accept(cw)
+    return cw.toByteArray()
+}
+
+fun ClassNode.toAsmString(): String {
+    val stringWriter = StringWriter()
+    this.accept(TraceClassVisitor(PrintWriter(stringWriter)))
+    return stringWriter.toString()
+}
+
+fun ByteArray.asClassNode(): ClassNode {
     val newNode = ClassNode()
-    ClassReader(cw.toByteArray()).accept(newNode, 0)
+    ClassReader(this).accept(newNode, 0)
     return newNode
 }

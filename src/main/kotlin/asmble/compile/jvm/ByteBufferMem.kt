@@ -95,7 +95,7 @@ open class ByteBufferMem(val direct: Boolean = true) : Mem {
             this.popExpecting(Int::class.ref).toUnsigned(fn).push(Long::class.ref)
         */
         fun Func.toUnsigned(owner: KClass<*>, methodName: String, inClass: KClass<*>) =
-            this.addInsns(MethodInsnNode(Opcodes.INVOKEVIRTUAL, owner.ref.asmName, methodName,
+            this.addInsns(MethodInsnNode(Opcodes.INVOKESTATIC, owner.ref.asmName, methodName,
                 Type.getMethodDescriptor(Int::class.ref.asm, inClass.ref.asm), false))
         fun Func.toUnsigned32(owner: KClass<*>, methodName: String, inClass: KClass<*>) =
             this.popExpecting(Int::class.ref).toUnsigned(owner, methodName, inClass).push(Int::class.ref)

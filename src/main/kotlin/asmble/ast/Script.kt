@@ -2,10 +2,10 @@ package asmble.ast
 
 data class Script(val commands: List<Cmd>) {
     sealed class Cmd {
-        data class Module(val module: Node.Module): Cmd()
+        data class Module(val module: Node.Module, val name: String?): Cmd()
         data class Register(val string: String, val name: String?): Cmd()
         sealed class Action: Cmd() {
-            data class Invoke(val name: String?, val string: String, val exprs: List<Node.Instr>): Action()
+            data class Invoke(val name: String?, val string: String, val exprs: List<List<Node.Instr>>): Action()
             data class Get(val name: String?, val string: String): Action()
         }
         sealed class Assertion: Cmd() {
