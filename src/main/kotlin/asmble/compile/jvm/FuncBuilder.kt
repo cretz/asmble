@@ -424,17 +424,23 @@ open class FuncBuilder {
     fun applyBr(ctx: FuncContext, fn: Func, i: Node.Instr.Br) =
         fn.blockAtDepth(i.relativeDepth).let { (fn, block) ->
             fn.addInsns(JumpInsnNode(Opcodes.GOTO, block.label)).let { fn ->
+                // We only peek here, because we keep items on the stack for
+                // dead code that uses it
                 block.insnType?.typeRef?.let { typ ->
-                    fn.popExpecting(typ).also { block.blockExitVals += typ }
-                } ?: fn
+                    fn.peekExpecting(typ)
+                    block.blockExitVals += i to typ
+                }
+                fn
             }
         }
 
     fun applyBrIf(ctx: FuncContext, fn: Func, i: Node.Instr.BrIf) =
         fn.blockAtDepth(i.relativeDepth).let { (fn, block) ->
             fn.popExpecting(Int::class.ref).addInsns(JumpInsnNode(Opcodes.IFNE, block.label)).let { fn ->
-                // We don't have to pop this like we do with br, because it's conditional
-                block.insnType?.typeRef?.let { block.blockExitVals += it }
+                block.insnType?.typeRef?.let {
+                    fn.peekExpecting(it)
+                    block.blockExitVals += i to it
+                }
                 fn
             }
         }
@@ -442,17 +448,25 @@ open class FuncBuilder {
     // Can compile quite cleanly as a table switch on the JVM
     fun applyBrTable(ctx: FuncContext, fn: Func, insn: Node.Instr.BrTable) =
         fn.blockAtDepth(insn.default).let { (fn, defaultBlock) ->
-            defaultBlock.insnType?.typeRef?.let { defaultBlock.blockExitVals += it }
+            defaultBlock.insnType?.typeRef?.let { defaultBlock.blockExitVals += insn to it }
             insn.targetTable.fold(fn to emptyList<LabelNode>()) { (fn, labels), targetDepth ->
                 fn.blockAtDepth(targetDepth).let { (fn, targetBlock) ->
-                    targetBlock.insnType?.typeRef?.let { targetBlock.blockExitVals += it }
+                    targetBlock.insnType?.typeRef?.let { targetBlock.blockExitVals += insn to it }
                     fn to (labels + targetBlock.label)
                 }
             }.let { (fn, targetLabels) ->
-                fn.popExpecting(Int::class.ref).addInsns(TableSwitchInsnNode(0, targetLabels.size - 1,
-                    defaultBlock.label, *targetLabels.toTypedArray()))
+                // In some cases, the target labels is empty. We need to make 0 goto
+                // the default as well.
+                val targetLabelsArr =
+                    if (targetLabels.isNotEmpty()) targetLabels.toTypedArray()
+                    else arrayOf(defaultBlock.label)
+                fn.popExpecting(Int::class.ref).addInsns(TableSwitchInsnNode(0, targetLabelsArr.size - 1,
+                    defaultBlock.label, *targetLabelsArr))
             }.let { fn ->
-                defaultBlock.insnType?.typeRef?.let { fn.popExpecting(it) } ?: fn
+                // We only peek here, because we keep items on the stack for
+                // dead code that uses it
+                defaultBlock.insnType?.typeRef?.let { fn.peekExpecting(it) }
+                fn
             }
         }
 
@@ -466,23 +480,30 @@ open class FuncBuilder {
     fun applyEnd(ctx: FuncContext, fn: Func) = fn.popBlock().let { (fn, block) ->
         // Go over each exit and make sure it did the right thing
         block.blockExitVals.forEach {
-            require(it == block.insnType?.typeRef) { "Block exit val was $it, expected ${block.insnType}" }
+            require(it.second == block.insnType?.typeRef) { "Block exit val was $it, expected ${block.insnType}" }
         }
         // We need to check the current stack
         when (block.insnType) {
             null -> {
-                require(fn.stack == block.origStack) {
-                    "At block end, expected stack ${block.origStack}, got ${fn.stack}"
-                }
+                if (fn.stack != block.origStack) throw CompileErr.BlockEndMismatch(block.origStack, null, fn.stack)
                 fn
             }
             else -> {
                 val typ = block.insnType!!.typeRef
-                require(fn.stack == block.origStack || fn.stack == block.origStack + typ) {
-                    "At block end, expected stack ${block.origStack} and maybe $typ, got ${fn.stack}"
-                }
-                // We have to add the expected type ourselves, there wasn't a fall through...
-                if (fn.stack.size == block.origStack.size) fn.push(typ) else fn
+                val hasOrig = fn.stack == block.origStack
+                val hasExpectedStart = !hasOrig && fn.stack.take(block.origStack.size + 1) == block.origStack + typ
+                if (hasExpectedStart) {
+                    // Extra stack items are always ok, because sometimes dead code
+                    // works with them. Just pop off everything to get back down to
+                    // size.
+                    fn.stack.drop(block.origStack.size  + 1).fold(fn) { fn, _ -> fn.pop().first }
+                } else if (hasOrig && block.blockExitVals.isNotEmpty()) {
+                    // Exact orig stack is ok so long as there was at least one exit.
+                    // This means that there was likely something internally that
+                    // did an unconditional jump and some dead code after it consumed
+                    // the stack.
+                    fn.push(typ)
+                } else throw CompileErr.BlockEndMismatch(block.origStack, typ, fn.stack)
             }
         }.let { fn ->
             when (block.insn) {
@@ -849,7 +870,7 @@ open class FuncBuilder {
                             "invokeExact", funcType.asmDesc, false)
                     )
                     is Either.Right -> fn.popExpecting(ctx.cls.thisRef).addInsns(
-                        MethodInsnNode(Opcodes.INVOKESTATIC, ctx.cls.thisRef.asmName,
+                        MethodInsnNode(Opcodes.INVOKEVIRTUAL, ctx.cls.thisRef.asmName,
                             ctx.cls.funcName(index), funcType.asmDesc, false)
                     )
                 }.let { fn -> funcType.ret?.let { fn.push(it.typeRef) } ?: fn }
@@ -868,7 +889,7 @@ open class FuncBuilder {
         Node.Type.Value.F64 ->
             fn.popExpecting(Double::class.ref).addInsns(InsnNode(Opcodes.DRETURN))
     }.let {
-        require(it.stack.isEmpty()) { "Stack not empty on return" }
+        if (it.stack.isNotEmpty()) throw CompileErr.UnusedStackOnReturn(it.stack)
         it
     }
 

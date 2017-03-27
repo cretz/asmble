@@ -3,6 +3,7 @@ package asmble.compile.jvm
 import asmble.ast.Node
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.tree.*
+import java.util.*
 
 data class Func(
     val name: String,
@@ -32,22 +33,26 @@ data class Func(
 
     fun popExpecting(type: TypeRef) = popExpectingAny(type)
 
-    fun popExpectingNum() = popExpectingAny(Int::class.ref, Long::class.ref, Float::class.ref, Double::class.ref)
-
-    fun popExpectingAny(vararg types: TypeRef) = popExpectingAny(types::contains)
-
-    fun popExpectingAny(pred: (TypeRef) -> Boolean): Func {
-        stack.lastOrNull()?.let { require(pred(it)) { "Stack var type ${stack.last()} unexpected" } }
+    fun popExpectingAny(vararg types: TypeRef): Func {
+        peekExpectingAny(*types)
         return pop().first
     }
 
     fun pop(): Pair<Func, TypeRef> {
-        require(stack.isNotEmpty(), { "Stack is empty" })
+        if (stack.isEmpty()) throw CompileErr.StackMismatch(emptyArray(), null)
         return copy(stack = stack.dropLast(1)) to stack.last()
     }
 
+    fun peekExpecting(type: TypeRef) = peekExpectingAny(type)
+
+    fun peekExpectingAny(vararg types: TypeRef): TypeRef {
+        val hasExpected = stack.lastOrNull()?.let(types::contains) ?: false
+        if (!hasExpected) throw CompileErr.StackMismatch(types, stack.lastOrNull())
+        return stack.last()
+    }
+
     fun toMethodNode(): MethodNode {
-        require(stack.isEmpty(), { "Stack not empty for $name when compiling" })
+        if (stack.isNotEmpty()) throw CompileErr.UnusedStackOnReturn(stack)
         require(insns.lastOrNull()?.isTerminating ?: false, { "Last insn for $name$desc is not terminating" })
         val ret = MethodNode(access, name, desc, null, null)
         insns.forEach(ret.instructions::add)
@@ -102,7 +107,8 @@ data class Func(
         val origStack: List<TypeRef>
     ) {
         open val label: LabelNode? get() = null
-        open val blockExitVals: List<TypeRef?> = emptyList()
+        // First val is the insn, second is the type
+        open val blockExitVals: List<Pair<Node.Instr, TypeRef?>> = emptyList()
         fun withLabel(label: LabelNode) = WithLabel(insn, startIndex, origStack, label)
         val insnType: Node.Type.Value? get() = (insn as? Node.Instr.Args.Type)?.type
 
@@ -112,7 +118,7 @@ data class Func(
             origStack: List<TypeRef>,
             override val label: LabelNode
         ) : Block(insn, startIndex, origStack) {
-            override var blockExitVals: List<TypeRef?> = emptyList()
+            override var blockExitVals: List<Pair<Node.Instr, TypeRef?>> = emptyList()
         }
     }
 }

@@ -3,6 +3,8 @@ package asmble.run.jvm
 import asmble.ast.Node
 import asmble.ast.Script
 import asmble.compile.jvm.*
+import asmble.io.AstToSExpr
+import asmble.io.SExprToStr
 import asmble.util.Logger
 import java.io.PrintWriter
 import java.lang.invoke.MethodHandle
@@ -20,7 +22,7 @@ data class ScriptContext(
     val classLoader: SimpleClassLoader =
         ScriptContext.SimpleClassLoader(ScriptContext::class.java.classLoader, logger),
     val exceptionTranslator: ExceptionTranslator = ExceptionTranslator
-) {
+) : Logger by logger {
     fun withHarnessRegistered(out: PrintWriter = PrintWriter(System.out, true)) =
         copy(registrations = registrations + (
             "spectest" to NativeModule(Harness::class.java, Harness(out))
@@ -60,25 +62,22 @@ data class ScriptContext(
 
     fun assertTrap(trap: Script.Cmd.Assertion.Trap) {
         try { doAction(trap.action).also { throw AssertionError("Expected exception") } }
-        catch (e: Throwable) {
-            val innerEx = if (e is InvocationTargetException) e.targetException else e
-            exceptionTranslator.translateOrRethrow(innerEx).let {
-                if (it != trap.failure) throw AssertionError("Expected failure '${trap.failure}' got '$it'")
-            }
-        }
+        catch (e: Throwable) { assertFailure(e, trap.failure) }
     }
 
     fun assertInvalid(invalid: Script.Cmd.Assertion.Invalid) {
         try {
+            debug { "Compiling invalid: " + SExprToStr.Compact.fromSExpr(AstToSExpr.fromModule(invalid.module)) }
             val className = "invalid" + UUID.randomUUID().toString().replace("-", "")
             compileModule(invalid.module, className, null)
             throw AssertionError("Expected invalid module with error '${invalid.failure}', was valid")
-        } catch (e: Throwable) {
-            val innerEx = if (e is InvocationTargetException) e.targetException else e
-            exceptionTranslator.translateOrRethrow(innerEx).let {
-                if (it != invalid.failure) throw AssertionError("Expected invalid '${invalid.failure}' got '$it'")
-            }
-        }
+        } catch (e: Throwable) { assertFailure(e, invalid.failure) }
+    }
+
+    private fun assertFailure(e: Throwable, expectedString: String) {
+        val innerEx = if (e is InvocationTargetException) e.targetException else e
+        val msg = exceptionTranslator.translate(innerEx) ?: "unknown"
+        if (msg != expectedString) throw AssertionError("Expected failure '$expectedString' got '$msg'", innerEx)
     }
 
     fun doAction(cmd: Script.Cmd.Action) = when (cmd) {
@@ -120,6 +119,7 @@ data class ScriptContext(
     }
 
     fun compileExpr(insns: List<Node.Instr>, retType: Node.Type.Value?): MethodHandle {
+        debug { "Compiling expression: $insns" }
         val mod = Node.Module(
             exports = listOf(Node.Export("expr", Node.ExternalKind.FUNCTION, 0)),
             funcs = listOf(Node.Func(
@@ -194,9 +194,9 @@ data class ScriptContext(
 
     open class SimpleClassLoader(parent: ClassLoader, logger: Logger) : ClassLoader(parent), Logger by logger {
         fun fromBuiltContext(ctx: ClsContext): Class<*> {
-            ctx.trace { "Computing frames for ASM class:\n" + ctx.cls.toAsmString() }
+            trace { "Computing frames for ASM class:\n" + ctx.cls.toAsmString() }
             return ctx.cls.withComputedFramesAndMaxs().let { bytes ->
-                ctx.debug { "ASM class:\n" + bytes.asClassNode().toAsmString() }
+                debug { "ASM class:\n" + bytes.asClassNode().toAsmString() }
                 defineClass("${ctx.packageName}.${ctx.className}",  bytes, 0, bytes.size)
             }
         }

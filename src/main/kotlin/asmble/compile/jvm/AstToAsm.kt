@@ -22,24 +22,25 @@ open class AstToAsm {
     fun addFields(ctx: ClsContext) {
         // First field is always a private final memory field
         // Ug, ambiguity on List<?> +=
-        ctx.cls.fields.plusAssign(FieldNode(Opcodes.ACC_PRIVATE + Opcodes.ACC_FINAL, "memory",
+        ctx.cls.fields.add(FieldNode(Opcodes.ACC_PRIVATE + Opcodes.ACC_FINAL, "memory",
             ctx.mem.memType.asmDesc, null, null))
         // Now all method imports as method handles
-        ctx.cls.fields += ctx.importFuncs.indices.map {
+        // TODO: why does this fail with asm-debug-all but not with just regular asm?
+        ctx.cls.fields.addAll(ctx.importFuncs.indices.map {
             FieldNode(Opcodes.ACC_PRIVATE + Opcodes.ACC_FINAL, ctx.funcName(it),
                 MethodHandle::class.ref.asmDesc, null, null)
-        }
+        })
         // Now all import globals as getter (and maybe setter) method handles
-        ctx.cls.fields += ctx.importGlobals.withIndex().flatMap { (index, import) ->
+        ctx.cls.fields.addAll(ctx.importGlobals.withIndex().flatMap { (index, import) ->
             val ret = listOf(FieldNode(Opcodes.ACC_PRIVATE + Opcodes.ACC_FINAL, ctx.importGlobalGetterFieldName(index),
                 MethodHandle::class.ref.asmDesc, null, null))
             if (!(import.kind as Node.Import.Kind.Global).type.mutable) ret else {
                 ret + FieldNode(Opcodes.ACC_PRIVATE + Opcodes.ACC_FINAL, ctx.importGlobalSetterFieldName(index),
                     MethodHandle::class.ref.asmDesc, null, null)
             }
-        }
+        })
         // Now all non-import globals
-        ctx.cls.fields += ctx.mod.globals.withIndex().map { (index, global) ->
+        ctx.cls.fields.addAll(ctx.mod.globals.withIndex().map { (index, global) ->
             // In the MVP, we can trust the init is constant stuff and a single instr
             require(global.init.size <= 1) { "Global init has more than 1 insn" }
             val init: Number = global.init.firstOrNull().let {
@@ -57,7 +58,7 @@ open class AstToAsm {
             val access = Opcodes.ACC_PRIVATE + if (!global.type.mutable) Opcodes.ACC_FINAL else 0
             FieldNode(access, ctx.globalName(ctx.importGlobals.size + index),
                 global.type.contentType.typeRef.asmDesc, null, init)
-        }
+        })
     }
 
     fun addConstructors(ctx: ClsContext) {
@@ -153,7 +154,7 @@ open class AstToAsm {
             constructors = listOf(regCon) + constructors
         }
 
-        ctx.cls.methods += constructors.map(Func::toMethodNode)
+        ctx.cls.methods.addAll(constructors.map(Func::toMethodNode))
     }
 
     fun addExports(ctx: ClsContext) {
@@ -212,9 +213,9 @@ open class AstToAsm {
     }
 
     fun addFuncs(ctx: ClsContext) {
-        ctx.cls.methods += ctx.mod.funcs.mapIndexed { index, func ->
+        ctx.cls.methods.addAll(ctx.mod.funcs.mapIndexed { index, func ->
             ctx.funcBuilder.fromFunc(ctx, func, ctx.importFuncs.size + index).toMethodNode()
-        }
+        })
     }
 
     companion object : AstToAsm()

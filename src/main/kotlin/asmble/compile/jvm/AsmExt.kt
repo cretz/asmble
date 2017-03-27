@@ -14,7 +14,8 @@ import kotlin.reflect.KFunction
 import kotlin.reflect.KProperty
 import kotlin.reflect.jvm.javaField
 import kotlin.reflect.jvm.javaMethod
-import kotlin.reflect.jvm.reflect
+
+
 
 val <R> KFunction<R>.asmDesc: String get() = Type.getMethodDescriptor(this.javaMethod)
 
@@ -35,7 +36,8 @@ fun <T : Exception> KClass<T>.athrow(msg: String) = listOf(
     InsnNode(Opcodes.DUP),
     msg.const,
     MethodInsnNode(Opcodes.INVOKESPECIAL, this.ref.asmName, "<init>",
-        Void::class.ref.asMethodRetDesc(String::class.ref), false)
+        Void::class.ref.asMethodRetDesc(String::class.ref), false),
+    InsnNode(Opcodes.ATHROW)
 )
 
 // Ug: https://youtrack.jetbrains.com/issue/KT-17064
@@ -114,6 +116,11 @@ val Node.Type.Value.jclass: Class<*> get() = this.kclass.java
 val AbstractInsnNode.isTerminating: Boolean get() = when (this.opcode) {
     Opcodes.ARETURN, Opcodes.ATHROW, Opcodes.DRETURN, Opcodes.FRETURN,
         Opcodes.IRETURN, Opcodes.LRETURN, Opcodes.RETURN -> true
+    else -> false
+}
+
+val AbstractInsnNode.isUnconditionalJump: Boolean get() = when (this.opcode) {
+    Opcodes.GOTO, Opcodes.JSR -> true
     else -> false
 }
 
