@@ -1,11 +1,12 @@
 package asmble.run.jvm
 
-import asmble.compile.jvm.CompileErr
+import asmble.AsmErr
 
 open class ExceptionTranslator {
     fun translate(ex: Throwable): String? = when (ex) {
         is IndexOutOfBoundsException -> "out of bounds memory access"
-        is CompileErr -> ex.asmErrString
+        is StackOverflowError -> "call stack exhausted"
+        is AsmErr -> ex.asmErrString
         else -> null
     }
 

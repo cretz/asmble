@@ -13,15 +13,23 @@ data class Script(val commands: List<Cmd>) {
             data class ReturnNan(val action: Action): Assertion()
             data class Trap(val action: Action, val failure: String): Assertion()
             data class Malformed(val module: Node.Module, val failure: String): Assertion()
-            data class Invalid(val module: Node.Module, val failure: String): Assertion()
+            data class Invalid(val module: LazyModule, val failure: String): Assertion()
             data class SoftInvalid(val module: Node.Module, val failure: String): Assertion()
             data class Unlinkable(val module: Node.Module, val failure: String): Assertion()
             data class TrapModule(val module: Node.Module, val failure: String): Assertion()
+            data class Exhaustion(val action: Action, val failure: String): Assertion()
         }
         sealed class Meta: Cmd() {
             data class Script(val name: String?, val script: asmble.ast.Script): Meta()
             data class Input(val name: String?, val str: String): Meta()
             data class Output(val name: String?, val str: String?): Meta()
         }
+    }
+
+    sealed class LazyModule(l: Lazy<Node.Module>) : Lazy<Node.Module> by l {
+        data class SExpr(
+            val sexpr: asmble.ast.SExpr.Multi,
+            val fn: (asmble.ast.SExpr.Multi) -> Node.Module
+        ) : LazyModule(lazy { fn(sexpr) })
     }
 }

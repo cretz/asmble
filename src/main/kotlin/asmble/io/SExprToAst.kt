@@ -5,6 +5,7 @@ import asmble.ast.Node.InstrOp
 import asmble.ast.SExpr
 import asmble.ast.Script
 import asmble.util.takeUntilNullLazy
+import com.google.common.primitives.UnsignedInteger
 
 typealias NameMap = Map<String, Int>
 
@@ -43,11 +44,16 @@ open class SExprToAst {
             "assert_malformed" ->
                 Script.Cmd.Assertion.Malformed(toModule(mult).second, exp.vals[2].symbolStr()!!)
             "assert_invalid" ->
-                Script.Cmd.Assertion.Invalid(toModule(mult).second, exp.vals[2].symbolStr()!!)
+                Script.Cmd.Assertion.Invalid(
+                    Script.LazyModule.SExpr(mult) { toModule(it).second },
+                    exp.vals[2].symbolStr()!!
+                )
             "assert_soft_invalid" ->
                 Script.Cmd.Assertion.SoftInvalid(toModule(mult).second, exp.vals[2].symbolStr()!!)
             "assert_unlinkable" ->
                 Script.Cmd.Assertion.Unlinkable(toModule(mult).second, exp.vals[2].symbolStr()!!)
+            "assert_exhaustion" ->
+                Script.Cmd.Assertion.Exhaustion(toAction(mult), exp.vals[2].symbolStr()!!)
             else -> throw Exception("Invalid assertion exp $exp")
         }
     }
@@ -65,8 +71,8 @@ open class SExprToAst {
             "module" -> toModule(exp).let { Script.Cmd.Module(it.second, it.first) }
             "register" -> toRegister(exp)
             "invoke", "get" -> toAction(exp)
-            "assert_return", "assert_return_nan", "assert_trap", "assert_malformed",
-                "assert_invalid", "assert_soft_invalid", "assert_unlinkable" -> toAssertion(exp)
+            "assert_return", "assert_return_nan", "assert_trap", "assert_malformed", "assert_invalid",
+                "assert_soft_invalid", "assert_unlinkable", "assert_exhaustion" -> toAssertion(exp)
             "script", "input", "output" -> toMeta(exp)
             else -> error("Unrecognized cmd expr '$expName'")
         }
@@ -212,10 +218,10 @@ open class SExprToAst {
         val params = exp.repeated("param", offset, { toParams(it) }).mapIndexed { index, (nameMaybe, vals) ->
             nameMaybe?.also { require(vals.size == 1); nameMap += it to index }
             vals
-        }.flatten()
+        }
         val results = exp.repeated("result", offset + params.size, this::toResult)
         require(results.size <= 1)
-        return Triple(nameMap, params.size + results.size, Node.Type.Func(params, results.firstOrNull()))
+        return Triple(nameMap, params.size + results.size, Node.Type.Func(params.flatten(), results.firstOrNull()))
     }
 
     fun toGlobal(exp: SExpr.Multi, nameMap: NameMap): Triple<String?, Node.Global, ImportOrExport?> {
@@ -303,7 +309,7 @@ open class SExprToAst {
         val blockName = exp.vals[offset].symbolStr() ?: return Pair(emptyList(), 0)
         var opOffset = 1
         var innerCtx = ctx.copy(blockDepth = ctx.blockDepth + 1)
-        val maybeName = exp.maybeName(opOffset)
+        val maybeName = exp.maybeName(offset + opOffset)
         if (maybeName != null) {
             opOffset++
             innerCtx = innerCtx.copy(nameMap = innerCtx.nameMap + (maybeName to innerCtx.blockDepth))
@@ -314,7 +320,7 @@ open class SExprToAst {
         when(blockName) {
             "block" -> {
                 ret += Node.Instr.Block(sigs.firstOrNull())
-                toInstrs(exp, offset + opOffset, innerCtx).also {
+                toInstrs(exp, offset + opOffset, innerCtx, false).also {
                     ret += it.first
                     opOffset += it.second
                 }
@@ -491,6 +497,8 @@ open class SExprToAst {
 
         var namesToIndices = emptyMap<String, Int>()
 
+        fun maybeAddName(name: String?, index: Int) { name?.let { namesToIndices += it to index } }
+
         // First, go over everything in the module and get names as indices
         // All imports first
         importExps.forEach {
@@ -499,23 +507,23 @@ open class SExprToAst {
                 else -> it
             }
             val kindName = kindExp.maybeName(1)
-            if (kindName != null) when(kindExp.vals.firstOrNull()?.symbolStr()) {
-                "func" -> namesToIndices += kindName to funcCount++
-                "global" -> namesToIndices += kindName to globalCount++
-                "table" -> namesToIndices += kindName to tableCount++
-                "memory" -> namesToIndices += kindName to memoryCount++
+            when (kindExp.vals.firstOrNull()?.symbolStr()) {
+                "func" -> maybeAddName(kindName, funcCount++)
+                "global" -> maybeAddName(kindName, globalCount++)
+                "table" -> maybeAddName(kindName, tableCount++)
+                "memory" -> maybeAddName(kindName, memoryCount++)
                 else -> throw Exception("Unknown import exp: $it")
             }
         }
         // Now the rest
         nonImportExps.forEach {
             val kindName = it.maybeName(1)
-            if (kindName != null) when(it.vals.firstOrNull()?.symbolStr()) {
-                "type" -> namesToIndices += kindName to typeCount++
-                "func" -> namesToIndices += kindName to funcCount++
-                "global" -> namesToIndices += kindName to globalCount++
-                "table" -> namesToIndices += kindName to tableCount++
-                "memory" -> namesToIndices += kindName to memoryCount++
+            when (it.vals.firstOrNull()?.symbolStr()) {
+                "type" -> maybeAddName(kindName, typeCount++)
+                "func" -> maybeAddName(kindName, funcCount++)
+                "global" -> maybeAddName(kindName, globalCount++)
+                "table" -> maybeAddName(kindName, tableCount++)
+                "memory" -> maybeAddName(kindName, memoryCount++)
                 else -> {}
             }
         }
@@ -527,6 +535,11 @@ open class SExprToAst {
         val head = exp.vals[offset].symbol()!!
         fun varIsStringRef() = exp.vals[offset + 1].symbolStr()?.firstOrNull() == '$'
         fun oneVar() = toVar(exp.vals[offset + 1].symbol()!!, ctx.nameMap)
+        // Some are not handled here:
+        when (head.contents) {
+            "block", "loop", "if", "else", "end" -> return null
+            else -> { }
+        }
         val op = InstrOp.strToOpMap[head.contents]
         return when(op) {
             null -> null
@@ -552,7 +565,8 @@ open class SExprToAst {
                 var instrAlign = 0
                 if (exp.vals.size > offset + count) exp.vals[offset + count].symbolStr().also {
                     if (it != null && it.startsWith("offset=")) {
-                        instrOffset = it.substring(7).toLong()
+                        // TODO: unsigned ints everywhere!
+                        instrOffset = UnsignedInteger.valueOf(it.substring(7)).toLong()
                         count++
                     }
                 }
@@ -567,8 +581,8 @@ open class SExprToAst {
             is InstrOp.MemOp.ReservedArg -> Pair(op.create(false), 1)
             is InstrOp.ConstOp.IntArg -> Pair(op.create(exp.vals[offset + 1].symbol()!!.contents.toIntConst()), 2)
             is InstrOp.ConstOp.LongArg -> Pair(op.create(exp.vals[offset + 1].symbol()!!.contents.toLongConst()), 2)
-            is InstrOp.ConstOp.FloatArg -> Pair(op.create(exp.vals[offset + 1].symbol()!!.contents.toFloat()), 2)
-            is InstrOp.ConstOp.DoubleArg -> Pair(op.create(exp.vals[offset + 1].symbol()!!.contents.toDouble()), 2)
+            is InstrOp.ConstOp.FloatArg -> Pair(op.create(exp.vals[offset + 1].symbol()!!.contents.toFloatConst()), 2)
+            is InstrOp.ConstOp.DoubleArg -> Pair(op.create(exp.vals[offset + 1].symbol()!!.contents.toDoubleConst()), 2)
             is InstrOp.CompareOp.NoArg -> Pair(op.create, 1)
             is InstrOp.NumOp.NoArg -> Pair(op.create, 1)
             is InstrOp.ConvertOp.NoArg -> Pair(op.create, 1)
@@ -644,7 +658,7 @@ open class SExprToAst {
     }
 
     fun toTypeDef(exp: SExpr.Multi, nameMap: NameMap): Pair<String?, Node.Type.Func> {
-        exp.requireFirstSymbol("typedef")
+        exp.requireFirstSymbol("type")
         var currIndex = 1
         val name = exp.maybeName(currIndex)
         if (name != null) currIndex++
@@ -658,10 +672,10 @@ open class SExprToAst {
     }
 
     fun toVarMaybe(exp: SExpr, nameMap: NameMap): Int? {
-        return exp.symbolStr()?.let {
-            exp.symbolStr()?.toIntOrNull() ?: if (it.first() != '$') null else {
-              nameMap[it] ?: throw Exception("Unable to find index for name $it")
-            }
+        return exp.symbolStr()?.let { it ->
+            if (it.startsWith("$")) nameMap[it] ?: throw Exception("Unable to find index for name $it")
+            else if (it.startsWith("0x")) it.substring(2).toIntOrNull(16)
+            else it.toIntOrNull()
         }
     }
 
@@ -669,6 +683,10 @@ open class SExprToAst {
         if (this.startsWith("0x")) this.substring(2).toInt(16) else this.toInt()
     private fun String.toLongConst() =
         if (this.startsWith("0x")) this.substring(2).toLong(16) else this.toLong()
+    private fun String.toFloatConst() =
+        if (this.startsWith("0x")) this.substring(2).toLong(16).toFloat() else this.toFloat()
+    private fun String.toDoubleConst() =
+        if (this.startsWith("0x")) this.substring(2).toLong(16).toDouble() else this.toDouble()
 
     private fun SExpr.requireSymbol(contents: String, quotedCheck: Boolean? = null) {
         if (this is SExpr.Symbol && this.contents == contents &&

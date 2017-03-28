@@ -25,7 +25,7 @@ data class ClsContext(
 
     fun funcAtIndex(index: Int) = importFuncs.getOrNull(index).let {
         when (it) {
-            null -> Either.Right(mod.funcs.getOrNull(index - importFuncs.size) ?: error("No func at $index"))
+            null -> Either.Right(mod.funcs.getOrNull(index - importFuncs.size) ?: throw CompileErr.UnknownFunc(index))
             else -> Either.Left(it)
         }
     }

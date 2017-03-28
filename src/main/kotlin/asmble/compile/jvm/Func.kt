@@ -38,14 +38,21 @@ data class Func(
         return pop().first
     }
 
-    fun pop(): Pair<Func, TypeRef> {
-        if (stack.isEmpty()) throw CompileErr.StackMismatch(emptyArray(), null)
+    fun isStackEmptyForBlock(currBlock: Block? = blockStack.lastOrNull()): Boolean {
+        // Per https://github.com/WebAssembly/design/issues/1020, it's not whether the
+        // stack is empty, but whether it's the same as the current block
+        return stack.isEmpty() || (currBlock != null && stack.size <= currBlock.origStack.size)
+    }
+
+    fun pop(currBlock: Block? = blockStack.lastOrNull()): Pair<Func, TypeRef> {
+        if (isStackEmptyForBlock(currBlock)) throw CompileErr.StackMismatch(emptyArray(), null)
         return copy(stack = stack.dropLast(1)) to stack.last()
     }
 
     fun peekExpecting(type: TypeRef) = peekExpectingAny(type)
 
     fun peekExpectingAny(vararg types: TypeRef): TypeRef {
+        if (isStackEmptyForBlock()) throw CompileErr.StackMismatch(types, null)
         val hasExpected = stack.lastOrNull()?.let(types::contains) ?: false
         if (!hasExpected) throw CompileErr.StackMismatch(types, stack.lastOrNull())
         return stack.last()
@@ -59,9 +66,11 @@ data class Func(
         return ret
     }
 
-    fun stackSwap() = pop().let { (fn, refLast) ->
-        fn.pop().let { (fn, refFirst) ->
-            if (refFirst.stackSize == 2) {
+    fun withoutAffectingStack(fn: (Func) -> Func) = fn(this).copy(stack = stack)
+
+    fun stackSwap(currBlock: Block? = blockStack.lastOrNull()) = pop(currBlock).let { (fn, refLast) ->
+        fn.pop(currBlock).let { (fn, refFirst) ->
+            (if (refFirst.stackSize == 2) {
                 if (refLast.stackSize == 2)
                     // If they are both 2, dup2_x2 + pop2
                     fn.addInsns(InsnNode(Opcodes.DUP2_X2), InsnNode(Opcodes.POP))
@@ -75,7 +84,7 @@ data class Func(
                 else
                     // If neither are 2, just swap
                     fn.addInsns(InsnNode(Opcodes.SWAP))
-            }
+            }).push(refLast).push(refFirst)
         }
     }
 
@@ -83,8 +92,9 @@ data class Func(
 
     fun popBlock() = copy(blockStack = blockStack.dropLast(1)) to blockStack.last()
 
-    fun blockAtDepth(depth: Int) = blockStack[blockStack.size - depth - 1].let { block ->
+    fun blockAtDepth(depth: Int) = blockStack.getOrNull(blockStack.size - depth - 1).let { block ->
         when (block) {
+            null -> throw CompileErr.NoBlockAtDepth(depth)
             is Block.WithLabel -> this to block
             // We have to lazily create it here
             else -> blockStack.toMutableList().let {

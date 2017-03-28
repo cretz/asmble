@@ -27,6 +27,27 @@ class CoreTestUnit(val name: String, val wast: String, val expectedOutput: Strin
     val script: Script by lazy { SExprToAst.toScript(SExpr.Multi(ast)) }
 
     companion object {
+
+        /*
+        TODO: We are going down in order. One's we have not yet handled:
+        - binary.wast - No binary yet
+        - br.wast - Not handling tables yet
+        - br_table.wast - Not handling tables yet
+        -- call_indirect.wast - Not handling tables yet
+        */
+
+        val knownGoodTests = arrayOf(
+            "address.wast",
+            "address-offset-range.fail.wast",
+            "block.wast",
+            "block-end-label-mismatch.fail.wast",
+            "block-end-label-superfluous.wast",
+            "br_if.wast",
+            "break-drop.wast",
+            "call.wast",
+            "comments.wast"
+        )
+
         val unitsPath = "/spec/test/core"
         fun loadAll(): List<CoreTestUnit> {
             return loadFromResourcePath("/local-spec") + loadFromResourcePath(unitsPath)
@@ -39,7 +60,11 @@ class CoreTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             val fs = if (uri.scheme == "jar") FileSystems.newFileSystem(uri, emptyMap<String, Any>()) else null
             fs.use { fs ->
                 val path = fs?.getPath(basePath) ?: Paths.get(uri)
-                return Files.walk(path, 1).filter { it.toString().endsWith("block.wast") }.map {
+                val testWastFiles = Files.walk(path, 1).
+                    filter { it.toString().endsWith(".wast") }.
+                    // TODO: remove this when they all succeed
+                    filter { knownGoodTests.contains(it.fileName.toString()) }
+                return testWastFiles.map {
                     val name = it.fileName.toString().substringBeforeLast(".wast")
                     CoreTestUnit(
                         name = name,

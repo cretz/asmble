@@ -15,7 +15,7 @@ interface Mem {
     // stack and it will be reused or popped.
     fun init(func: Func, initial: Int): Func
 
-    // Caller can trust the mem instance is on the stack, buildOffset puts
+    // Caller can trust the mem instance is on the stack, buildOffset puts an i32
     // offset on the stack. If it's already there after call anyways, this can
     // leave the mem inst on the stack and it will be reused or popped.
     fun data(func: Func, bytes: ByteArray, buildOffset: (Func) -> Func): Func

@@ -39,10 +39,12 @@ data class ScriptContext(
     }
 
     fun doAssertion(cmd: Script.Cmd.Assertion) {
+        debug { "Performing assertion: " + SExprToStr.fromSExpr(AstToSExpr.fromAssertion(cmd)) }
         when (cmd) {
             is Script.Cmd.Assertion.Return -> assertReturn(cmd)
             is Script.Cmd.Assertion.Trap -> assertTrap(cmd)
             is Script.Cmd.Assertion.Invalid -> assertInvalid(cmd)
+            is Script.Cmd.Assertion.Exhaustion -> assertExhaustion(cmd)
             else -> TODO()
         }
     }
@@ -67,16 +69,23 @@ data class ScriptContext(
 
     fun assertInvalid(invalid: Script.Cmd.Assertion.Invalid) {
         try {
-            debug { "Compiling invalid: " + SExprToStr.Compact.fromSExpr(AstToSExpr.fromModule(invalid.module)) }
+            debug { "Compiling invalid: " + SExprToStr.Compact.fromSExpr(AstToSExpr.fromModule(invalid.module.value)) }
             val className = "invalid" + UUID.randomUUID().toString().replace("-", "")
-            compileModule(invalid.module, className, null)
+            compileModule(invalid.module.value, className, null)
             throw AssertionError("Expected invalid module with error '${invalid.failure}', was valid")
-        } catch (e: Throwable) { assertFailure(e, invalid.failure) }
+        } catch (e: Exception) { assertFailure(e, invalid.failure) }
     }
 
+    fun assertExhaustion(exhaustion: Script.Cmd.Assertion.Exhaustion) {
+        try { doAction(exhaustion.action).also { throw AssertionError("Expected exception") } }
+        catch (e: Throwable) { assertFailure(e, exhaustion.failure) }
+    }
+
+    private fun exceptionFromCatch(e: Throwable) = if (e is InvocationTargetException) e.targetException else e
+
     private fun assertFailure(e: Throwable, expectedString: String) {
-        val innerEx = if (e is InvocationTargetException) e.targetException else e
-        val msg = exceptionTranslator.translate(innerEx) ?: "unknown"
+        val innerEx = exceptionFromCatch(e)
+        val msg = exceptionTranslator.translate(innerEx) ?: "<unrecognized error>"
         if (msg != expectedString) throw AssertionError("Expected failure '$expectedString' got '$msg'", innerEx)
     }
 
@@ -165,6 +174,7 @@ data class ScriptContext(
     inner class CompiledModule(val mod: Node.Module, override val cls: Class<*>, val name: String?) : Module {
         override val instance by lazy {
             // Find the constructor with no max mem amount (i.e. methodhandle or nothing as first param)
+            // TODO: genericize which constructor is the no-mem one
             var constructor = cls.declaredConstructors.find {
                 when (it.parameterTypes.firstOrNull()) {
                     null, MethodHandle::class.java -> true

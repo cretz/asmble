@@ -1,15 +1,22 @@
 package asmble.compile.jvm
 
+import asmble.AsmErr
 import java.util.*
 
-sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeException(message, cause) {
-    abstract val asmErrString: String
+sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeException(message, cause), AsmErr {
 
     class StackMismatch(
         val expected: Array<out TypeRef>,
         val actual: TypeRef?
     ) : CompileErr("Expected any type of ${Arrays.toString(expected)}, got $actual") {
-        override val asmErrString: String get() = "type mismatch"
+        override val asmErrString get() = "type mismatch"
+    }
+
+    class StackInjectionMismatch(
+        val injectBackwardsCount: Int,
+        val attemptedInsn: Insn
+    ) : CompileErr("Unable to inject $attemptedInsn back $injectBackwardsCount stack values") {
+        override val asmErrString get() = "type mismatch"
     }
 
     class BlockEndMismatch(
@@ -17,8 +24,7 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
         val possibleExtra: TypeRef?,
         val actualStack: List<TypeRef>
     ) : CompileErr(msgString(expectedStack, possibleExtra, actualStack)) {
-
-        override val asmErrString: String get() = "type mismatch"
+        override val asmErrString get() = "type mismatch"
 
         companion object {
             fun msgString(expectedStack: List<TypeRef>, possibleExtra: TypeRef?, actualStack: List<TypeRef>) =
@@ -30,6 +36,18 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
     class UnusedStackOnReturn(
         val leftover: List<TypeRef>
     ) : CompileErr("Expected empty stack on return, still leftover with: $leftover") {
-        override val asmErrString: String get() = "type mismatch"
+        override val asmErrString get() = "type mismatch"
+    }
+
+    class NoBlockAtDepth(
+        val attemptedDepth: Int
+    ) : CompileErr("Attempted to access block at depth $attemptedDepth, but not there") {
+        override val asmErrString get() = "unknown label"
+    }
+
+    class UnknownFunc(
+        val index: Int
+    ) : CompileErr("Unknown function at index $index") {
+        override val asmErrString get() = "unknown function"
     }
 }

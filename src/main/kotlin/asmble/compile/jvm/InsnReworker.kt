@@ -4,7 +4,15 @@ import asmble.ast.Node
 
 open class InsnReworker {
 
-    fun rework(ctx: ClsContext, insns: List<Node.Instr>): List<Insn> {
+
+    fun rework(ctx: ClsContext, insns: List<Node.Instr>, retType: Node.Type.Value?): List<Insn> {
+        return injectNeededStackVars(ctx, insns).let { insns -> wrapWithImplicitBlock(ctx, insns, retType) }
+    }
+
+    fun wrapWithImplicitBlock(ctx: ClsContext, insns: List<Insn>, retType: Node.Type.Value?) =
+        (listOf(Insn.Node(Node.Instr.Block(retType))) + insns) + Insn.Node(Node.Instr.End)
+
+    fun injectNeededStackVars(ctx: ClsContext, insns: List<Node.Instr>): List<Insn> {
         // How we do this:
         // We run over each insn, and keep a running list of stack
         // manips. If there is an insn that needs something so far back,
@@ -36,7 +44,7 @@ open class InsnReworker {
                 countSoFar += amountChanged
                 if (countSoFar == count) return inject(insnIndex)
             }
-            error("Unable to find place to inject $insn")
+            throw CompileErr.StackInjectionMismatch(count, insn)
         }
 
         // Go over each insn, determining where to inject

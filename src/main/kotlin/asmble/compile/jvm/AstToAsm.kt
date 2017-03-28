@@ -96,7 +96,7 @@ open class AstToAsm {
             ctx.mem.data(memCon, data.data) { memCon ->
                 val funcCtx = FuncContext(ctx, Node.Func(
                     Node.Type.Func(emptyList(), null), emptyList(), data.offset),
-                    ctx.reworker.rework(ctx, data.offset))
+                    ctx.reworker.rework(ctx, data.offset, Node.Type.Value.I32))
                 funcCtx.insns.foldIndexed(memCon) { index, memCon, insn ->
                     ctx.funcBuilder.applyInsn(funcCtx, memCon, insn, index)
                 }

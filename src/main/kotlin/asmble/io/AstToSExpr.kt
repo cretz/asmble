@@ -20,14 +20,18 @@ open class AstToSExpr {
             newMulti("assert_trap") + fromAction(v.action) + v.failure
         is Script.Cmd.Assertion.Malformed ->
             newMulti("assert_malformed") + fromModule(v.module) + v.failure
-        is Script.Cmd.Assertion.Invalid ->
-            newMulti("assert_invalid") + fromModule(v.module) + v.failure
+        is Script.Cmd.Assertion.Invalid -> when (v.module) {
+            is Script.LazyModule.SExpr -> newMulti("assert_invalid") + v.module.sexpr + v.failure
+            else -> newMulti("assert_invalid") + fromModule(v.module.value) + v.failure
+        }
         is Script.Cmd.Assertion.SoftInvalid ->
             newMulti("assert_soft_invalid") + fromModule(v.module) + v.failure
         is Script.Cmd.Assertion.Unlinkable ->
             newMulti("assert_unlinkable") + fromModule(v.module) + v.failure
         is Script.Cmd.Assertion.TrapModule ->
             newMulti("assert_trap") + fromModule(v.module) + v.failure
+        is Script.Cmd.Assertion.Exhaustion ->
+            newMulti("assert_exhaustion") + fromAction(v.action) + v.failure
     }
 
     fun fromCmd(v: Script.Cmd): SExpr.Multi = when(v) {

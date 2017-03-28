@@ -19,13 +19,13 @@ open class FuncBuilder {
             ret = f.type.ret?.let(Node.Type.Value::typeRef) ?: Void::class.ref
         )
         // Rework the instructions
-        val reworkedInsns = ctx.reworker.rework(ctx, f.instructions)
+        val reworkedInsns = ctx.reworker.rework(ctx, f.instructions, f.type.ret)
         val funcCtx = FuncContext(
             cls = ctx,
             node = f,
             insns = reworkedInsns,
             memIsLocalVar =
-            ctx.reworker.nonAdjacentMemAccesses(reworkedInsns) >= ctx.nonAdjacentMemAccessesRequiringLocalVar
+                ctx.reworker.nonAdjacentMemAccesses(reworkedInsns) >= ctx.nonAdjacentMemAccessesRequiringLocalVar
         )
 
         // Add the mem as a local variable if necessary
@@ -37,6 +37,7 @@ open class FuncBuilder {
 
         // Add all instructions
         ctx.debug { "Applying insns for function ${ctx.funcName(index)}" }
+        // All functions have an implicit block
         func = funcCtx.insns.foldIndexed(func) { index, func, insn ->
             ctx.debug { "Applying insn $insn" }
             val ret = applyInsn(funcCtx, func, insn, index)
@@ -94,7 +95,7 @@ open class FuncBuilder {
             fn.pushBlock(i)
         is Node.Instr.If ->
             // The label is set in else or end
-            fn.pushBlock(i).pushIf().addInsns(JumpInsnNode(Opcodes.IFEQ, null))
+            fn.popExpecting(Int::class.ref).pushBlock(i).pushIf().addInsns(JumpInsnNode(Opcodes.IFEQ, null))
         is Node.Instr.Else ->
             applyElse(ctx, fn)
         is Node.Instr.End ->
@@ -172,7 +173,7 @@ open class FuncBuilder {
         is Node.Instr.I32GeU ->
             applyI32CmpU(ctx, fn, Opcodes.IFGE)
         is Node.Instr.I64Eqz ->
-            fn.addInsns(0L.const).push(Long::class.ref).let { applyI64CmpS(ctx, fn, Opcodes.IFEQ) }
+            fn.addInsns(0L.const).push(Long::class.ref).let { fn -> applyI64CmpS(ctx, fn, Opcodes.IFEQ) }
         is Node.Instr.I64Eq ->
             applyI64CmpS(ctx, fn, Opcodes.IFEQ)
         is Node.Instr.I64Ne ->
@@ -299,9 +300,9 @@ open class FuncBuilder {
         is Node.Instr.F32Neg ->
             applyF32Unary(ctx, fn, InsnNode(Opcodes.FNEG))
         is Node.Instr.F32Ceil ->
-            applyWithF32To64AndBack(ctx, fn) { applyF64Unary(ctx, it, Math::ceil.invokeStatic()) }
+            applyWithF32To64AndBack(ctx, fn) { fn -> applyF64Unary(ctx, fn, Math::ceil.invokeStatic()) }
         is Node.Instr.F32Floor ->
-            applyWithF32To64AndBack(ctx, fn) { applyF64Unary(ctx, it, Math::floor.invokeStatic()) }
+            applyWithF32To64AndBack(ctx, fn) { fn -> applyF64Unary(ctx, fn, Math::floor.invokeStatic()) }
         is Node.Instr.F32Trunc ->
             applyF32Trunc(ctx, fn)
         is Node.Instr.F32Nearest ->
@@ -309,7 +310,7 @@ open class FuncBuilder {
             applyF32Unary(ctx, fn, forceFnType<(Float) -> Int>(Math::round).invokeStatic()).
                 addInsns(InsnNode(Opcodes.I2F))
         is Node.Instr.F32Sqrt ->
-            applyWithF32To64AndBack(ctx, fn) { applyF64Unary(ctx, it, Math::sqrt.invokeStatic()) }
+            applyWithF32To64AndBack(ctx, fn) { fn -> applyF64Unary(ctx, fn, Math::sqrt.invokeStatic()) }
         is Node.Instr.F32Add ->
             applyF32Binary(ctx, fn, Opcodes.FADD)
         is Node.Instr.F32Sub ->
@@ -436,12 +437,18 @@ open class FuncBuilder {
 
     fun applyBrIf(ctx: FuncContext, fn: Func, i: Node.Instr.BrIf) =
         fn.blockAtDepth(i.relativeDepth).let { (fn, block) ->
-            fn.popExpecting(Int::class.ref).addInsns(JumpInsnNode(Opcodes.IFNE, block.label)).let { fn ->
-                block.insnType?.typeRef?.let {
-                    fn.peekExpecting(it)
-                    block.blockExitVals += i to it
+            fn.popExpecting(Int::class.ref).let { fn ->
+                // Must at least have the item on the stack that the block expects if it expects something
+                val needsPopBeforeJump = needsToPopBeforeJumping(ctx, fn, block)
+                val toLabel = if (needsPopBeforeJump) LabelNode() else block.label
+                fn.addInsns(JumpInsnNode(Opcodes.IFNE, toLabel)).let { fn ->
+                    block.insnType?.typeRef?.let {
+                        fn.peekExpecting(it)
+                        block.blockExitVals += i to it
+                    }
+                    if (needsPopBeforeJump) buildPopBeforeJump(ctx, fn, block, toLabel)
+                    else fn
                 }
-                fn
             }
         }
 
@@ -470,11 +477,51 @@ open class FuncBuilder {
             }
         }
 
+    fun needsToPopBeforeJumping(ctx: FuncContext, fn: Func, block: Func.Block.WithLabel): Boolean {
+        val requiredStackCount = if (block.insnType == null) block.origStack.size else block.origStack.size + 1
+        return fn.stack.size > requiredStackCount
+    }
+
+    fun buildPopBeforeJump(ctx: FuncContext, fn: Func, block: Func.Block.WithLabel, tempLabel: LabelNode): Func {
+        // This is sad that we have to do this because we can't trust the wasm stack on nested breaks
+        // Steps:
+        // 1. Build a label, do a GOTO to it for the regular path
+        // 2. Start the given temp label, do the pop, then goto the block label
+        // 3. Resume code from the label at #1
+        // NOTE: We have chosen to do it this way instead of negating the br_if conditional
+        // or whatever because this should not happen in practice but in many tests there
+        // are leftover stack items when doing nested breaks
+        // TODO: make this better by moving this "pad" to the block end so we don't have
+        // to make the running code path jump also. Also consider a better approach than
+        // the constant swap-and-pop we do here.
+        val requiredStackCount = if (block.insnType == null) block.origStack.size else block.origStack.size + 1
+        ctx.debug {
+            "Jumping to block requiring stack size $requiredStackCount but we " +
+                "have ${fn.stack.size} so we are popping all unnecessary stack items before jumping"
+        }
+        // We actually have to pop the second to last, keeping the latest (unless it's empty)...and we do
+        // this over and over, sadly, if there are more to discard
+        val resumeLabel = LabelNode()
+        return fn.addInsns(JumpInsnNode(Opcodes.GOTO, resumeLabel), tempLabel).withoutAffectingStack { fn ->
+            (requiredStackCount until fn.stack.size).fold(fn) { fn, index ->
+                if (fn.stack.size == 1) {
+                    fn.addInsns(InsnNode(if (fn.stack.last().stackSize == 2) Opcodes.POP2 else Opcodes.POP)).pop(block).first
+                } else fn.stackSwap(block).let { fn ->
+                    fn.addInsns(InsnNode(if (fn.stack.last().stackSize == 2) Opcodes.POP2 else Opcodes.POP)).pop(block).first
+                }
+            }
+        }.addInsns(
+            JumpInsnNode(Opcodes.GOTO, block.label),
+            resumeLabel
+        )
+    }
+
     fun applyElse(ctx: FuncContext, fn: Func) = fn.blockAtDepth(0).let { (fn, block) ->
         // Do a goto the end, and then add a fresh label to the initial "if" that jumps here
+        // Also, put the stack back at what it was pre-if
         val label = LabelNode()
         fn.peekIf().label = label
-        fn.addInsns(JumpInsnNode(Opcodes.GOTO, block.label), label)
+        fn.addInsns(JumpInsnNode(Opcodes.GOTO, block.label), label).copy(stack = block.origStack)
     }
 
     fun applyEnd(ctx: FuncContext, fn: Func) = fn.popBlock().let { (fn, block) ->
