@@ -37,6 +37,7 @@ class CoreTestUnit(val name: String, val wast: String, val expectedOutput: Strin
         */
 
         val knownGoodTests = arrayOf(
+            "temp.wast",
             "address.wast",
             "address-offset-range.fail.wast",
             "block.wast",
@@ -45,7 +46,8 @@ class CoreTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             "br_if.wast",
             "break-drop.wast",
             "call.wast",
-            "comments.wast"
+            "comments.wast",
+            "conversions.wast"
         )
 
         val unitsPath = "/spec/test/core"

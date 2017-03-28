@@ -81,7 +81,8 @@ data class ScriptContext(
         catch (e: Throwable) { assertFailure(e, exhaustion.failure) }
     }
 
-    private fun exceptionFromCatch(e: Throwable) = if (e is InvocationTargetException) e.targetException else e
+    private fun exceptionFromCatch(e: Throwable) =
+        if (e is AssertionError) e else if (e is InvocationTargetException) e.targetException else e
 
     private fun assertFailure(e: Throwable, expectedString: String) {
         val innerEx = exceptionFromCatch(e)
@@ -101,7 +102,7 @@ data class ScriptContext(
     fun doInvoke(cmd: Script.Cmd.Action.Invoke): Pair<Node.Type.Value?, Any?> {
         // If there is a module name, use that index, otherwise just search
         val (compMod, method) = modules.filter { cmd.name == null || it.name == cmd.name }.flatMap { compMod ->
-            compMod.cls.declaredMethods.filter { it.name == cmd.string }.map { compMod to it }
+            compMod.cls.declaredMethods.filter { it.name == cmd.string.javaIdent }.map { compMod to it }
         }.singleOrNull() ?: error("Unable to find single func for $cmd")
 
         // Invoke all parameter expressions
@@ -159,7 +160,7 @@ data class ScriptContext(
         val module = registrations[import.module] ?: error("Unable to find module ${import.module}")
         return MethodHandles.lookup().bind(
             module.instance,
-            import.field,
+            import.field.javaIdent,
             MethodType.methodType(funcType.ret?.jclass ?: Void.TYPE, funcType.params.map { it.jclass })
         )
     }

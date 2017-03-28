@@ -4,6 +4,7 @@ import asmble.ast.Node
 import asmble.util.Either
 import asmble.util.add
 import org.objectweb.asm.Opcodes
+import org.objectweb.asm.Type
 import org.objectweb.asm.tree.*
 import java.lang.invoke.MethodHandle
 
@@ -358,7 +359,8 @@ open class FuncBuilder {
         is Node.Instr.I32WrapI64 ->
             applyConv(ctx, fn, Long::class.ref, Int::class.ref, Opcodes.L2I)
         is Node.Instr.I32TruncSF32 ->
-            applyConv(ctx, fn, Float::class.ref, Int::class.ref, Opcodes.F2I)
+            applyCheckedConv(ctx, fn, Float::class.ref, Int::class.ref, signed = true) ?:
+                applyConv(ctx, fn, Float::class.ref, Int::class.ref, Opcodes.F2I)
         is Node.Instr.I32TruncUF32 ->
             // TODO: wat?
             applyConv(ctx, fn, Float::class.ref, Int::class.ref, Opcodes.F2I).
@@ -418,7 +420,7 @@ open class FuncBuilder {
             applyConv(ctx, fn, Int::class.ref, Float::class.ref,
                 java.lang.Float::class.invokeStatic("intBitsToFloat", Float::class, Int::class))
         is Node.Instr.F64ReinterpretI64 ->
-            applyConv(ctx, fn, Double::class.ref, Long::class.ref,
+            applyConv(ctx, fn, Long::class.ref, Double::class.ref,
                 java.lang.Double::class.invokeStatic("longBitsToDouble", Double::class, Long::class))
     }
 
@@ -579,6 +581,19 @@ open class FuncBuilder {
                 else -> error("Unrecognized end for ${block.insn}")
             }
         }
+    }
+
+    fun applyCheckedConv(ctx: FuncContext, fn: Func, from: TypeRef, to: TypeRef, signed: Boolean): Func? {
+        if (!ctx.cls.checkConversionOverflow) return null
+        // One approach would be to take the previous result and make sure it
+        // was equal to the original. Another approach is to do the check inline.
+        // But the best approach is a static synthetic function at the class level.
+        if (from == Float::class.ref) {
+            if (to == Int::class.ref) {
+                if (signed) return fn.popExpecting(from).addInsns(ctx.cls.checkedF2SIConv).push(to)
+            }
+        }
+        return null
     }
 
     fun applyConv(ctx: FuncContext, fn: Func, from: TypeRef, to: TypeRef, op: Int) =
@@ -938,6 +953,61 @@ open class FuncBuilder {
     }.let {
         if (it.stack.isNotEmpty()) throw CompileErr.UnusedStackOnReturn(it.stack)
         it
+    }
+
+    fun buildF2SICheckedConv(ctx: ClsContext): MethodNode {
+        /*
+            public static int $$convF2SI(float f) {
+                if (Float.isNaN(f)) throw new ArithmeticException("Invalid conversion to integer");
+                if (f >= Integer.MAX_VALUE || f < Integer.MIN_VALUE)
+                    throw new ArithmeticException("Integer overflow");
+                return (int) f;
+            }
+        */
+        val name = "\$\$convF2SI"
+        val method = MethodNode(Opcodes.ACC_PRIVATE + Opcodes.ACC_STATIC + Opcodes.ACC_SYNTHETIC,
+            name, "(F)I", null, null)
+        fun addInsns(vararg insn: AbstractInsnNode) = insn.forEach(method.instructions::add)
+        fun throwArith(msg: String) = addInsns(
+            TypeInsnNode(Opcodes.NEW, ArithmeticException::class.ref.asmName),
+            InsnNode(Opcodes.DUP),
+            msg.const,
+            MethodInsnNode(Opcodes.INVOKESPECIAL, ArithmeticException::class.ref.asmName,
+                "<init>", "(Ljava/lang/String;)V", false),
+            InsnNode(Opcodes.ATHROW)
+        )
+        val firstIfSafe = LabelNode()
+        val secondIfFail = LabelNode()
+        val secondIfSafe = LabelNode()
+        addInsns(
+            // Check NaN and throw
+            VarInsnNode(Opcodes.FLOAD, 0),
+            MethodInsnNode(Opcodes.INVOKESTATIC, Float::class.javaObjectType.ref.asmName, "isNaN", "(F)Z", false),
+            JumpInsnNode(Opcodes.IFEQ, firstIfSafe)
+        )
+        throwArith("Invalid conversion to integer")
+        addInsns(
+            firstIfSafe,
+            // Check over or under int max/min
+            VarInsnNode(Opcodes.FLOAD, 0),
+            Integer.MAX_VALUE.toFloat().const,
+            InsnNode(Opcodes.FCMPL),
+            // TODO: So I can't store 2147483647.0f in an int? That seems wrong
+            JumpInsnNode(Opcodes.IFGE, secondIfFail),
+            VarInsnNode(Opcodes.FLOAD, 0),
+            Integer.MIN_VALUE.toFloat().const,
+            InsnNode(Opcodes.FCMPG),
+            JumpInsnNode(Opcodes.IFGE, secondIfSafe),
+            secondIfFail
+        )
+        throwArith("Integer overflow")
+        addInsns(
+            secondIfSafe,
+            VarInsnNode(Opcodes.FLOAD, 0),
+            InsnNode(Opcodes.F2I),
+            InsnNode(Opcodes.IRETURN)
+        )
+        return method
     }
 
     companion object : FuncBuilder()

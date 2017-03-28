@@ -15,8 +15,6 @@ import kotlin.reflect.KProperty
 import kotlin.reflect.jvm.javaField
 import kotlin.reflect.jvm.javaMethod
 
-
-
 val <R> KFunction<R>.asmDesc: String get() = Type.getMethodDescriptor(this.javaMethod)
 
 val <R> KFunction<R>.declarer: Class<*> get() = this.javaMethod!!.declaringClass
@@ -98,6 +96,8 @@ val Double.const: AbstractInsnNode get() = when (this) {
 }
 
 val String.const: AbstractInsnNode get() = LdcInsnNode(this)
+
+val String.javaIdent: String get() = this.replace(".", "\$dot\$")
 
 fun Node.Func.localByIndex(index: Int) =
     this.type.params.getOrNull(index) ?: this.locals.getOrNull(index) ?: error("No local at index $index")

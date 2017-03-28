@@ -3,8 +3,10 @@ package asmble.compile.jvm
 import asmble.ast.Node
 import asmble.util.Either
 import asmble.util.Logger
+import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
 import org.objectweb.asm.tree.ClassNode
+import org.objectweb.asm.tree.MethodInsnNode
 
 data class ClsContext(
     val packageName: String,
@@ -13,11 +15,12 @@ data class ClsContext(
     val cls: ClassNode = ClassNode().also { it.name = (packageName.replace('.', '/') + "/$className").trimStart('/') },
     val mem: Mem = ByteBufferMem,
     val reworker: InsnReworker = InsnReworker,
-    val nonAdjacentMemAccessesRequiringLocalVar: Int = 3,
     val logger: Logger = Logger.Print(Logger.Level.OFF),
+    val funcBuilder: FuncBuilder = FuncBuilder,
+    val nonAdjacentMemAccessesRequiringLocalVar: Int = 3,
     val eagerFailLargeMemOffset: Boolean = true,
     val preventMemIndexOverflow: Boolean = false,
-    val funcBuilder: FuncBuilder = FuncBuilder
+    val checkConversionOverflow: Boolean = true
 ) : Logger by logger {
     val importFuncs: List<Node.Import> by lazy { mod.imports.filter { it.kind is Node.Import.Kind.Func } }
     val importGlobals: List<Node.Import> by lazy { mod.imports.filter { it.kind is Node.Import.Kind.Global } }
@@ -48,4 +51,10 @@ data class ClsContext(
     fun importGlobalSetterFieldName(index: Int) = "import\$set" + globalName(index)
     fun globalName(index: Int) = "\$global$index"
     fun funcName(index: Int) = "\$func$index"
+
+    val checkedF2SIConv: MethodInsnNode by lazy {
+        val method = funcBuilder.buildF2SICheckedConv(this)
+        cls.methods.add(method)
+        MethodInsnNode(Opcodes.INVOKESTATIC, thisRef.asmName, method.name, method.desc, false)
+    }
 }

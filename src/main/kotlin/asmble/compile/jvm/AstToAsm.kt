@@ -170,7 +170,7 @@ open class AstToAsm {
     fun addExportFunc(ctx: ClsContext, export: Node.Export) {
         // TODO: java safe name
         val funcType = ctx.funcTypeAtIndex(export.index)
-        val method = MethodNode(Opcodes.ACC_PUBLIC, export.field, funcType.asmDesc, null, null)
+        val method = MethodNode(Opcodes.ACC_PUBLIC, export.field.javaIdent, funcType.asmDesc, null, null)
         // Push all params
         funcType.params.fold(1) { stackIndex, param ->
             val op = when (param) {
