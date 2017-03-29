@@ -73,7 +73,7 @@ data class Func(
             (if (refFirst.stackSize == 2) {
                 if (refLast.stackSize == 2)
                     // If they are both 2, dup2_x2 + pop2
-                    fn.addInsns(InsnNode(Opcodes.DUP2_X2), InsnNode(Opcodes.POP))
+                    fn.addInsns(InsnNode(Opcodes.DUP2_X2), InsnNode(Opcodes.POP2))
                 else
                     // If only the first one is, dup_x2 + pop
                     fn.addInsns(InsnNode(Opcodes.DUP_X2), InsnNode(Opcodes.POP))

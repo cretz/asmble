@@ -57,7 +57,25 @@ data class ScriptContext(
             else -> {
                 if (ret.exprs.isEmpty()) throw AssertionError("Got return, expected empty")
                 val expectedVal = runExpr(ret.exprs.first(), retType)
-                if (retVal != expectedVal) throw AssertionError("Expected $expectedVal, got $retVal")
+                if (expectedVal is Float && expectedVal.isNaN() && retVal is Float) {
+                    java.lang.Float.floatToRawIntBits(expectedVal).let { expectedBits ->
+                        java.lang.Float.floatToRawIntBits(retVal).let { actualBits ->
+                            if (expectedBits != actualBits) throw AssertionError(
+                                "Expected NaN ${java.lang.Integer.toHexString(expectedBits)}, " +
+                                    "got ${java.lang.Integer.toHexString(actualBits)}"
+                            )
+                        }
+                    }
+                } else if (expectedVal is Double && expectedVal.isNaN() && retVal is Double) {
+                    java.lang.Double.doubleToRawLongBits(expectedVal).let { expectedBits ->
+                        java.lang.Double.doubleToRawLongBits(retVal).let { actualBits ->
+                            if (expectedBits != actualBits) throw AssertionError(
+                                "Expected NaN ${java.lang.Long.toHexString(expectedBits)}, " +
+                                    "got ${java.lang.Long.toHexString(actualBits)}"
+                            )
+                        }
+                    }
+                } else if (retVal != expectedVal) throw AssertionError("Expected $expectedVal, got $retVal")
             }
         }
     }
@@ -82,7 +100,7 @@ data class ScriptContext(
     }
 
     private fun exceptionFromCatch(e: Throwable) =
-        if (e is AssertionError) e else if (e is InvocationTargetException) e.targetException else e
+        e as? AssertionError ?: (e as? InvocationTargetException)?.targetException ?: e
 
     private fun assertFailure(e: Throwable, expectedString: String) {
         val innerEx = exceptionFromCatch(e)

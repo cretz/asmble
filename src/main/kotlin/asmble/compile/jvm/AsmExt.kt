@@ -83,14 +83,16 @@ val Long.const: AbstractInsnNode get() = when (this) {
 }
 
 val Float.const: AbstractInsnNode get() = when (this) {
-    0F -> InsnNode(Opcodes.FCONST_0)
+    // Ref: https://discuss.kotlinlang.org/t/when-isnt-equals/2452
+    0F -> if (this.equals(-0.0f)) LdcInsnNode(this) else InsnNode(Opcodes.FCONST_0)
     1F -> InsnNode(Opcodes.FCONST_1)
     2F -> InsnNode(Opcodes.FCONST_2)
     else -> LdcInsnNode(this)
 }
 
 val Double.const: AbstractInsnNode get() = when (this) {
-    0.0 -> InsnNode(Opcodes.DCONST_0)
+    // Ref: https://discuss.kotlinlang.org/t/when-isnt-equals/2452
+    0.0 -> if (this.equals(-0.0)) LdcInsnNode(this) else InsnNode(Opcodes.DCONST_0)
     1.0 -> InsnNode(Opcodes.DCONST_1)
     else -> LdcInsnNode(this)
 }
@@ -126,6 +128,10 @@ val AbstractInsnNode.isUnconditionalJump: Boolean get() = when (this.opcode) {
 
 val Node.Type.Func.asmDesc: String get() =
     (this.ret?.typeRef ?: Void::class.ref).asMethodRetDesc(*this.params.map { it.typeRef }.toTypedArray())
+
+fun ClassNode.addMethodIfNotPresent(m: MethodNode) {
+    this.methods.find { (it as MethodNode).let { it.name == m.name && it.desc == it.desc } } ?: this.methods.add(m)
+}
 
 fun ClassNode.withComputedFramesAndMaxs(): ByteArray {
     // TODO: compute maxs adds a bunch of NOPs for unreachable code

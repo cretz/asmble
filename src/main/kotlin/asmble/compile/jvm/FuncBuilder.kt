@@ -4,7 +4,6 @@ import asmble.ast.Node
 import asmble.util.Either
 import asmble.util.add
 import org.objectweb.asm.Opcodes
-import org.objectweb.asm.Type
 import org.objectweb.asm.tree.*
 import java.lang.invoke.MethodHandle
 
@@ -359,55 +358,66 @@ open class FuncBuilder {
         is Node.Instr.I32WrapI64 ->
             applyConv(ctx, fn, Long::class.ref, Int::class.ref, Opcodes.L2I)
         is Node.Instr.I32TruncSF32 ->
-            applyCheckedConv(ctx, fn, Float::class.ref, Int::class.ref, signed = true) ?:
+            assertTruncConv(ctx, fn, Float::class.ref, Int::class.ref, signed = true).let { fn ->
                 applyConv(ctx, fn, Float::class.ref, Int::class.ref, Opcodes.F2I)
+            }
         is Node.Instr.I32TruncUF32 ->
-            // TODO: wat?
-            applyConv(ctx, fn, Float::class.ref, Int::class.ref, Opcodes.F2I).
-                addInsns(java.lang.Short::class.invokeStatic("toUnsignedInt", Int::class, Short::class))
+            assertTruncConv(ctx, fn, Float::class.ref, Int::class.ref, signed = false).let { fn ->
+                applyConv(ctx, fn, Float::class.ref, Long::class.ref, Opcodes.F2L).let { fn ->
+                    applyConv(ctx, fn, Long::class.ref, Int::class.ref, Opcodes.L2I)
+                }
+            }
         is Node.Instr.I32TruncSF64 ->
-            applyConv(ctx, fn, Double::class.ref, Int::class.ref, Opcodes.D2I)
+            assertTruncConv(ctx, fn, Double::class.ref, Int::class.ref, signed = true).let { fn ->
+                applyConv(ctx, fn, Double::class.ref, Int::class.ref, Opcodes.D2I)
+            }
         is Node.Instr.I32TruncUF64 ->
-            applyConv(ctx, fn, Double::class.ref, Int::class.ref, Opcodes.D2I).
-                addInsns(java.lang.Short::class.invokeStatic("toUnsignedInt", Int::class, Short::class))
+            assertTruncConv(ctx, fn, Double::class.ref, Int::class.ref, signed = false).let { fn ->
+                applyConv(ctx, fn, Double::class.ref, Long::class.ref, Opcodes.D2L).let { fn ->
+                    applyConv(ctx, fn, Long::class.ref, Int::class.ref, Opcodes.L2I)
+                }
+            }
         is Node.Instr.I64ExtendSI32 ->
             applyConv(ctx, fn, Int::class.ref, Long::class.ref, Opcodes.I2L)
         is Node.Instr.I64ExtendUI32 ->
             applyConv(ctx, fn, Int::class.ref, Long::class.ref,
                 Integer::class.invokeStatic("toUnsignedLong", Long::class, Int::class))
         is Node.Instr.I64TruncSF32 ->
-            applyConv(ctx, fn, Float::class.ref, Long::class.ref, Opcodes.F2L)
+            assertTruncConv(ctx, fn, Float::class.ref, Long::class.ref, signed = true).let { fn ->
+                applyConv(ctx, fn, Float::class.ref, Long::class.ref, Opcodes.F2L)
+            }
         is Node.Instr.I64TruncUF32 ->
-            applyConv(ctx, fn, Float::class.ref, Long::class.ref, Opcodes.F2L).
-                addInsns(0xffL.const, InsnNode(Opcodes.LAND))
+            assertTruncConv(ctx, fn, Float::class.ref, Long::class.ref, signed = false).let { fn ->
+                applyI64TruncUF32(ctx, fn)
+            }
         is Node.Instr.I64TruncSF64 ->
-            applyConv(ctx, fn, Double::class.ref, Long::class.ref, Opcodes.D2L)
+            assertTruncConv(ctx, fn, Double::class.ref, Long::class.ref, signed = true).let { fn ->
+                applyConv(ctx, fn, Double::class.ref, Long::class.ref, Opcodes.D2L)
+            }
         is Node.Instr.I64TruncUF64 ->
-            // TODO: so wrong
-            applyConv(ctx, fn, Double::class.ref, Long::class.ref, Opcodes.D2L).
-                addInsns(0xffL.const, InsnNode(Opcodes.LAND))
+            assertTruncConv(ctx, fn, Double::class.ref, Long::class.ref, signed = false).let { fn ->
+                applyI64TruncUF64(ctx, fn)
+            }
         is Node.Instr.F32ConvertSI32 ->
             applyConv(ctx, fn, Int::class.ref, Float::class.ref, Opcodes.I2F)
         is Node.Instr.F32ConvertUI32 ->
             fn.addInsns(Integer::class.invokeStatic("toUnsignedLong", Long::class, Int::class)).
-                let { applyConv(ctx, it, Int::class.ref, Float::class.ref, Opcodes.L2F) }
+                let { fn -> applyConv(ctx, fn, Int::class.ref, Float::class.ref, Opcodes.L2F) }
         is Node.Instr.F32ConvertSI64 ->
             applyConv(ctx, fn, Long::class.ref, Float::class.ref, Opcodes.L2F)
         is Node.Instr.F32ConvertUI64 ->
-            fn.addInsns(0xffL.const, InsnNode(Opcodes.LAND)).
-                let { applyConv(ctx, it, Long::class.ref, Float::class.ref, Opcodes.L2F) }
+            applyF32ConvertUI64(ctx, fn)
         is Node.Instr.F32DemoteF64 ->
             applyConv(ctx, fn, Double::class.ref, Float::class.ref, Opcodes.D2F)
         is Node.Instr.F64ConvertSI32 ->
             applyConv(ctx, fn, Int::class.ref, Double::class.ref, Opcodes.I2D)
         is Node.Instr.F64ConvertUI32 ->
             fn.addInsns(Integer::class.invokeStatic("toUnsignedLong", Long::class, Int::class)).
-                let { applyConv(ctx, it, Int::class.ref, Double::class.ref, Opcodes.L2D) }
+                let { fn -> applyConv(ctx, fn, Int::class.ref, Double::class.ref, Opcodes.L2D) }
         is Node.Instr.F64ConvertSI64 ->
             applyConv(ctx, fn, Long::class.ref, Double::class.ref, Opcodes.L2D)
         is Node.Instr.F64ConvertUI64 ->
-            fn.addInsns(0xffL.const, InsnNode(Opcodes.LAND)).
-                let { applyConv(ctx, it, Long::class.ref, Double::class.ref, Opcodes.L2D) }
+            applyF64ConvertUI64(ctx, fn)
         is Node.Instr.F64PromoteF32 ->
             applyConv(ctx, fn, Float::class.ref, Double::class.ref, Opcodes.F2D)
         is Node.Instr.I32ReinterpretF32 ->
@@ -583,17 +593,117 @@ open class FuncBuilder {
         }
     }
 
-    fun applyCheckedConv(ctx: FuncContext, fn: Func, from: TypeRef, to: TypeRef, signed: Boolean): Func? {
-        if (!ctx.cls.checkConversionOverflow) return null
-        // One approach would be to take the previous result and make sure it
-        // was equal to the original. Another approach is to do the check inline.
-        // But the best approach is a static synthetic function at the class level.
-        if (from == Float::class.ref) {
-            if (to == Int::class.ref) {
-                if (signed) return fn.popExpecting(from).addInsns(ctx.cls.checkedF2SIConv).push(to)
-            }
+    fun applyF32ConvertUI64(ctx: FuncContext, fn: Func): Func {
+        // l >= 0 ? (float) l : ((float) ((l >> 1) * 2.0f))
+        val notPositive = LabelNode()
+        val allDone = LabelNode()
+        return fn.popExpecting(Long::class.ref).addInsns(
+            InsnNode(Opcodes.DUP2),
+            0L.const,
+            InsnNode(Opcodes.LCMP),
+            JumpInsnNode(Opcodes.IFLT, notPositive),
+            InsnNode(Opcodes.L2F),
+            JumpInsnNode(Opcodes.GOTO, allDone),
+            notPositive,
+            1.const,
+            InsnNode(Opcodes.LUSHR),
+            InsnNode(Opcodes.L2F),
+            2f.const,
+            InsnNode(Opcodes.FMUL),
+            allDone
+        ).push(Float::class.ref)
+    }
+
+    fun applyF64ConvertUI64(ctx: FuncContext, fn: Func): Func {
+        // l >= 0 ? (double) l : (((l >>> 1) | (l & 1)) * 2.0f)
+        val notPositive = LabelNode()
+        val allDone = LabelNode()
+        return fn.popExpecting(Long::class.ref).addInsns(
+            InsnNode(Opcodes.DUP2),
+            0L.const,
+            InsnNode(Opcodes.LCMP),
+            JumpInsnNode(Opcodes.IFLT, notPositive),
+            InsnNode(Opcodes.L2D),
+            JumpInsnNode(Opcodes.GOTO, allDone),
+            notPositive,
+            InsnNode(Opcodes.DUP2),
+            1.const,
+            InsnNode(Opcodes.LUSHR),
+            // Swap the shift result and the long on the stack
+            InsnNode(Opcodes.DUP2_X2), InsnNode(Opcodes.POP2),
+            1L.const,
+            InsnNode(Opcodes.LAND),
+            InsnNode(Opcodes.LOR),
+            InsnNode(Opcodes.L2D),
+            2.0.const,
+            InsnNode(Opcodes.DMUL),
+            allDone
+        ).push(Double::class.ref)
+    }
+
+    fun applyI64TruncUF32(ctx: FuncContext, fn: Func) = LabelNode().let { underMax ->
+        LabelNode().let { allDone ->
+            // If over max long, subtract and negate
+            // (Really, it's (long) (-9223372036854775808f + (f - 9223372036854775807f))
+            fn.popExpecting(Float::class.ref).addInsns(
+                InsnNode(Opcodes.DUP), // [f, f]
+                9223372036854775807f.const, // [f, f, c]
+                InsnNode(Opcodes.FCMPL), // [f, z]
+                JumpInsnNode(Opcodes.IFLT, underMax), // [f]
+                9223372036854775807f.const, // [f, c]
+                InsnNode(Opcodes.FSUB),
+                (-9223372036854775808f).const,
+                InsnNode(Opcodes.FADD),
+                InsnNode(Opcodes.F2L),
+                JumpInsnNode(Opcodes.GOTO, allDone),
+                underMax,
+                InsnNode(Opcodes.F2L),
+                allDone
+            ).push(Long::class.ref)
         }
-        return null
+    }
+
+    fun applyI64TruncUF64(ctx: FuncContext, fn: Func) = LabelNode().let { underMax ->
+        LabelNode().let { allDone ->
+            // If over max long, subtract and negate
+            fn.popExpecting(Double::class.ref).addInsns(
+                InsnNode(Opcodes.DUP2), // [f, f]
+                9223372036854775807.0.const, // [f, f, c]
+                InsnNode(Opcodes.DCMPL), // [f, z]
+                JumpInsnNode(Opcodes.IFLT, underMax), // [f]
+                9223372036854775807.0.const, // [f, c]
+                InsnNode(Opcodes.DSUB),
+                (-9223372036854775808.0).const,
+                InsnNode(Opcodes.DADD),
+                InsnNode(Opcodes.D2L),
+                JumpInsnNode(Opcodes.GOTO, allDone),
+                underMax,
+                InsnNode(Opcodes.D2L),
+                allDone
+            ).push(Long::class.ref)
+        }
+    }
+
+    fun assertTruncConv(ctx: FuncContext, fn: Func, from: TypeRef, to: TypeRef, signed: Boolean): Func {
+        if (!ctx.cls.checkTruncOverflow) return fn
+        if (from == Float::class.ref) {
+            if (to == Int::class.ref) return fn.addInsns(
+                InsnNode(Opcodes.DUP),
+                if (signed) ctx.cls.truncAssertF2SI else ctx.cls.truncAssertF2UI
+            ) else if (to == Long::class.ref) return fn.addInsns(
+                InsnNode(Opcodes.DUP),
+                if (signed) ctx.cls.truncAssertF2SL else ctx.cls.truncAssertF2UL
+            )
+        } else if (from == Double::class.ref) {
+            if (to == Int::class.ref) return fn.addInsns(
+                InsnNode(Opcodes.DUP2),
+                if (signed) ctx.cls.truncAssertD2SI else ctx.cls.truncAssertD2UI
+            ) else if (to == Long::class.ref) return fn.addInsns(
+                InsnNode(Opcodes.DUP2),
+                if (signed) ctx.cls.truncAssertD2SL else ctx.cls.truncAssertD2UL
+            )
+        }
+        return fn
     }
 
     fun applyConv(ctx: FuncContext, fn: Func, from: TypeRef, to: TypeRef, op: Int) =
@@ -953,61 +1063,6 @@ open class FuncBuilder {
     }.let {
         if (it.stack.isNotEmpty()) throw CompileErr.UnusedStackOnReturn(it.stack)
         it
-    }
-
-    fun buildF2SICheckedConv(ctx: ClsContext): MethodNode {
-        /*
-            public static int $$convF2SI(float f) {
-                if (Float.isNaN(f)) throw new ArithmeticException("Invalid conversion to integer");
-                if (f >= Integer.MAX_VALUE || f < Integer.MIN_VALUE)
-                    throw new ArithmeticException("Integer overflow");
-                return (int) f;
-            }
-        */
-        val name = "\$\$convF2SI"
-        val method = MethodNode(Opcodes.ACC_PRIVATE + Opcodes.ACC_STATIC + Opcodes.ACC_SYNTHETIC,
-            name, "(F)I", null, null)
-        fun addInsns(vararg insn: AbstractInsnNode) = insn.forEach(method.instructions::add)
-        fun throwArith(msg: String) = addInsns(
-            TypeInsnNode(Opcodes.NEW, ArithmeticException::class.ref.asmName),
-            InsnNode(Opcodes.DUP),
-            msg.const,
-            MethodInsnNode(Opcodes.INVOKESPECIAL, ArithmeticException::class.ref.asmName,
-                "<init>", "(Ljava/lang/String;)V", false),
-            InsnNode(Opcodes.ATHROW)
-        )
-        val firstIfSafe = LabelNode()
-        val secondIfFail = LabelNode()
-        val secondIfSafe = LabelNode()
-        addInsns(
-            // Check NaN and throw
-            VarInsnNode(Opcodes.FLOAD, 0),
-            MethodInsnNode(Opcodes.INVOKESTATIC, Float::class.javaObjectType.ref.asmName, "isNaN", "(F)Z", false),
-            JumpInsnNode(Opcodes.IFEQ, firstIfSafe)
-        )
-        throwArith("Invalid conversion to integer")
-        addInsns(
-            firstIfSafe,
-            // Check over or under int max/min
-            VarInsnNode(Opcodes.FLOAD, 0),
-            Integer.MAX_VALUE.toFloat().const,
-            InsnNode(Opcodes.FCMPL),
-            // TODO: So I can't store 2147483647.0f in an int? That seems wrong
-            JumpInsnNode(Opcodes.IFGE, secondIfFail),
-            VarInsnNode(Opcodes.FLOAD, 0),
-            Integer.MIN_VALUE.toFloat().const,
-            InsnNode(Opcodes.FCMPG),
-            JumpInsnNode(Opcodes.IFGE, secondIfSafe),
-            secondIfFail
-        )
-        throwArith("Integer overflow")
-        addInsns(
-            secondIfSafe,
-            VarInsnNode(Opcodes.FLOAD, 0),
-            InsnNode(Opcodes.F2I),
-            InsnNode(Opcodes.IRETURN)
-        )
-        return method
     }
 
     companion object : FuncBuilder()

@@ -687,18 +687,6 @@ open class SExprToAst {
     private fun String.toIntConst() = toBigIntegerConst().toInt()
     private fun String.toLongConst() = toBigIntegerConst().toLong()
 
-    private fun String.toBigDecimalConst() = try {
-        if (this.contains("0x")) this.replace("0x", "").let { noHexPrefix ->
-            // If there is a "p", take it off and append as "e" later
-            val pStart = noHexPrefix.indexOfAny(charArrayOf('P', 'p'))
-            val sansP = if (pStart == -1) noHexPrefix else noHexPrefix.substring(0, pStart)
-            // Chop on decimal, big int parse as hex, put back as decimal, add P
-            val dec = sansP.split('.').map { BigInteger(it, 16).toString() }.joinToString(".")
-            if (pStart == -1) BigDecimal(dec) else BigDecimal(dec + "e" + noHexPrefix.substring(pStart + 1))
-        } else BigDecimal(this)
-    } catch (e: NumberFormatException) {
-        throw if (e.message.isNullOrEmpty()) NumberFormatException(this) else e
-    }
     private fun String.toFloatConst() =
         if (this == "infinity") Float.POSITIVE_INFINITY
         else if (this == "-infinity") Float.NEGATIVE_INFINITY
@@ -708,7 +696,7 @@ open class SExprToAst {
             java.lang.Float.floatToRawIntBits(Float.NaN) - this.substring(4).toIntConst()
         ) else if (this.startsWith("-nan:")) java.lang.Float.intBitsToFloat(
             java.lang.Float.floatToRawIntBits(-Float.NaN) - this.substring(5).toIntConst()
-        ) else toBigDecimalConst().toFloat()
+        ) else this.toFloat()
     private fun String.toDoubleConst() =
         if (this == "infinity") Double.POSITIVE_INFINITY
         else if (this == "-infinity") Double.NEGATIVE_INFINITY
@@ -718,7 +706,7 @@ open class SExprToAst {
             java.lang.Double.doubleToRawLongBits(Double.NaN) - this.substring(4).toLongConst()
         ) else if (this.startsWith("-nan:")) java.lang.Double.longBitsToDouble(
             java.lang.Double.doubleToRawLongBits(-Double.NaN) - this.substring(5).toLongConst()
-        ) else toBigDecimalConst().toDouble()
+        ) else this.toDouble()
 
     private fun SExpr.requireSymbol(contents: String, quotedCheck: Boolean? = null) {
         if (this is SExpr.Symbol && this.contents == contents &&
