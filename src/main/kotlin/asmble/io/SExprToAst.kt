@@ -691,22 +691,24 @@ open class SExprToAst {
         if (this == "infinity") Float.POSITIVE_INFINITY
         else if (this == "-infinity") Float.NEGATIVE_INFINITY
         else if (this == "nan") Float.NaN
-        else if (this == "-nan") -Float.NaN
+        else if (this == "-nan") java.lang.Float.intBitsToFloat(0xffc00000.toInt())
         else if (this.startsWith("nan:")) java.lang.Float.intBitsToFloat(
-            java.lang.Float.floatToRawIntBits(Float.NaN) - this.substring(4).toIntConst()
+            0x7f800000 + this.substring(4).toIntConst()
         ) else if (this.startsWith("-nan:")) java.lang.Float.intBitsToFloat(
-            java.lang.Float.floatToRawIntBits(-Float.NaN) - this.substring(5).toIntConst()
-        ) else this.toFloat()
+            0xff800000.toInt() + this.substring(5).toIntConst()
+        ) else if (this.startsWith("0x") && !this.contains('P', true)) this.toLongConst().toFloat()
+        else this.toFloat()
     private fun String.toDoubleConst() =
         if (this == "infinity") Double.POSITIVE_INFINITY
         else if (this == "-infinity") Double.NEGATIVE_INFINITY
         else if (this == "nan") Double.NaN
-        else if (this == "-nan") -Double.NaN
+        else if (this == "-nan") java.lang.Double.longBitsToDouble(-2251799813685248) // i.e. 0xfff8000000000000
         else if (this.startsWith("nan:")) java.lang.Double.longBitsToDouble(
-            java.lang.Double.doubleToRawLongBits(Double.NaN) - this.substring(4).toLongConst()
+            0x7ff0000000000000 + this.substring(4).toLongConst()
         ) else if (this.startsWith("-nan:")) java.lang.Double.longBitsToDouble(
-            java.lang.Double.doubleToRawLongBits(-Double.NaN) - this.substring(5).toLongConst()
-        ) else this.toDouble()
+            -4503599627370496 + this.substring(5).toLongConst() // i.e. 0xfff0000000000000
+        ) else if (this.startsWith("0x") && !this.contains('P', true)) this.toLongConst().toDouble()
+        else this.toDouble()
 
     private fun SExpr.requireSymbol(contents: String, quotedCheck: Boolean? = null) {
         if (this is SExpr.Symbol && this.contents == contents &&

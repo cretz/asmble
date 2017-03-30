@@ -37,7 +37,6 @@ class CoreTestUnit(val name: String, val wast: String, val expectedOutput: Strin
         */
 
         val knownGoodTests = arrayOf(
-            "temp.wast",
             "address.wast",
             "address-offset-range.fail.wast",
             "block.wast",

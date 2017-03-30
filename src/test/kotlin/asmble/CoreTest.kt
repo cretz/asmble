@@ -13,7 +13,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 
 @RunWith(Parameterized::class)
-class CoreTest(val unit: CoreTestUnit) : Logger by Logger.Print(Logger.Level.TRACE) {
+class CoreTest(val unit: CoreTestUnit) : Logger by Logger.Print(Logger.Level.INFO) {
 
     @Test
     fun testName() {
