@@ -7,24 +7,30 @@ import asmble.util.plus
 open class StrToSExpr {
     sealed class ParseResult {
         data class Pos(val line: Int, val char: Int)
-        data class Success(val vals: List<SExpr>, val exprOffsetMap: IdentityMap<SExpr, Pos>) : ParseResult()
+        data class Success(
+            val vals: List<SExpr>,
+            // Key is ident hash code, val is str char offset
+            val exprIdentOffsetMap: Map<Int, Int>
+        ) : ParseResult() {
+            fun exprPos(fullStr: CharSequence, expr: SExpr) =
+                fullStr.posFromOffset(exprIdentOffsetMap.getValue(System.identityHashCode(expr)))
+        }
         data class Error(val pos: Pos, val msg: String) : ParseResult()
     }
 
     fun parse(str: CharSequence): ParseResult {
         val state = ParseState(str)
-        var ret = emptyList<SExpr>()
+        val ret = mutableListOf<SExpr>()
         while (!state.isEof) {
             ret += state.nextSExpr() ?: break
             if (state.err != null) return ParseResult.Error(str.posFromOffset(state.offset), state.err!!)
         }
-//        val retVals = if (ret.size == 1 && ret[0] is SExpr.Multi) (ret[0] as SExpr.Multi).vals else ret
         return ParseResult.Success(ret, state.exprOffsetMap)
     }
 
     private class ParseState(
         val str: CharSequence,
-        var exprOffsetMap: IdentityMap<SExpr, ParseResult.Pos> = IdentityMap(),
+        val exprOffsetMap: MutableMap<Int, Int> = mutableMapOf(),
         var offset: Int = 0,
         var err: String? = null
     ) {
@@ -36,15 +42,15 @@ open class StrToSExpr {
             when (str[offset]) {
                 '(' -> {
                     offset++
-                    var ret = SExpr.Multi()
+                    val inner = mutableListOf<SExpr>()
                     while (err == null && !isEof && str[offset] != ')') {
-                        val innerExp = nextSExpr() ?: break
-                        ret = ret.copy(ret.vals + innerExp)
+                        inner.add(nextSExpr() ?: break)
                     }
                     if (err == null) {
                         if (str[offset] == ')') offset++ else err = "EOF when expected ')'"
                     }
-                    exprOffsetMap += ret to str.posFromOffset(origOffset)
+                    val ret = SExpr.Multi(inner)
+                    exprOffsetMap.put(System.identityHashCode(ret), origOffset)
                     return ret
                 }
                 '"' -> {
@@ -83,7 +89,7 @@ open class StrToSExpr {
                     if (err == null && str[offset] != '"') err = "EOF when expected '\"'"
                     else if (err == null) offset++
                     val ret = SExpr.Symbol(retStr, true)
-                    exprOffsetMap += ret to str.posFromOffset(origOffset)
+                    exprOffsetMap.put(System.identityHashCode(ret), origOffset)
                     return ret
                 }
                 else -> {
@@ -91,7 +97,7 @@ open class StrToSExpr {
                     while (!isEof && !"();\"".contains(str[offset]) && !str[offset].isWhitespace()) offset++
                     if (origOffset == offset) return null
                     val ret = SExpr.Symbol(str.substring(origOffset, offset))
-                    exprOffsetMap += ret to str.posFromOffset(origOffset)
+                    exprOffsetMap.put(System.identityHashCode(ret), origOffset)
                     return ret
                 }
             }

@@ -7,6 +7,8 @@ import org.objectweb.asm.Opcodes
 import org.objectweb.asm.tree.*
 import java.lang.invoke.MethodHandle
 
+// TODO: modularize
+
 open class FuncBuilder {
     fun fromFunc(ctx: ClsContext, f: Node.Func, index: Int): Func {
         // TODO: validate local size?
@@ -284,19 +286,21 @@ open class FuncBuilder {
         is Node.Instr.I64Xor ->
             applyI64Binary(ctx, fn, Opcodes.LXOR)
         is Node.Instr.I64Shl ->
-            applyI64Binary(ctx, fn, Opcodes.LSHL)
+            applyI64BinarySecondOpI32(ctx, fn, Opcodes.LSHL)
         is Node.Instr.I64ShrS ->
-            applyI64Binary(ctx, fn, Opcodes.LSHR)
+            applyI64BinarySecondOpI32(ctx, fn, Opcodes.LSHR)
         is Node.Instr.I64ShrU ->
-            applyI64Binary(ctx, fn, Opcodes.LUSHR)
+            applyI64BinarySecondOpI32(ctx, fn, Opcodes.LUSHR)
         is Node.Instr.I64Rotl ->
-            applyI64Binary(ctx, fn, java.lang.Long::class.invokeStatic("rotateLeft",
+            applyI64BinarySecondOpI32(ctx, fn, java.lang.Long::class.invokeStatic("rotateLeft",
                 Long::class, Long::class, Int::class))
         is Node.Instr.I64Rotr ->
-            applyI64Binary(ctx, fn, java.lang.Long::class.invokeStatic("rotateRight",
+            applyI64BinarySecondOpI32(ctx, fn, java.lang.Long::class.invokeStatic("rotateRight",
                 Long::class, Long::class, Int::class))
         is Node.Instr.F32Abs ->
-            applyF32Unary(ctx, fn, forceFnType<(Float) -> Float>(Math::abs).invokeStatic())
+            applyF32UnaryPreserveNanBits(ctx, fn) { fn ->
+                applyF32Unary(ctx, fn, forceFnType<(Float) -> Float>(Math::abs).invokeStatic())
+            }
         is Node.Instr.F32Neg ->
             applyF32Unary(ctx, fn, InsnNode(Opcodes.FNEG))
         is Node.Instr.F32Ceil ->
@@ -306,9 +310,9 @@ open class FuncBuilder {
         is Node.Instr.F32Trunc ->
             applyF32Trunc(ctx, fn)
         is Node.Instr.F32Nearest ->
-            // TODO: this ain't right wrt infinity and other things
-            applyF32Unary(ctx, fn, forceFnType<(Float) -> Int>(Math::round).invokeStatic()).
-                addInsns(InsnNode(Opcodes.I2F))
+            applyF32UnaryPreserveNanBits(ctx, fn) { fn ->
+                applyWithF32To64AndBack(ctx, fn) { fn -> applyF64Unary(ctx, fn, Math::rint.invokeStatic()) }
+            }
         is Node.Instr.F32Sqrt ->
             applyWithF32To64AndBack(ctx, fn) { fn -> applyF64Unary(ctx, fn, Math::sqrt.invokeStatic()) }
         is Node.Instr.F32Add ->
@@ -336,9 +340,7 @@ open class FuncBuilder {
         is Node.Instr.F64Trunc ->
             applyF64Trunc(ctx, fn)
         is Node.Instr.F64Nearest ->
-            // TODO: this ain't right wrt infinity and other things
-            applyF64Unary(ctx, fn, forceFnType<(Double) -> Long>(Math::round).invokeStatic()).
-                addInsns(InsnNode(Opcodes.L2D))
+            applyF64Unary(ctx, fn, Math::rint.invokeStatic())
         is Node.Instr.F64Sqrt ->
             applyF64Unary(ctx, fn, Math::sqrt.invokeStatic())
         is Node.Instr.F64Add ->
@@ -759,6 +761,20 @@ open class FuncBuilder {
         ).push(Float::class.ref)
     }
 
+    fun applyF32UnaryPreserveNanBits(ctx: FuncContext, fn: Func, cb: (Func) -> Func): Func {
+        if (!ctx.cls.preserveNanBits) return cb(fn)
+        // Extra work for NaN, ref:
+        // http://stackoverflow.com/questions/43129365/javas-math-rint-not-behaving-as-expected-when-using-nan
+        val allDone = LabelNode()
+        return fn.addInsns(
+            InsnNode(Opcodes.DUP), // [f, f]
+            InsnNode(Opcodes.DUP), // [f, f, f]
+            // Equals compare to check nan
+            InsnNode(Opcodes.FCMPL), // [f, z]
+            JumpInsnNode(Opcodes.IFNE, allDone) // [f]
+        ).let(cb).addInsns(allDone)
+    }
+
     fun applyWithF32To64AndBack(ctx: FuncContext, fn: Func, f: (Func) -> Func) =
         fn.popExpecting(Float::class.ref).
             addInsns(InsnNode(Opcodes.F2D)).
@@ -778,6 +794,13 @@ open class FuncBuilder {
 
     fun applyF32Binary(ctx: FuncContext, fn: Func, insn: AbstractInsnNode) =
         applyBinary(ctx, fn, Float::class.ref, insn)
+
+    fun applyI64BinarySecondOpI32(ctx: FuncContext, fn: Func, op: Int) =
+        applyI64BinarySecondOpI32(ctx, fn, InsnNode(op))
+
+    fun applyI64BinarySecondOpI32(ctx: FuncContext, fn: Func, insn: AbstractInsnNode) =
+        fn.popExpectingMulti(Long::class.ref, Long::class.ref).
+            addInsns(InsnNode(Opcodes.L2I), insn).push(Long::class.ref)
 
     fun applyI64Binary(ctx: FuncContext, fn: Func, op: Int) =
         applyI64Binary(ctx, fn, InsnNode(op))

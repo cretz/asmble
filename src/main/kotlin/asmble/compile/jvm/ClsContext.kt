@@ -21,7 +21,8 @@ data class ClsContext(
     val truncAssertionBuilder: TruncAssertionBuilder? = TruncAssertionBuilder,
     val nonAdjacentMemAccessesRequiringLocalVar: Int = 3,
     val eagerFailLargeMemOffset: Boolean = true,
-    val preventMemIndexOverflow: Boolean = false
+    val preventMemIndexOverflow: Boolean = false,
+    val preserveNanBits: Boolean = true
 ) : Logger by logger {
     val importFuncs: List<Node.Import> by lazy { mod.imports.filter { it.kind is Node.Import.Kind.Func } }
     val importGlobals: List<Node.Import> by lazy { mod.imports.filter { it.kind is Node.Import.Kind.Global } }

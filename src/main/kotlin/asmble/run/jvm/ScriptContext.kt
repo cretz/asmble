@@ -42,6 +42,7 @@ data class ScriptContext(
         debug { "Performing assertion: " + SExprToStr.fromSExpr(AstToSExpr.fromAssertion(cmd)) }
         when (cmd) {
             is Script.Cmd.Assertion.Return -> assertReturn(cmd)
+            is Script.Cmd.Assertion.ReturnNan -> assertReturnNan(cmd)
             is Script.Cmd.Assertion.Trap -> assertTrap(cmd)
             is Script.Cmd.Assertion.Invalid -> assertInvalid(cmd)
             is Script.Cmd.Assertion.Exhaustion -> assertExhaustion(cmd)
@@ -77,6 +78,15 @@ data class ScriptContext(
                     }
                 } else if (retVal != expectedVal) throw AssertionError("Expected $expectedVal, got $retVal")
             }
+        }
+    }
+
+    fun assertReturnNan(ret: Script.Cmd.Assertion.ReturnNan) {
+        val (retType, retVal) = doAction(ret.action)
+        when (retType) {
+            Node.Type.Value.F32 -> if (!(retVal as Float).isNaN()) throw AssertionError("Expected NaN, got $retVal")
+            Node.Type.Value.F64 -> if (!(retVal as Double).isNaN()) throw AssertionError("Expected NaN, got $retVal")
+            else -> throw AssertionError("Expected NaN, got $retVal")
         }
     }
 

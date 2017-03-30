@@ -76,7 +76,7 @@ open class InsnReworker {
                 is Node.Instr.I32Store, is Node.Instr.I64Store, is Node.Instr.F32Store, is Node.Instr.F64Store,
                 is Node.Instr.I32Store8, is Node.Instr.I32Store16, is Node.Instr.I64Store8, is Node.Instr.I64Store16,
                 is Node.Instr.I64Store32 ->
-                    injectBeforeLastStackCount(Insn.MemNeededOnStack, 1)
+                    injectBeforeLastStackCount(Insn.MemNeededOnStack, 2)
                 // Grow memory requires "mem" before the single param
                 is Node.Instr.GrowMemory ->
                     injectBeforeLastStackCount(Insn.MemNeededOnStack, 1)
