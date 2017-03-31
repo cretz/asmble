@@ -203,11 +203,11 @@ open class FuncBuilder {
         is Node.Instr.F32Lt ->
             applyF32Cmp(ctx, fn, Opcodes.IFLT)
         is Node.Instr.F32Gt ->
-            applyF32Cmp(ctx, fn, Opcodes.IFGT)
+            applyF32Cmp(ctx, fn, Opcodes.IFGT, nanIsOne = false)
         is Node.Instr.F32Le ->
             applyF32Cmp(ctx, fn, Opcodes.IFLE)
         is Node.Instr.F32Ge ->
-            applyF32Cmp(ctx, fn, Opcodes.IFGE)
+            applyF32Cmp(ctx, fn, Opcodes.IFGE, nanIsOne = false)
         is Node.Instr.F64Eq ->
             applyF64Cmp(ctx, fn, Opcodes.IFEQ)
         is Node.Instr.F64Ne ->
@@ -215,11 +215,11 @@ open class FuncBuilder {
         is Node.Instr.F64Lt ->
             applyF64Cmp(ctx, fn, Opcodes.IFLT)
         is Node.Instr.F64Gt ->
-            applyF64Cmp(ctx, fn, Opcodes.IFGT)
+            applyF64Cmp(ctx, fn, Opcodes.IFGT, nanIsOne = false)
         is Node.Instr.F64Le ->
             applyF64Cmp(ctx, fn, Opcodes.IFLE)
         is Node.Instr.F64Ge ->
-            applyF64Cmp(ctx, fn, Opcodes.IFGE)
+            applyF64Cmp(ctx, fn, Opcodes.IFGE, nanIsOne = false)
         is Node.Instr.I32Clz ->
             // TODO Should make unsigned?
             applyI32Unary(ctx, fn, Integer::class.invokeStatic("numberOfLeadingZeros", Int::class, Int::class))
@@ -298,7 +298,7 @@ open class FuncBuilder {
             applyI64BinarySecondOpI32(ctx, fn, java.lang.Long::class.invokeStatic("rotateRight",
                 Long::class, Long::class, Int::class))
         is Node.Instr.F32Abs ->
-            applyF32UnaryPreserveNanBits(ctx, fn) { fn ->
+            applyF32UnaryNanReturnConst(ctx, fn) { fn ->
                 applyF32Unary(ctx, fn, forceFnType<(Float) -> Float>(Math::abs).invokeStatic())
             }
         is Node.Instr.F32Neg ->
@@ -310,7 +310,7 @@ open class FuncBuilder {
         is Node.Instr.F32Trunc ->
             applyF32Trunc(ctx, fn)
         is Node.Instr.F32Nearest ->
-            applyF32UnaryPreserveNanBits(ctx, fn) { fn ->
+            applyF32UnaryNanReturnSame(ctx, fn) { fn ->
                 applyWithF32To64AndBack(ctx, fn) { fn -> applyF64Unary(ctx, fn, Math::rint.invokeStatic()) }
             }
         is Node.Instr.F32Sqrt ->
@@ -330,7 +330,9 @@ open class FuncBuilder {
         is Node.Instr.F32CopySign ->
             applyF32Binary(ctx, fn, forceFnType<(Float, Float) -> Float>(Math::copySign).invokeStatic())
         is Node.Instr.F64Abs ->
-            applyF64Unary(ctx, fn, forceFnType<(Double) -> Double>(Math::abs).invokeStatic())
+            applyF32UnaryNanReturnConst(ctx, fn) { fn ->
+                applyF64Unary(ctx, fn, forceFnType<(Double) -> Double>(Math::abs).invokeStatic())
+            }
         is Node.Instr.F64Neg ->
             applyF64Unary(ctx, fn, InsnNode(Opcodes.DNEG))
         is Node.Instr.F64Ceil ->
@@ -340,7 +342,9 @@ open class FuncBuilder {
         is Node.Instr.F64Trunc ->
             applyF64Trunc(ctx, fn)
         is Node.Instr.F64Nearest ->
-            applyF64Unary(ctx, fn, Math::rint.invokeStatic())
+            applyF64UnaryNanReturnSame(ctx, fn) { fn ->
+                applyF64Unary(ctx, fn, Math::rint.invokeStatic())
+            }
         is Node.Instr.F64Sqrt ->
             applyF64Unary(ctx, fn, Math::sqrt.invokeStatic())
         is Node.Instr.F64Add ->
@@ -761,8 +765,58 @@ open class FuncBuilder {
         ).push(Float::class.ref)
     }
 
-    fun applyF32UnaryPreserveNanBits(ctx: FuncContext, fn: Func, cb: (Func) -> Func): Func {
-        if (!ctx.cls.preserveNanBits) return cb(fn)
+    fun applyF64UnaryNanReturnConst(ctx: FuncContext, fn: Func, cb: (Func) -> Func): Func {
+        if (!ctx.cls.accurateNanBits) return cb(fn)
+        val isNan = LabelNode()
+        val allDone = LabelNode()
+        return fn.addInsns(
+            InsnNode(Opcodes.DUP2), // [d, d]
+            InsnNode(Opcodes.DUP2), // [d, d, d]
+            // Equals compare to check nan
+            InsnNode(Opcodes.DCMPL), // [d, z]
+            JumpInsnNode(Opcodes.IFNE, isNan) // [d]
+        ).let(cb).addInsns(
+            JumpInsnNode(Opcodes.GOTO, allDone),
+            isNan,
+            InsnNode(Opcodes.POP2),
+            Double.NaN.const,
+            allDone
+        )
+    }
+
+    fun applyF32UnaryNanReturnConst(ctx: FuncContext, fn: Func, cb: (Func) -> Func): Func {
+        if (!ctx.cls.accurateNanBits) return cb(fn)
+        val isNan = LabelNode()
+        val allDone = LabelNode()
+        return fn.addInsns(
+            InsnNode(Opcodes.DUP), // [f, f]
+            InsnNode(Opcodes.DUP), // [f, f, f]
+            // Equals compare to check nan
+            InsnNode(Opcodes.FCMPL), // [f, z]
+            JumpInsnNode(Opcodes.IFNE, isNan) // [f]
+        ).let(cb).addInsns(
+            JumpInsnNode(Opcodes.GOTO, allDone),
+            isNan,
+            InsnNode(Opcodes.POP),
+            Float.NaN.const,
+            allDone
+        )
+    }
+
+    fun applyF64UnaryNanReturnSame(ctx: FuncContext, fn: Func, cb: (Func) -> Func): Func {
+        if (!ctx.cls.accurateNanBits) return cb(fn)
+        val allDone = LabelNode()
+        return fn.addInsns(
+            InsnNode(Opcodes.DUP2), // [d, d]
+            InsnNode(Opcodes.DUP2), // [d, d, d]
+            // Equals compare to check nan
+            InsnNode(Opcodes.DCMPL), // [d, z]
+            JumpInsnNode(Opcodes.IFNE, allDone) // [d]
+        ).let(cb).addInsns(allDone)
+    }
+
+    fun applyF32UnaryNanReturnSame(ctx: FuncContext, fn: Func, cb: (Func) -> Func): Func {
+        if (!ctx.cls.accurateNanBits) return cb(fn)
         // Extra work for NaN, ref:
         // http://stackoverflow.com/questions/43129365/javas-math-rint-not-behaving-as-expected-when-using-nan
         val allDone = LabelNode()
@@ -832,19 +886,18 @@ open class FuncBuilder {
     fun applyUnary(ctx: FuncContext, fn: Func, type: TypeRef, insn: AbstractInsnNode) =
         fn.popExpecting(type).addInsns(insn).push(type)
 
-    fun applyF32Cmp(ctx: FuncContext, fn: Func, op: Int) =
+    fun applyF32Cmp(ctx: FuncContext, fn: Func, op: Int, nanIsOne: Boolean = true) =
+        // TODO: Can we shorten this and use the direct cmp result instead of IF<OP>?
         fn.popExpecting(Float::class.ref).
             popExpecting(Float::class.ref).
-            // TODO: test whether we need FCMPG instead
-            addInsns(InsnNode(Opcodes.FCMPL)).
+            addInsns(InsnNode(if (nanIsOne) Opcodes.FCMPG else Opcodes.FCMPL)).
             push(Int::class.ref).
             let { fn -> applyI32UnaryCmp(ctx, fn, op) }
 
-    fun applyF64Cmp(ctx: FuncContext, fn: Func, op: Int) =
+    fun applyF64Cmp(ctx: FuncContext, fn: Func, op: Int, nanIsOne: Boolean = true) =
         fn.popExpecting(Double::class.ref).
             popExpecting(Double::class.ref).
-            // TODO: test whether we need DCMPG instead
-            addInsns(InsnNode(Opcodes.DCMPL)).
+            addInsns(InsnNode(if (nanIsOne) Opcodes.DCMPG else Opcodes.FCMPL)).
             push(Int::class.ref).
             let { fn -> applyI32UnaryCmp(ctx, fn, op) }
 
