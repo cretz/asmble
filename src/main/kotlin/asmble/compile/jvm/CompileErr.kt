@@ -50,4 +50,10 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
     ) : CompileErr("Unknown function at index $index") {
         override val asmErrString get() = "unknown function"
     }
+
+    class UnknownLocal(
+        val index: Int
+    ) : CompileErr("Unknown local at index $index") {
+        override val asmErrString get() = "unknown local"
+    }
 }

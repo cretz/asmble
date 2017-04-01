@@ -1,7 +1,5 @@
 package asmble.compile.jvm
 
-import asmble.ast.Node
-
 sealed class Insn {
     data class Node(val insn: asmble.ast.Node.Instr) : Insn()
     data class ImportFuncRefNeededOnStack(val index: Int) : Insn()

@@ -94,9 +94,12 @@ open class AstToAsm {
                 else origMemCon.addInsns(VarInsnNode(Opcodes.ALOAD, 1)).push(ctx.mem.memType)
             // Ask mem to build the data, giving it a callback to put the offset on the stack
             ctx.mem.data(memCon, data.data) { memCon ->
-                val funcCtx = FuncContext(ctx, Node.Func(
-                    Node.Type.Func(emptyList(), null), emptyList(), data.offset),
-                    ctx.reworker.rework(ctx, data.offset, Node.Type.Value.I32))
+                val func = Node.Func(
+                    type = Node.Type.Func(emptyList(), Node.Type.Value.I32),
+                    locals = emptyList(),
+                    instructions = data.offset
+                )
+                val funcCtx = FuncContext(ctx, func, ctx.reworker.rework(ctx, func))
                 funcCtx.insns.foldIndexed(memCon) { index, memCon, insn ->
                     ctx.funcBuilder.applyInsn(funcCtx, memCon, insn, index)
                 }

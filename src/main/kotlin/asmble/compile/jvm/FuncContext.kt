@@ -9,7 +9,5 @@ data class FuncContext(
     val insns: List<Insn>,
     val memIsLocalVar: Boolean = false
 ) : Logger by cls.logger {
-    fun actualLocalIndex(givenIndex: Int) =
-        // Add 1 for "this"
-        (node.type.params + node.locals).take(givenIndex).sumBy { it.typeRef.stackSize } + 1
+    fun actualLocalIndex(givenIndex: Int) = node.actualLocalIndex(givenIndex)
 }

@@ -6,7 +6,6 @@ import asmble.ast.SExpr
 import asmble.ast.Script
 import asmble.util.takeUntilNullLazy
 import com.google.common.primitives.UnsignedInteger
-import java.math.BigDecimal
 import java.math.BigInteger
 
 typealias NameMap = Map<String, Int>
@@ -203,12 +202,12 @@ open class SExprToAst {
         val locals = exp.repeated("local", currentIndex, { toLocals(it) }).mapIndexed { index, (nameMaybe, vals) ->
             nameMaybe?.also { require(vals.size == 1); nameMap += it to index }
             vals
-        }.flatten()
+        }
         currentIndex += locals.size
         val (instrs, _) = toInstrs(exp, currentIndex, ExprContext(nameMap))
         // Imports can't have locals or instructions
         if (maybeImpExp?.importModule != null) require(locals.isEmpty() && instrs.isEmpty())
-        return Triple(name, Node.Func(sig, locals, instrs), maybeImpExp)
+        return Triple(name, Node.Func(sig, locals.flatten(), instrs), maybeImpExp)
     }
 
     fun toFuncSig(exp: SExpr.Multi, offset: Int, origNameMap: NameMap): Triple<NameMap, Int, Node.Type.Func> {
@@ -688,25 +687,25 @@ open class SExprToAst {
     private fun String.toLongConst() = toBigIntegerConst().toLong()
 
     private fun String.toFloatConst() =
-        if (this == "infinity") Float.POSITIVE_INFINITY
+        if (this == "infinity" || this == "+infinity") Float.POSITIVE_INFINITY
         else if (this == "-infinity") Float.NEGATIVE_INFINITY
-        else if (this == "nan") Float.NaN
+        else if (this == "nan" || this == "+nan") java.lang.Float.intBitsToFloat(0x7fc00000)
         else if (this == "-nan") java.lang.Float.intBitsToFloat(0xffc00000.toInt())
-        else if (this.startsWith("nan:")) java.lang.Float.intBitsToFloat(
-            0x7f800000 + this.substring(4).toIntConst()
+        else if (this.startsWith("nan:") || this.startsWith("+nan:")) java.lang.Float.intBitsToFloat(
+            0x7f800000 + this.substring(this.indexOf(':') + 1).toIntConst()
         ) else if (this.startsWith("-nan:")) java.lang.Float.intBitsToFloat(
-            0xff800000.toInt() + this.substring(5).toIntConst()
+            0xff800000.toInt() + this.substring(this.indexOf(':') + 1).toIntConst()
         ) else if (this.startsWith("0x") && !this.contains('P', true)) this.toLongConst().toFloat()
         else this.toFloat()
     private fun String.toDoubleConst() =
-        if (this == "infinity") Double.POSITIVE_INFINITY
+        if (this == "infinity" || this == "+infinity") Double.POSITIVE_INFINITY
         else if (this == "-infinity") Double.NEGATIVE_INFINITY
-        else if (this == "nan") Double.NaN
+        else if (this == "nan" || this == "+nan") java.lang.Double.longBitsToDouble(0x7ff8000000000000)
         else if (this == "-nan") java.lang.Double.longBitsToDouble(-2251799813685248) // i.e. 0xfff8000000000000
-        else if (this.startsWith("nan:")) java.lang.Double.longBitsToDouble(
-            0x7ff0000000000000 + this.substring(4).toLongConst()
+        else if (this.startsWith("nan:") || this.startsWith("+nan:")) java.lang.Double.longBitsToDouble(
+            0x7ff0000000000000 + this.substring(this.indexOf(':') + 1).toLongConst()
         ) else if (this.startsWith("-nan:")) java.lang.Double.longBitsToDouble(
-            -4503599627370496 + this.substring(5).toLongConst() // i.e. 0xfff0000000000000
+            -4503599627370496 + this.substring(this.indexOf(':') + 1).toLongConst() // i.e. 0xfff0000000000000
         ) else if (this.startsWith("0x") && !this.contains('P', true)) this.toLongConst().toDouble()
         else this.toDouble()
 

@@ -4,9 +4,88 @@ import asmble.ast.Node
 
 open class InsnReworker {
 
+    fun rework(ctx: ClsContext, func: Node.Func): List<Insn> {
+        return injectNeededStackVars(ctx, func.instructions).let { insns ->
+            addEagerLocalInitializers(ctx, func, insns).let { insns ->
+                wrapWithImplicitBlock(ctx, insns, func.type.ret)
+            }
+        }
+    }
 
-    fun rework(ctx: ClsContext, insns: List<Node.Instr>, retType: Node.Type.Value?): List<Insn> {
-        return injectNeededStackVars(ctx, insns).let { insns -> wrapWithImplicitBlock(ctx, insns, retType) }
+    fun addEagerLocalInitializers(ctx: ClsContext, func: Node.Func, insns: List<Insn>): List<Insn> {
+        if (func.locals.isEmpty()) return insns
+        // The JVM requires you set a local before you access it. WASM requires that
+        // all locals are implicitly zero. After some thought, we're going to make this
+        // an easy algorithm where, for any get_local, there must be a set/tee_local
+        // in a preceding insn before a branch of any form (br, br_if, and br_table).
+        // If there isn't, an eager set_local will be added at the beginning to init
+        // to 0.
+        //
+        // This should prevent any false positives (i.e. a get_local before
+        // a set/tee_local) while reducing false negatives (i.e. a get_local where it
+        // just doesn't seem like there is a set/tee but there is). Sure there are more
+        // accurate ways such as specifically injecting sets where needed, or turning
+        // the first non-set get to a tee, or counting specific block depths, but this
+        // keeps it simple for now.
+        //
+        // Note, while walking backwards up the insns to find set/tee, we do skip entire
+        // blocks/loops/if+else combined with "end"
+        var neededEagerLocalIndices = emptySet<Int>()
+        fun addEagerSetIfNeeded(getInsnIndex: Int, localIndex: Int) {
+            // Within the param range? nothing needed
+            if (localIndex < func.type.params.size) return
+            // Already loading? nothing needed
+            if (neededEagerLocalIndices.contains(localIndex)) return
+            var blockInitsToSkip = 0
+            // Get first set/tee or branching insn (or nothing of course)
+            val insn = insns.take(getInsnIndex).asReversed().find { insn ->
+                insn is Insn.Node && when (insn.insn) {
+                    // End means we need to skip to next block start
+                    is Node.Instr.End -> {
+                        blockInitsToSkip++
+                        false
+                    }
+                    // Else with no inits to skip means we are in the else
+                    // and we should skip to the if (i.e. nothing between
+                    // if and else)
+                    is Node.Instr.Else -> {
+                        if (blockInitsToSkip == 0) blockInitsToSkip++
+                        false
+                    }
+                    // Block init, decrement skip count
+                    is Node.Instr.Block, is Node.Instr.Loop, is Node.Instr.If -> {
+                        if (blockInitsToSkip > 0) blockInitsToSkip--
+                        false
+                    }
+                    // Branch means we found it if we're not skipping
+                    is Node.Instr.Br, is Node.Instr.BrIf, is Node.Instr.BrTable ->
+                        blockInitsToSkip == 0
+                    // Set/Tee means we found it if the index is right
+                    // and we're not skipping
+                    is Node.Instr.SetLocal, is Node.Instr.TeeLocal ->
+                        blockInitsToSkip == 0 && (insn.insn as Node.Instr.Args.Index).index == localIndex
+                    // Anything else doesn't matter
+                    else -> false
+                }
+            }
+            // If the insn is not set or tee, we have to eager init
+            val needsEagerInit = insn == null ||
+                (insn is Insn.Node && insn.insn !is Node.Instr.SetLocal && insn.insn !is Node.Instr.TeeLocal)
+            if (needsEagerInit) neededEagerLocalIndices += localIndex
+        }
+        insns.forEachIndexed { index, insn ->
+            if (insn is Insn.Node && insn.insn is Node.Instr.GetLocal) addEagerSetIfNeeded(index, insn.insn.index)
+        }
+        // Now, in local order, prepend needed local inits
+        return neededEagerLocalIndices.sorted().flatMap {
+            val const: Node.Instr = when (func.localByIndex(it)) {
+                is Node.Type.Value.I32 -> Node.Instr.I32Const(0)
+                is Node.Type.Value.I64 -> Node.Instr.I64Const(0)
+                is Node.Type.Value.F32 -> Node.Instr.F32Const(0f)
+                is Node.Type.Value.F64 -> Node.Instr.F64Const(0.0)
+            }
+            listOf(Insn.Node(const), Insn.Node(Node.Instr.SetLocal(it)))
+        } + insns
     }
 
     fun wrapWithImplicitBlock(ctx: ClsContext, insns: List<Insn>, retType: Node.Type.Value?) =

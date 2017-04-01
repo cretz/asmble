@@ -102,7 +102,12 @@ val String.const: AbstractInsnNode get() = LdcInsnNode(this)
 val String.javaIdent: String get() = this.replace(".", "\$dot\$")
 
 fun Node.Func.localByIndex(index: Int) =
-    this.type.params.getOrNull(index) ?: this.locals.getOrNull(index) ?: error("No local at index $index")
+    this.type.params.getOrNull(index) ?:
+        this.locals.getOrNull(index - this.type.params.size) ?:
+            throw CompileErr.UnknownLocal(index)
+fun Node.Func.actualLocalIndex(givenIndex: Int) =
+    // Add 1 for "this"
+    (this.type.params + this.locals).take(givenIndex).sumBy { it.typeRef.stackSize } + 1
 val Node.Func.localsSize: Int get() = this.type.params.size + this.locals.size
 
 val Node.Type.Value.kclass: KClass<*> get() = when (this) {
