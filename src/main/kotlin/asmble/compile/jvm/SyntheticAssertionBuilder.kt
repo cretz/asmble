@@ -3,7 +3,49 @@ package asmble.compile.jvm
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.tree.*
 
-open class TruncAssertionBuilder {
+open class SyntheticAssertionBuilder {
+
+    fun buildIDivAssertion(ctx: ClsContext) =
+        LabelNode().let { safeLabel ->
+            LabelNode().let { overflowLabel ->
+                MethodNode(
+                    Opcodes.ACC_PRIVATE + Opcodes.ACC_STATIC + Opcodes.ACC_SYNTHETIC,
+                    "\$\$assertIDiv", "(II)V", null, null
+                ).addInsns(
+                    VarInsnNode(Opcodes.ILOAD, 0),
+                    Int.MIN_VALUE.const,
+                    JumpInsnNode(Opcodes.IF_ICMPNE, safeLabel),
+                    VarInsnNode(Opcodes.ILOAD, 1),
+                    (-1).const,
+                    JumpInsnNode(Opcodes.IF_ICMPEQ, overflowLabel),
+                    safeLabel,
+                    InsnNode(Opcodes.RETURN),
+                    overflowLabel
+                ).throwArith("Integer overflow")
+            }
+        }
+
+    fun buildLDivAssertion(ctx: ClsContext) =
+        LabelNode().let { safeLabel ->
+            LabelNode().let { overflowLabel ->
+                MethodNode(
+                    Opcodes.ACC_PRIVATE + Opcodes.ACC_STATIC + Opcodes.ACC_SYNTHETIC,
+                    "\$\$assertIDiv", "(JJ)V", null, null
+                ).addInsns(
+                    VarInsnNode(Opcodes.LLOAD, 0),
+                    Long.MIN_VALUE.const,
+                    InsnNode(Opcodes.LCMP),
+                    JumpInsnNode(Opcodes.IFNE, safeLabel),
+                    VarInsnNode(Opcodes.LLOAD, 2),
+                    (-1L).const,
+                    InsnNode(Opcodes.LCMP),
+                    JumpInsnNode(Opcodes.IFEQ, overflowLabel),
+                    safeLabel,
+                    InsnNode(Opcodes.RETURN),
+                    overflowLabel
+                ).throwArith("Integer overflow")
+            }
+        }
 
     // TODO: add tests for +- 4 near overflow for each combo compared with spec
 
@@ -149,5 +191,5 @@ open class TruncAssertionBuilder {
         InsnNode(Opcodes.ATHROW)
     )
 
-    companion object : TruncAssertionBuilder()
+    companion object : SyntheticAssertionBuilder()
 }

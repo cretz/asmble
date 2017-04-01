@@ -221,7 +221,6 @@ open class FuncBuilder {
         is Node.Instr.F64Ge ->
             applyF64Cmp(ctx, fn, Opcodes.IFGE, nanIsOne = false)
         is Node.Instr.I32Clz ->
-            // TODO Should make unsigned?
             applyI32Unary(ctx, fn, Integer::class.invokeStatic("numberOfLeadingZeros", Int::class, Int::class))
         is Node.Instr.I32Ctz ->
             applyI32Unary(ctx, fn, Integer::class.invokeStatic("numberOfTrailingZeros", Int::class, Int::class))
@@ -234,7 +233,9 @@ open class FuncBuilder {
         is Node.Instr.I32Mul ->
             applyI32Binary(ctx, fn, Opcodes.IMUL)
         is Node.Instr.I32DivS ->
-            applyI32Binary(ctx, fn, Opcodes.IDIV)
+            assertSignedIntegerDiv(ctx, fn, Int::class.ref).let { fn ->
+                applyI32Binary(ctx, fn, Opcodes.IDIV)
+            }
         is Node.Instr.I32DivU ->
             applyI32Binary(ctx, fn, Integer::class.invokeStatic("divideUnsigned", Int::class, Int::class, Int::class))
         is Node.Instr.I32RemS ->
@@ -258,11 +259,16 @@ open class FuncBuilder {
         is Node.Instr.I32Rotr ->
             applyI32Binary(ctx, fn, Integer::class.invokeStatic("rotateRight", Int::class, Int::class, Int::class))
         is Node.Instr.I64Clz ->
-            applyI64Unary(ctx, fn, java.lang.Long::class.invokeStatic("numberOfLeadingZeros", Int::class, Long::class))
+            applyI64Unary(ctx, fn,
+                java.lang.Long::class.invokeStatic("numberOfLeadingZeros", Int::class, Long::class)).
+                    addInsns(InsnNode(Opcodes.I2L))
         is Node.Instr.I64Ctz ->
-            applyI64Unary(ctx, fn, java.lang.Long::class.invokeStatic("numberOfTrailingZeros", Int::class, Long::class))
+            applyI64Unary(ctx, fn,
+                java.lang.Long::class.invokeStatic("numberOfTrailingZeros", Int::class, Long::class)).
+                    addInsns(InsnNode(Opcodes.I2L))
         is Node.Instr.I64Popcnt ->
-            applyI64Unary(ctx, fn, java.lang.Long::class.invokeStatic("bitCount", Int::class, Long::class))
+            applyI64Unary(ctx, fn, java.lang.Long::class.invokeStatic("bitCount", Int::class, Long::class)).
+                addInsns(InsnNode(Opcodes.I2L))
         is Node.Instr.I64Add ->
             applyI64Binary(ctx, fn, Opcodes.LADD)
         is Node.Instr.I64Sub ->
@@ -270,7 +276,9 @@ open class FuncBuilder {
         is Node.Instr.I64Mul ->
             applyI64Binary(ctx, fn, Opcodes.LMUL)
         is Node.Instr.I64DivS ->
-            applyI64Binary(ctx, fn, Opcodes.LDIV)
+            assertSignedIntegerDiv(ctx, fn, Long::class.ref).let { fn ->
+                applyI64Binary(ctx, fn, Opcodes.LDIV)
+            }
         is Node.Instr.I64DivU ->
             applyI64Binary(ctx, fn, java.lang.Long::class.invokeStatic("divideUnsigned",
                 Long::class, Long::class, Long::class))
@@ -690,6 +698,21 @@ open class FuncBuilder {
         }
     }
 
+    fun assertSignedIntegerDiv(ctx: FuncContext, fn: Func, type: TypeRef) =
+        if (!ctx.cls.checkSignedDivIntegerOverflow) fn
+        else if (type == Int::class.ref) fn.addInsns(InsnNode(Opcodes.DUP2), ctx.cls.divAssertI)
+        else fn.addInsns(
+            // Duping longs...ug
+            // TODO: is it really this worth it to avoid a local and make one tiny assertion call?
+            InsnNode(Opcodes.DUP2_X2),
+            InsnNode(Opcodes.POP2),
+            InsnNode(Opcodes.DUP2_X2),
+            InsnNode(Opcodes.DUP2_X2),
+            InsnNode(Opcodes.POP2),
+            InsnNode(Opcodes.DUP2_X2),
+            ctx.cls.divAssertL
+        )
+
     fun assertTruncConv(ctx: FuncContext, fn: Func, from: TypeRef, to: TypeRef, signed: Boolean): Func {
         if (!ctx.cls.checkTruncOverflow) return fn
         if (from == Float::class.ref) {
@@ -856,8 +879,8 @@ open class FuncBuilder {
         applyI64BinarySecondOpI32(ctx, fn, InsnNode(op))
 
     fun applyI64BinarySecondOpI32(ctx: FuncContext, fn: Func, insn: AbstractInsnNode) =
-        fn.popExpectingMulti(Long::class.ref, Long::class.ref).
-            addInsns(InsnNode(Opcodes.L2I), insn).push(Long::class.ref)
+        fn.popExpecting(Long::class.ref).push(Int::class.ref).
+            addInsns(InsnNode(Opcodes.L2I), insn)
 
     fun applyI64Binary(ctx: FuncContext, fn: Func, op: Int) =
         applyI64Binary(ctx, fn, InsnNode(op))

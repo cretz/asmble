@@ -91,7 +91,7 @@ data class ScriptContext(
     }
 
     fun assertTrap(trap: Script.Cmd.Assertion.Trap) {
-        try { doAction(trap.action).also { throw AssertionError("Expected exception") } }
+        try { doAction(trap.action).also { throw AssertionError("Expected exception but completed successfully") } }
         catch (e: Throwable) { assertFailure(e, trap.failure) }
     }
 
