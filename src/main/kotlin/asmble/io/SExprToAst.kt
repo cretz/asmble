@@ -466,7 +466,7 @@ open class SExprToAst {
                     addMaybeExport(impExp, Node.ExternalKind.FUNCTION, funcCount++)
                     mod = mod.copy(funcs = mod.funcs + fn)
                 }
-                "export" -> mod = mod.copy(exports = mod.exports + toExport(exp, nameMap))
+                "export" -> mod = mod.copy(exports = mod.exports + toExport(it, nameMap))
                 "global" -> toGlobal(it, nameMap).also { (_, glb, impExp) ->
                     addMaybeExport(impExp, Node.ExternalKind.GLOBAL, globalCount++)
                     mod = mod.copy(globals = mod.globals + glb)
@@ -570,7 +570,6 @@ open class SExprToAst {
                 var instrAlign = 0
                 if (exp.vals.size > offset + count) exp.vals[offset + count].symbolStr().also {
                     if (it != null && it.startsWith("offset=")) {
-                        // TODO: unsigned ints everywhere!
                         instrOffset = UnsignedInteger.valueOf(it.substring(7)).toLong()
                         count++
                     }
@@ -578,6 +577,9 @@ open class SExprToAst {
                 if (exp.vals.size > offset + count) exp.vals[offset + count].symbolStr().also {
                     if (it != null && it.startsWith("align=")) {
                         instrAlign = it.substring(6).toInt()
+                        require(instrAlign > 0 && instrAlign and (instrAlign - 1) == 0) {
+                            "Alignment expected to be positive power of 2, but got $instrAlign"
+                        }
                         count++
                     }
                 }

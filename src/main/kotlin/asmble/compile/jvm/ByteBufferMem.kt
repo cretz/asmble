@@ -42,7 +42,7 @@ open class ByteBufferMem(val direct: Boolean = true) : Mem {
         addInsns(bytes.withIndex().flatMap { (index, byte) ->
             listOf(InsnNode(Opcodes.DUP), index.const, byte.toInt().const, InsnNode(Opcodes.BASTORE))
         }).
-        apply(buildOffset).popExpecting(Int::class.ref).
+        let(buildOffset).popExpecting(Int::class.ref).
         // BOO! https://discuss.kotlinlang.org/t/overload-resolution-ambiguity-function-reference-requiring-local-var/2425
         addInsns(
             bytes.size.const,

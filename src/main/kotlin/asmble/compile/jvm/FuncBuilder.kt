@@ -87,7 +87,9 @@ open class FuncBuilder {
 
     fun applyNodeInsn(ctx: FuncContext, fn: Func, i: Node.Instr, index: Int) = when (i) {
         is Node.Instr.Unreachable ->
-            fn.addInsns(UnsupportedOperationException::class.athrow("Unreachable"))
+            fn.addInsns(UnsupportedOperationException::class.athrow("Unreachable")).let { fn ->
+                setAsUnconditionalBranch(ctx, fn)
+            }
         is Node.Instr.Nop ->
             fn.addInsns(InsnNode(Opcodes.NOP))
         is Node.Instr.Block ->
@@ -448,42 +450,53 @@ open class FuncBuilder {
                 java.lang.Double::class.invokeStatic("longBitsToDouble", Double::class, Long::class))
     }
 
-    fun setAsUnconditionalBranchUpToDepth(ctx: FuncContext, fn: Func, depth: Int) =
-        (0..depth).fold(fn) { fn, depth ->
-            fn.blockAtDepth(depth).let { (fn, block) -> block.unconditionalBranch = true; fn }
+    fun setAsUnconditionalBranch(ctx: FuncContext, fn: Func) =
+        fn.blockAtDepth(0).let { (fn, block) ->
+            // We stop at the first conditional branch that:
+            // * Has an else but doesn't have an initial unconditional branch
+            // * Doesn't have an else
+            if (block.insn is Node.Instr.If) {
+                if (block.hasElse) block.unconditionalBranchInElse = true
+                else block.unconditionalBranchInIf = true
+
+                if (block.hasElse && !block.unconditionalBranchInIf) return fn
+                if (!block.hasElse) return fn
+            }
+            block.unconditionalBranch = true
+            fn
         }
 
     fun applyBr(ctx: FuncContext, fn: Func, i: Node.Instr.Br) =
-        setAsUnconditionalBranchUpToDepth(ctx, fn, i.relativeDepth).let { fn ->
-            fn.blockAtDepth(i.relativeDepth).let { (fn, block) ->
-                // We have to pop all unnecessary values per the spec
-                val type = block.insnType?.typeRef
-                fun pop(fn: Func): Func {
-                    // Have to swap first if there is a type expected
-                    return (if (type != null) fn.stackSwap(block) else fn).let { fn ->
-                        fn.pop().let { (fn, poppedType) ->
-                            fn.addInsns(InsnNode(if (poppedType.stackSize == 2) Opcodes.POP2 else Opcodes.POP))
-                        }
+        fn.blockAtDepth(i.relativeDepth).let { (fn, block) ->
+            // We have to pop all unnecessary values per the spec
+            val type = block.insnType?.typeRef
+            fun pop(fn: Func): Func {
+                // Have to swap first if there is a type expected
+                // Note, we check stack size because dead code is allowed to do some crazy
+                // things.
+                return (if (type != null && fn.stack.size > 1) fn.stackSwap(block) else fn).let { fn ->
+                    fn.pop().let { (fn, poppedType) ->
+                        fn.addInsns(InsnNode(if (poppedType.stackSize == 2) Opcodes.POP2 else Opcodes.POP))
                     }
                 }
-                val expectedStackSize =
-                    if (block.insn is Node.Instr.Loop || type == null) block.origStack.size
-                    else block.origStack.size + 1
-                ctx.debug {
-                    "Unconditional branch on ${block.insn}, curr stack ${fn.stack}, " +
-                        " orig stack ${block.origStack}, expected stack size $expectedStackSize" }
-                val popCount = Math.max(0, fn.stack.size - expectedStackSize)
-                (0 until popCount).fold(fn) { fn, _ -> pop(fn) }.let { fn ->
-                    fn.addInsns(JumpInsnNode(Opcodes.GOTO, block.label)).let { fn ->
-                        // We only peek here, because we keep items on the stack for
-                        // dead code that uses it
-                        block.insnType?.typeRef?.let { typ ->
-                            // Loop breaks don't have to type check
-                            if (block.insn !is Node.Instr.Loop) fn.peekExpecting(typ, block)
-                            block.blockExitVals += i to typ
-                        }
-                        fn
+            }
+            val expectedStackSize =
+                if (type == null) block.origStack.size
+                else block.origStack.size + 1
+            ctx.debug {
+                "Unconditional branch on ${block.insn}, curr stack ${fn.stack}, " +
+                    " orig stack ${block.origStack}, expected stack size $expectedStackSize" }
+            val popCount = Math.max(0, fn.stack.size - expectedStackSize)
+            (0 until popCount).fold(fn) { fn, _ -> pop(fn) }.let { fn ->
+                fn.addInsns(JumpInsnNode(Opcodes.GOTO, block.label)).let { fn ->
+                    // We only peek here, because we keep items on the stack for
+                    // dead code that uses it
+                    block.insnType?.typeRef?.let { typ ->
+                        // Loop breaks don't have to type check
+                        if (block.insn !is Node.Instr.Loop) fn.assertTopOfStack(typ, block)
+                        block.blockExitVals += i to typ
                     }
+                    setAsUnconditionalBranch(ctx, fn)
                 }
             }
         }
@@ -496,7 +509,7 @@ open class FuncBuilder {
                 val toLabel = if (needsPopBeforeJump) LabelNode() else block.label
                 fn.addInsns(JumpInsnNode(Opcodes.IFNE, toLabel)).let { fn ->
                     block.insnType?.typeRef?.let {
-                        fn.peekExpecting(it)
+                        fn.assertTopOfStack(it)
                         block.blockExitVals += i to it
                     }
                     if (needsPopBeforeJump) buildPopBeforeJump(ctx, fn, block, toLabel)
@@ -508,11 +521,9 @@ open class FuncBuilder {
     // Can compile quite cleanly as a table switch on the JVM
     fun applyBrTable(ctx: FuncContext, fn: Func, insn: Node.Instr.BrTable) =
         fn.blockAtDepth(insn.default).let { (fn, defaultBlock) ->
-            defaultBlock.unconditionalBranch = true
             defaultBlock.insnType?.typeRef?.let { defaultBlock.blockExitVals += insn to it }
             insn.targetTable.fold(fn to emptyList<LabelNode>()) { (fn, labels), targetDepth ->
                 fn.blockAtDepth(targetDepth).let { (fn, targetBlock) ->
-                    targetBlock.unconditionalBranch = true
                     targetBlock.insnType?.typeRef?.let { targetBlock.blockExitVals += insn to it }
                     fn to (labels + targetBlock.label)
                 }
@@ -527,8 +538,9 @@ open class FuncBuilder {
             }.let { fn ->
                 // We only peek here, because we keep items on the stack for
                 // dead code that uses it
-                defaultBlock.insnType?.typeRef?.let { fn.peekExpecting(it) }
-                fn
+                defaultBlock.insnType?.typeRef?.let { fn.assertTopOfStack(it) }
+                // I think we're only going to mark ourselves dead for now
+                setAsUnconditionalBranch(ctx, fn)
             }
         }
 
@@ -560,9 +572,11 @@ open class FuncBuilder {
         return fn.addInsns(JumpInsnNode(Opcodes.GOTO, resumeLabel), tempLabel).withoutAffectingStack { fn ->
             (requiredStackCount until fn.stack.size).fold(fn) { fn, index ->
                 if (fn.stack.size == 1) {
-                    fn.addInsns(InsnNode(if (fn.stack.last().stackSize == 2) Opcodes.POP2 else Opcodes.POP)).pop(block).first
+                    fn.addInsns(InsnNode(if (fn.stack.last().stackSize == 2) Opcodes.POP2 else Opcodes.POP)).
+                        pop(block).first
                 } else fn.stackSwap(block).let { fn ->
-                    fn.addInsns(InsnNode(if (fn.stack.last().stackSize == 2) Opcodes.POP2 else Opcodes.POP)).pop(block).first
+                    fn.addInsns(InsnNode(if (fn.stack.last().stackSize == 2) Opcodes.POP2 else Opcodes.POP)).
+                        pop(block).first
                 }
             }
         }.addInsns(
@@ -577,7 +591,7 @@ open class FuncBuilder {
         val label = LabelNode()
         fn.peekIf().label = label
         ctx.debug { "Else block for ${block.insn}, orig stack ${block.origStack}" }
-        assertValidBlockEnd(ctx, fn, block)
+        if (!block.unconditionalBranchInIf) assertValidBlockEnd(ctx, fn, block)
         block.hasElse = true
         fn.addInsns(JumpInsnNode(Opcodes.GOTO, block.label), label).copy(stack = block.origStack)
     }
@@ -622,6 +636,8 @@ open class FuncBuilder {
     }
 
     fun assertValidBlockEnd(ctx: FuncContext, fn: Func, block: Func.Block) {
+        // If it's dead, who cares
+        if (block.unconditionalBranch || (block.unconditionalBranchInIf && !block.hasElse)) return
         // Go over each exit and make sure it did the right thing
         block.blockExitVals.forEach {
             require(it.second == block.insnType?.typeRef) { "Block exit val was $it, expected ${block.insnType}" }
@@ -1193,10 +1209,7 @@ open class FuncBuilder {
             fn.popExpecting(Double::class.ref).addInsns(InsnNode(Opcodes.DRETURN))
     }.let { fn ->
         if (fn.stack.isNotEmpty()) throw CompileErr.UnusedStackOnReturn(fn.stack)
-        fn.blockAtDepth(0).let { (fn, block) ->
-            block.unconditionalBranch = true
-            fn
-        }
+        setAsUnconditionalBranch(ctx, fn)
     }
 
     companion object : FuncBuilder()

@@ -3,7 +3,6 @@ package asmble.compile.jvm
 import asmble.ast.Node
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.tree.*
-import java.util.*
 
 data class Func(
     val name: String,
@@ -18,14 +17,19 @@ data class Func(
 ) {
 
     val desc: String get() = ret.asMethodRetDesc(*params.toTypedArray())
-    val isLastUnconditionalJump get() = insns.lastOrNull()?.isUnconditionalJump ?: false
-    val isLastTerminating get() = insns.lastOrNull()?.isTerminating ?: false
+    val isCurrentBlockDead get() = blockStack.lastOrNull()?.let { block ->
+        // It's dead if it's marked unconditional or it's an unconditional
+        // if/else and we are in that if/else area
+        block.unconditionalBranch ||
+            (block.unconditionalBranchInIf && !block.hasElse) ||
+            (block.unconditionalBranchInElse && block.hasElse)
+    } ?: false
 
-    fun addInsns(insns: List<AbstractInsnNode>) = copy(insns = this.insns + insns)
+    fun addInsns(insns: List<AbstractInsnNode>) =
+        if (isCurrentBlockDead) this else copy(insns = this.insns + insns)
 
-    fun addInsns(vararg insns: AbstractInsnNode) = copy(insns = this.insns + insns)
-
-    fun apply(fn: (Func) -> Func) = fn(this)
+    fun addInsns(vararg insns: AbstractInsnNode) =
+        if (isCurrentBlockDead) this else copy(insns = this.insns + insns)
 
     fun push(vararg types: TypeRef) = copy(stack = stack + types)
 
@@ -33,10 +37,8 @@ data class Func(
 
     fun popExpectingMulti(vararg types: TypeRef) = types.reversed().fold(this, Func::popExpecting)
 
-    fun popExpecting(type: TypeRef) = popExpectingAny(type)
-
-    fun popExpectingAny(vararg types: TypeRef): Func {
-        peekExpectingAny(types = *types)
+    fun popExpecting(type: TypeRef): Func {
+        assertTopOfStack(type)
         return pop().first
     }
 
@@ -47,18 +49,20 @@ data class Func(
     }
 
     fun pop(currBlock: Block? = blockStack.lastOrNull()): Pair<Func, TypeRef> {
-        if (isStackEmptyForBlock(currBlock)) throw CompileErr.StackMismatch(emptyArray(), null)
+        if (isStackEmptyForBlock(currBlock)) {
+            // Just fake it if dead
+            if (isCurrentBlockDead) return this to Int::class.ref
+            throw CompileErr.StackMismatch(emptyArray(), null)
+        }
         return copy(stack = stack.dropLast(1)) to stack.last()
     }
 
-    fun peekExpecting(type: TypeRef, currBlock: Block? = blockStack.lastOrNull()) =
-        peekExpectingAny(currBlock, type)
-
-    fun peekExpectingAny(currBlock: Block? = blockStack.lastOrNull(), vararg types: TypeRef): TypeRef {
-        if (isStackEmptyForBlock(currBlock)) throw CompileErr.StackMismatch(types, null)
-        val hasExpected = stack.lastOrNull()?.let(types::contains) ?: false
-        if (!hasExpected) throw CompileErr.StackMismatch(types, stack.lastOrNull())
-        return stack.last()
+    fun assertTopOfStack(type: TypeRef, currBlock: Block? = blockStack.lastOrNull()): Unit {
+        // If it's dead, we just go with it
+        if (!isCurrentBlockDead) {
+            if (isStackEmptyForBlock(currBlock)) throw CompileErr.StackMismatch(arrayOf(type), null)
+            if (stack.lastOrNull() != type) throw CompileErr.StackMismatch(arrayOf(type), stack.lastOrNull())
+        }
     }
 
     fun toMethodNode(): MethodNode {
@@ -71,25 +75,26 @@ data class Func(
 
     fun withoutAffectingStack(fn: (Func) -> Func) = fn(this).copy(stack = stack)
 
-    fun stackSwap(currBlock: Block? = blockStack.lastOrNull()) = pop(currBlock).let { (fn, refLast) ->
-        fn.pop(currBlock).let { (fn, refFirst) ->
-            (if (refFirst.stackSize == 2) {
-                if (refLast.stackSize == 2)
-                    // If they are both 2, dup2_x2 + pop2
-                    fn.addInsns(InsnNode(Opcodes.DUP2_X2), InsnNode(Opcodes.POP2))
-                else
-                    // If only the first one is, dup_x2 + pop
-                    fn.addInsns(InsnNode(Opcodes.DUP_X2), InsnNode(Opcodes.POP))
-            } else {
-                if (refLast.stackSize == 2)
-                   // If the first is not 2 but the last is, dup_2x1, pop2
-                    fn.addInsns(InsnNode(Opcodes.DUP2_X1), InsnNode(Opcodes.POP2))
-                else
-                    // If neither are 2, just swap
-                    fn.addInsns(InsnNode(Opcodes.SWAP))
-            }).push(refLast).push(refFirst)
+    fun stackSwap(currBlock: Block? = blockStack.lastOrNull()) =
+        if (isCurrentBlockDead) this else pop(currBlock).let { (fn, refLast) ->
+            fn.pop(currBlock).let { (fn, refFirst) ->
+                (if (refFirst.stackSize == 2) {
+                    if (refLast.stackSize == 2)
+                        // If they are both 2, dup2_x2 + pop2
+                        fn.addInsns(InsnNode(Opcodes.DUP2_X2), InsnNode(Opcodes.POP2))
+                    else
+                        // If only the first one is, dup_x2 + pop
+                        fn.addInsns(InsnNode(Opcodes.DUP_X2), InsnNode(Opcodes.POP))
+                } else {
+                    if (refLast.stackSize == 2)
+                       // If the first is not 2 but the last is, dup_2x1, pop2
+                        fn.addInsns(InsnNode(Opcodes.DUP2_X1), InsnNode(Opcodes.POP2))
+                    else
+                        // If neither are 2, just swap
+                        fn.addInsns(InsnNode(Opcodes.SWAP))
+                }).push(refLast).push(refFirst)
+            }
         }
-    }
 
     fun pushBlock(insn: Node.Instr) = copy(blockStack = blockStack + Block(insn, insns.size, stack))
 
@@ -123,6 +128,8 @@ data class Func(
         open val requiredEndStack: List<TypeRef>? get() = null
         open val hasElse: Boolean get() = false
         open val unconditionalBranch: Boolean get() = false
+        open val unconditionalBranchInIf: Boolean get() = false
+        open val unconditionalBranchInElse: Boolean get() = false
         // First val is the insn, second is the type
         open val blockExitVals: List<Pair<Node.Instr, TypeRef?>> = emptyList()
         fun withLabel(label: LabelNode) = WithLabel(insn, startIndex, origStack, label)
@@ -138,6 +145,8 @@ data class Func(
             override var requiredEndStack: List<TypeRef>? = null
             override var hasElse = false
             override var unconditionalBranch = false
+            override var unconditionalBranchInIf = false
+            override var unconditionalBranchInElse = false
         }
     }
 }
