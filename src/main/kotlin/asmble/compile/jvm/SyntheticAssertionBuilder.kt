@@ -30,7 +30,7 @@ open class SyntheticAssertionBuilder {
             LabelNode().let { overflowLabel ->
                 MethodNode(
                     Opcodes.ACC_PRIVATE + Opcodes.ACC_STATIC + Opcodes.ACC_SYNTHETIC,
-                    "\$\$assertIDiv", "(JJ)V", null, null
+                    "\$\$assertLDiv", "(JJ)V", null, null
                 ).addInsns(
                     VarInsnNode(Opcodes.LLOAD, 0),
                     Long.MIN_VALUE.const,

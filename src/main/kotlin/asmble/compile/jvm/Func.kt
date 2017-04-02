@@ -18,6 +18,8 @@ data class Func(
 ) {
 
     val desc: String get() = ret.asMethodRetDesc(*params.toTypedArray())
+    val isLastUnconditionalJump get() = insns.lastOrNull()?.isUnconditionalJump ?: false
+    val isLastTerminating get() = insns.lastOrNull()?.isTerminating ?: false
 
     fun addInsns(insns: List<AbstractInsnNode>) = copy(insns = this.insns + insns)
 
@@ -34,7 +36,7 @@ data class Func(
     fun popExpecting(type: TypeRef) = popExpectingAny(type)
 
     fun popExpectingAny(vararg types: TypeRef): Func {
-        peekExpectingAny(*types)
+        peekExpectingAny(types = *types)
         return pop().first
     }
 
@@ -49,10 +51,11 @@ data class Func(
         return copy(stack = stack.dropLast(1)) to stack.last()
     }
 
-    fun peekExpecting(type: TypeRef) = peekExpectingAny(type)
+    fun peekExpecting(type: TypeRef, currBlock: Block? = blockStack.lastOrNull()) =
+        peekExpectingAny(currBlock, type)
 
-    fun peekExpectingAny(vararg types: TypeRef): TypeRef {
-        if (isStackEmptyForBlock()) throw CompileErr.StackMismatch(types, null)
+    fun peekExpectingAny(currBlock: Block? = blockStack.lastOrNull(), vararg types: TypeRef): TypeRef {
+        if (isStackEmptyForBlock(currBlock)) throw CompileErr.StackMismatch(types, null)
         val hasExpected = stack.lastOrNull()?.let(types::contains) ?: false
         if (!hasExpected) throw CompileErr.StackMismatch(types, stack.lastOrNull())
         return stack.last()
@@ -117,6 +120,9 @@ data class Func(
         val origStack: List<TypeRef>
     ) {
         open val label: LabelNode? get() = null
+        open val requiredEndStack: List<TypeRef>? get() = null
+        open val hasElse: Boolean get() = false
+        open val unconditionalBranch: Boolean get() = false
         // First val is the insn, second is the type
         open val blockExitVals: List<Pair<Node.Instr, TypeRef?>> = emptyList()
         fun withLabel(label: LabelNode) = WithLabel(insn, startIndex, origStack, label)
@@ -129,6 +135,9 @@ data class Func(
             override val label: LabelNode
         ) : Block(insn, startIndex, origStack) {
             override var blockExitVals: List<Pair<Node.Instr, TypeRef?>> = emptyList()
+            override var requiredEndStack: List<TypeRef>? = null
+            override var hasElse = false
+            override var unconditionalBranch = false
         }
     }
 }

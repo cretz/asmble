@@ -33,6 +33,10 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
         }
     }
 
+    class IfThenValueWithoutElse() : CompileErr("If has value but no else clause") {
+        override val asmErrString get() = "type mismatch"
+    }
+
     class UnusedStackOnReturn(
         val leftover: List<TypeRef>
     ) : CompileErr("Expected empty stack on return, still leftover with: $leftover") {

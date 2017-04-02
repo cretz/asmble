@@ -200,7 +200,7 @@ open class SExprToAst {
         var (nameMap, exprsUsed, sig) = toFuncSig(exp, currentIndex, origNameMap)
         currentIndex += exprsUsed
         val locals = exp.repeated("local", currentIndex, { toLocals(it) }).mapIndexed { index, (nameMaybe, vals) ->
-            nameMaybe?.also { require(vals.size == 1); nameMap += it to index }
+            nameMaybe?.also { require(vals.size == 1); nameMap += it to (index + sig.params.size) }
             vals
         }
         currentIndex += locals.size
@@ -534,8 +534,8 @@ open class SExprToAst {
     fun toOpMaybe(exp: SExpr.Multi, offset: Int, ctx: ExprContext): Pair<Node.Instr, Int>? {
         if (offset >= exp.vals.size) return null
         val head = exp.vals[offset].symbol()!!
-        fun varIsStringRef() = exp.vals[offset + 1].symbolStr()?.firstOrNull() == '$'
-        fun oneVar() = toVar(exp.vals[offset + 1].symbol()!!, ctx.nameMap)
+        fun varIsStringRef(off: Int = offset + 1) = exp.vals[off].symbolStr()?.firstOrNull() == '$'
+        fun oneVar(off: Int = offset + 1) = toVar(exp.vals[off].symbol()!!, ctx.nameMap)
         // Some are not handled here:
         when (head.contents) {
             "block", "loop", "if", "else", "end" -> return null
@@ -552,8 +552,12 @@ open class SExprToAst {
                 else Pair(op.create(oneVar()), 2)
             }
             is InstrOp.ControlFlowOp.TableArg -> {
-                require(!varIsStringRef()) { "String refs not supported in br_table yet" }
-                val vars = exp.vals.drop(offset + 1).takeUntilNullLazy { toVarMaybe(it, ctx.nameMap) }
+                val vars = exp.vals.drop(offset + 1).takeUntilNullLazy {
+                    toVarMaybe(it, ctx.nameMap)?.let { tableVar ->
+                        // Named depth is subtracted from current depth
+                        if (it.symbolStr()?.firstOrNull() == '$') ctx.blockDepth - tableVar else tableVar
+                    }
+                }
                 Pair(op.create(vars.dropLast(1), vars.last()), offset + 1 + vars.size)
             }
             is InstrOp.CallOp.IndexArg -> Pair(op.create(oneVar()), 2)

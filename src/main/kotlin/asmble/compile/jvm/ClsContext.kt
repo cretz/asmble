@@ -1,7 +1,6 @@
 package asmble.compile.jvm
 
 import asmble.ast.Node
-import asmble.temp.Temp
 import asmble.util.Either
 import asmble.util.Logger
 import org.objectweb.asm.Opcodes

@@ -128,10 +128,15 @@ data class ScriptContext(
     }
 
     fun doInvoke(cmd: Script.Cmd.Action.Invoke): Pair<Node.Type.Value?, Any?> {
-        // If there is a module name, use that index, otherwise just search
+        // If there is a module name, use that index, otherwise just search.
         val (compMod, method) = modules.filter { cmd.name == null || it.name == cmd.name }.flatMap { compMod ->
             compMod.cls.declaredMethods.filter { it.name == cmd.string.javaIdent }.map { compMod to it }
-        }.singleOrNull() ?: error("Unable to find single func for $cmd")
+        }.let { methodPairs ->
+            // If there are multiple, we get the last one
+            if (methodPairs.isEmpty()) error("Unable to find method for invoke named ${cmd.string.javaIdent}")
+            else if (methodPairs.size == 1) methodPairs.single()
+            else methodPairs.last().also { debug { "Found multiple methods for ${cmd.string.javaIdent}, using last"} }
+        }
 
         // Invoke all parameter expressions
         require(cmd.exprs.size == method.parameterTypes.size)

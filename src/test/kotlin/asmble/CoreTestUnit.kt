@@ -33,10 +33,19 @@ class CoreTestUnit(val name: String, val wast: String, val expectedOutput: Strin
         - binary.wast - No binary yet
         - br.wast - Not handling tables yet
         - br_table.wast - Not handling tables yet
-        -- call_indirect.wast - Not handling tables yet
+        - call_indirect.wast - Not handling tables yet
+        - custom_section.wast - No binary yet
+        - exports.wast - Not handling tables yet
+        - float_exprs.wast - Not handling mem data strings yet
+        - float_memory.wast - Not handling mem data strings yet
+        - func.wast - Not handling tables yet
+        - func_ptrs.wast - Not handling tables yet
+        - globals.wast - No binary yet
+        - imports.wast - No memory exports yet
         */
 
         val knownGoodTests = arrayOf(
+            "temp.wast",
             "address.wast",
             "address-offset-range.fail.wast",
             "block.wast",
@@ -46,7 +55,56 @@ class CoreTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             "break-drop.wast",
             "call.wast",
             "comments.wast",
-            "conversions.wast"
+            "conversions.wast",
+            "endianness.wast",
+            "f32.load32.fail.wast",
+            "f32.load64.fail.wast",
+            "f32.store32.fail.wast",
+            "f32.store64.fail.wast",
+            "f32.wast",
+            "f32_cmp.wast",
+            "f64.load32.fail.wast",
+            "f64.load64.fail.wast",
+            "f64.store32.fail.wast",
+            "f64.store64.fail.wast",
+            "f64.wast",
+            "f64_cmp.wast",
+            "fac.wast",
+            "float_literals.wast",
+            "float_misc.wast",
+            "forward.wast",
+            "func-local-after-body.fail.wast",
+            "func-local-before-param.fail.wast",
+            "func-local-before-result.fail.wast",
+            "func-param-after-body.fail.wast",
+            "func-result-after-body.fail.wast",
+            "func-result-before-param.fail.wast",
+            "get_local.wast",
+            "i32.load32_s.fail.wast",
+            "i32.load32_u.fail.wast",
+            "i32.load64_s.fail.wast",
+            "i32.load64_u.fail.wast",
+            "i32.store32.fail.wast",
+            "i32.store64.fail.wast",
+            "i32.wast",
+            "i64.load64_s.fail.wast",
+            "i64.load64_u.fail.wast",
+            "i64.store64.fail.wast",
+            "i64.wast",
+            "if.wast",
+            "if-else-end-label-mismatch.fail.wast",
+            "if-else-end-label-superfluous.fail.wast",
+            "if-else-label-mismatch.fail.wast",
+            "if-else-label-superfluous.fail.wast",
+            "if-end-label-mismatch.fail.wast",
+            "if-end-label-superfluous.fail.wast",
+            "import-after-func.fail.wast",
+            "import-after-global.fail.wast",
+            "import-after-memory.fail.wast",
+            "import-after-table.fail.wast",
+            "int_exprs.wast",
+            "int_literals.wast",
+            "labels.wast"
         )
 
         val unitsPath = "/spec/test/core"
