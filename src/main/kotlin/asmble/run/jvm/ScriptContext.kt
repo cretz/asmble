@@ -21,7 +21,8 @@ data class ScriptContext(
     val adjustContext: (ClsContext) -> ClsContext = { it },
     val classLoader: SimpleClassLoader =
         ScriptContext.SimpleClassLoader(ScriptContext::class.java.classLoader, logger),
-    val exceptionTranslator: ExceptionTranslator = ExceptionTranslator
+    val exceptionTranslator: ExceptionTranslator = ExceptionTranslator,
+    val defaultMaxMemPages: Int = 1
 ) : Logger by logger {
     fun withHarnessRegistered(out: PrintWriter = PrintWriter(System.out, true)) =
         copy(registrations = registrations + (
@@ -218,7 +219,8 @@ data class ScriptContext(
             var constructorParams = emptyList<Any>()
             // If it is not there, find the one w/ the max mem amount
             if (constructor == null) {
-                constructorParams += (mod.memories.firstOrNull()?.limits?.initial ?: 0) * Mem.PAGE_SIZE
+                val maxMem = Math.max(mod.memories.firstOrNull()?.limits?.initial ?: 0, defaultMaxMemPages)
+                constructorParams += maxMem * Mem.PAGE_SIZE
                 constructor = cls.declaredConstructors.find {
                     it.parameterTypes.firstOrNull() == Int::class.java
                 } ?: error("Unable to find no-arg or mem-accepting construtor")

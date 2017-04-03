@@ -10,6 +10,7 @@ open class ExceptionTranslator {
             "/ by zero", "BigInteger divide by zero" -> "integer divide by zero"
             else -> ex.message?.decapitalize()
         }
+        is UnsupportedOperationException -> "unreachable executed"
         is AsmErr -> ex.asmErrString
         else -> null
     }

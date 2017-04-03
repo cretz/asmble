@@ -270,7 +270,7 @@ open class SExprToAst {
         val multiHead = multi.vals[0] as? SExpr.Symbol ?: return null
         return when (multiHead.contents) {
             "export" -> ImportOrExport(multi.vals[1].symbolStr()!!, null)
-            "import" -> ImportOrExport(multi.vals[1].symbolStr()!!, multi.vals[2].symbolStr()!!)
+            "import" -> ImportOrExport(multi.vals[2].symbolStr()!!, multi.vals[1].symbolStr()!!)
             else -> null
         }
     }

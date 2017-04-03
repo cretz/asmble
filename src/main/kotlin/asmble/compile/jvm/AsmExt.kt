@@ -99,7 +99,32 @@ val Double.const: AbstractInsnNode get() = when (this) {
 
 val String.const: AbstractInsnNode get() = LdcInsnNode(this)
 
-val String.javaIdent: String get() = this.replace(".", "\$dot\$")
+val javaKeywords = setOf("abstract", "assert", "boolean",
+    "break", "byte", "case", "catch", "char", "class", "const",
+    "continue", "default", "do", "double", "else", "extends", "false",
+    "final", "finally", "float", "for", "goto", "if", "implements",
+    "import", "instanceof", "int", "interface", "long", "native",
+    "new", "null", "package", "private", "protected", "public",
+    "return", "short", "static", "strictfp", "super", "switch",
+    "synchronized", "this", "throw", "throws", "transient", "true",
+    "try", "void", "volatile", "while")
+
+val String.javaIdent: String get() {
+    // What we're going to do is:
+    // * If it's empty, becomes $empty$
+    // * If it's a java keyword, add "wasm$" prefix
+    // * If it doesn't start with a valid java ident start, add "wasm$" prefix
+    // * All other invalid chars become $num$ where "num" is the int char value
+    return if (this.isEmpty()) "\$empty\$"
+        else if (javaKeywords.contains(this)) "wasm\$$this"
+        else {
+            (if (this.first().isJavaIdentifierStart()) this else "wasm\$$this").
+                fold(StringBuilder()) { builder, char ->
+                    if (char.isJavaIdentifierPart()) builder.append(char)
+                    else builder.append('_').append(char.toInt())
+                }.toString()
+        }
+}
 
 fun Node.Func.localByIndex(index: Int) =
     this.type.params.getOrNull(index) ?:

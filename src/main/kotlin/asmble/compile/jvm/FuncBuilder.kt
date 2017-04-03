@@ -1149,30 +1149,34 @@ open class FuncBuilder {
         Node.Type.Value.F64 -> fn.addInsns(VarInsnNode(Opcodes.DLOAD, ctx.actualLocalIndex(index)))
     }.push(ctx.node.localByIndex(index).typeRef)
 
-    fun applySelectInsn(ctx: FuncContext, origFn: Func): Func {
-        var fn = origFn
+    fun applySelectInsn(ctx: FuncContext, fn: Func): Func {
+        // If this is dead code, just give up early
+        if (fn.isCurrentBlockDead) return fn
         // 3 things, first two must have same type, third is 0 check (0 means use second, otherwise use first)
         // What we'll do is:
         //   IFNE third L1 (which means if it's non-zero, goto L1)
         //   SWAP (or the double-style swap) (which means second is now first, and first is now second)
         //   L1:
         //   POP (or pop2, remove the last)
-
-        // Check that we have an int for comparison, then the ref types
-        val (ref1, ref2) = fn.popExpecting(Int::class.ref).pop().let { (newFn, ref1) ->
-            newFn.pop().let { (newFn, ref2) -> fn = newFn; ref1 to ref2 }
-        }
-        require(ref1 == ref2) { "Select types do not match: $ref1 and $ref2" }
-
-        val lbl = LabelNode()
-        // Conditional jump
-        return fn.addInsns(JumpInsnNode(Opcodes.IFNE, lbl),
+        // TODO: How much does this hurt performance vs using a two label solution? Surely dependent upon how
+        // often we take the zero path.
+        val nonZero = LabelNode()
+        return fn.popExpecting(Int::class.ref).
+            // Conditional jump
+            addInsns(JumpInsnNode(Opcodes.IFNE, nonZero)).
             // Swap
-            InsnNode(if (ref1.stackSize == 2) Opcodes.DUP2 else Opcodes.SWAP),
-            // Label and pop
-            lbl,
-            InsnNode(if (ref1.stackSize == 2) Opcodes.POP2 else Opcodes.POP)
-        )
+            stackSwap().
+            // Pop next two and confirm they are the same type
+            pop().let { (fn, type1) ->
+                fn.pop().let { (fn, type2) ->
+                    require(type1 == type2) { "Select types do not match: $type1 and $type2" }
+                    // Label and pop
+                    fn.addInsns(
+                        nonZero,
+                        InsnNode(if (type1.stackSize == 2) Opcodes.POP2 else Opcodes.POP)
+                    ).push(type1)
+                }
+            }
     }
 
     fun applyCallInsn(ctx: FuncContext, fn: Func, index: Int) =

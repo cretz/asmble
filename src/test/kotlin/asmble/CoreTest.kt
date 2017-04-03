@@ -34,7 +34,8 @@ class CoreTest(val unit: CoreTestUnit) : Logger by Logger.Print(Logger.Level.INF
         val scriptContext = ScriptContext(
             packageName = "asmble.temp.${unit.name}",
             logger = this,
-            adjustContext = { it.copy(eagerFailLargeMemOffset = false) }
+            adjustContext = { it.copy(eagerFailLargeMemOffset = false) },
+            defaultMaxMemPages = unit.defaultMaxMemPages
         ).withHarnessRegistered(PrintWriter(out))
 
         // This will fail assertions as necessary

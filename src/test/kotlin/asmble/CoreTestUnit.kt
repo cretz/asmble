@@ -13,6 +13,12 @@ class CoreTestUnit(val name: String, val wast: String, val expectedOutput: Strin
 
     override fun toString() = "Spec unit: $name"
 
+    val defaultMaxMemPages get() = when (name) {
+        "nop"-> 20
+        "resizing" -> 830
+        else -> 1
+    }
+
     val parseResult: StrToSExpr.ParseResult.Success by lazy {
         StrToSExpr.parse(wast).let {
             when (it) {
@@ -45,6 +51,7 @@ class CoreTestUnit(val name: String, val wast: String, val expectedOutput: Strin
         - left-to-right.wast - Not handling tables yet
         - linking.wast - Not handling tables yet
         - memory.wast - Not handling mem data strings yet
+        - return.wast - Not handling tables yet
         */
 
         val knownGoodTests = arrayOf(
@@ -114,7 +121,17 @@ class CoreTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             "loop-end-label-mismatch.fail.wast",
             "loop-end-label-superfluous.fail.wast",
             "memory_redundancy.wast",
-            "memory_trap.wast"
+            "memory_trap.wast",
+            "names.wast",
+            "nop.wast",
+            "of_string-overflow-hex-u32.fail.wast",
+            "of_string-overflow-hex-u64.fail.wast",
+            "of_string-overflow-s32.fail.wast",
+            "of_string-overflow-s64.fail.wast",
+            "of_string-overflow-u32.fail.wast",
+            "of_string-overflow-u64.fail.wast",
+            "resizing.wast",
+            "select.wast"
         )
 
         val unitsPath = "/spec/test/core"

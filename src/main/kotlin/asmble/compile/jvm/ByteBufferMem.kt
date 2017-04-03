@@ -9,7 +9,6 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.reflect.KClass
 import kotlin.reflect.KFunction
-import kotlin.reflect.jvm.reflect
 
 open class ByteBufferMem(val direct: Boolean = true) : Mem {
     override val memType = ByteBuffer::class.ref
