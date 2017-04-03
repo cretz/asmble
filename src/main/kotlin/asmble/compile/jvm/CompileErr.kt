@@ -33,6 +33,13 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
         }
     }
 
+    class SelectMismatch(
+        val value1: TypeRef,
+        val value2: TypeRef
+    ) : CompileErr("Select values $value1 and $value2 are not the same type") {
+        override val asmErrString get() = "type mismatch"
+    }
+
     class IfThenValueWithoutElse() : CompileErr("If has value but no else clause") {
         override val asmErrString get() = "type mismatch"
     }
@@ -59,5 +66,11 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
         val index: Int
     ) : CompileErr("Unknown local at index $index") {
         override val asmErrString get() = "unknown local"
+    }
+
+    class UnknownGlobal(
+        val index: Int
+    ) : CompileErr("Unknown global at index $index") {
+        override val asmErrString get() = "unknown global"
     }
 }

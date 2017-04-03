@@ -46,8 +46,11 @@ data class ClsContext(
 
     fun globalAtIndex(index: Int) = importGlobals.getOrNull(index).let {
         when (it) {
-            null -> Either.Right(mod.globals.getOrNull(importGlobals.size - index) ?: error("No global at $index"))
-            else -> Either.Left(it)
+            null ->
+                Either.Right(mod.globals.getOrNull(importGlobals.size - index) ?:
+                    throw CompileErr.UnknownGlobal(index))
+            else ->
+                Either.Left(it)
         }
     }
 

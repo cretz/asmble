@@ -1128,8 +1128,9 @@ open class FuncBuilder {
         ).push(import.type.contentType.typeRef)
 
     fun applyTeeLocal(ctx: FuncContext, fn: Func, index: Int) = ctx.node.localByIndex(index).typeRef.let { typeRef ->
-        fn.addInsns(InsnNode(if (typeRef.stackSize == 2) Opcodes.DUP2 else Opcodes.DUP)).
-            push(typeRef).let { applySetLocal(ctx, it, index) }
+        fn.popExpecting(typeRef).
+            addInsns(InsnNode(if (typeRef.stackSize == 2) Opcodes.DUP2 else Opcodes.DUP)).
+            push(typeRef).push(typeRef).let { fn -> applySetLocal(ctx, fn, index) }
     }
 
     fun applySetLocal(ctx: FuncContext, fn: Func, index: Int) =
@@ -1150,8 +1151,6 @@ open class FuncBuilder {
     }.push(ctx.node.localByIndex(index).typeRef)
 
     fun applySelectInsn(ctx: FuncContext, fn: Func): Func {
-        // If this is dead code, just give up early
-        if (fn.isCurrentBlockDead) return fn
         // 3 things, first two must have same type, third is 0 check (0 means use second, otherwise use first)
         // What we'll do is:
         //   IFNE third L1 (which means if it's non-zero, goto L1)
@@ -1169,7 +1168,8 @@ open class FuncBuilder {
             // Pop next two and confirm they are the same type
             pop().let { (fn, type1) ->
                 fn.pop().let { (fn, type2) ->
-                    require(type1 == type2) { "Select types do not match: $type1 and $type2" }
+                    // Don't check if unreachable
+                    if (!fn.isCurrentBlockDead && type1 != type2) throw CompileErr.SelectMismatch(type1, type2)
                     // Label and pop
                     fn.addInsns(
                         nonZero,

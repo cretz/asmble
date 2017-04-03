@@ -328,14 +328,14 @@ open class SExprToAst {
             }
             "loop" -> {
                 ret += Node.Instr.Loop(sigs.firstOrNull())
-                toInstrs(exp, offset + opOffset, innerCtx).also {
+                toInstrs(exp, offset + opOffset, innerCtx, false).also {
                     ret += it.first
                     opOffset += it.second
                 }
             }
             "if" -> {
-                ret += Node.Instr.Loop(sigs.firstOrNull())
-                toInstrs(exp, offset + opOffset, innerCtx).also {
+                ret += Node.Instr.If(sigs.firstOrNull())
+                toInstrs(exp, offset + opOffset, innerCtx, false).also {
                     ret += it.first
                     opOffset += it.second
                 }
@@ -348,7 +348,7 @@ open class SExprToAst {
                             opOffset++
                             innerCtx = innerCtx.copy(nameMap = innerCtx.nameMap + (it to ctx.blockDepth))
                         }
-                        toInstrs(exp, offset + opOffset, innerCtx).also {
+                        toInstrs(exp, offset + opOffset, innerCtx, false).also {
                             ret += it.first
                             opOffset += it.second
                         }
@@ -358,6 +358,7 @@ open class SExprToAst {
             else -> return Pair(emptyList(), 0)
         }
         require(exp.vals[offset + opOffset].symbolStr() == "end")
+        ret += Node.Instr.End
         opOffset++
         exp.maybeName(offset + opOffset)?.also {
             opOffset++
@@ -570,7 +571,7 @@ open class SExprToAst {
                 var instrAlign = 0
                 if (exp.vals.size > offset + count) exp.vals[offset + count].symbolStr().also {
                     if (it != null && it.startsWith("offset=")) {
-                        instrOffset = UnsignedInteger.valueOf(it.substring(7)).toLong()
+                        instrOffset = it.substring(7).toUnsignedIntConst().toLong()
                         count++
                     }
                 }
@@ -691,6 +692,9 @@ open class SExprToAst {
         else BigInteger(this)
     private fun String.toIntConst() = toBigIntegerConst().toInt()
     private fun String.toLongConst() = toBigIntegerConst().toLong()
+    private fun String.toUnsignedIntConst() =
+        if (this.contains("0x")) UnsignedInteger.valueOf(this.replace("0x", ""), 16)
+        else UnsignedInteger.valueOf(this)
 
     private fun String.toFloatConst() =
         if (this == "infinity" || this == "+infinity") Float.POSITIVE_INFINITY
