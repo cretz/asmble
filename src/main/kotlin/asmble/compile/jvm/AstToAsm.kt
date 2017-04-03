@@ -64,7 +64,7 @@ open class AstToAsm {
     fun addConstructors(ctx: ClsContext) {
         // We have at least two constructors:
         // <init>(int maxMemory, imports...)
-        // <init>(MemClass maxMemory, imports...)
+        // <init>(MemClass mem, imports...)
         // If the max memory was supplied in the mem section, we also have
         // <init>(imports...)
         // TODO: what happens w/ more than 254 imports?
@@ -147,7 +147,7 @@ open class AstToAsm {
             val regCon = Func("<init>", importTypes).
                 addInsns(
                     VarInsnNode(Opcodes.ALOAD, 0),
-                    it.const
+                    (it * Mem.PAGE_SIZE).const
                 ).
                 addInsns(importTypes.indices.map { VarInsnNode(Opcodes.ALOAD, it + 1) }).
                 addInsns(

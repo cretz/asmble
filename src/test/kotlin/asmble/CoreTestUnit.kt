@@ -42,6 +42,9 @@ class CoreTestUnit(val name: String, val wast: String, val expectedOutput: Strin
         - func_ptrs.wast - Not handling tables yet
         - globals.wast - No binary yet
         - imports.wast - No memory exports yet
+        - left-to-right.wast - Not handling tables yet
+        - linking.wast - Not handling tables yet
+        - memory.wast - Not handling mem data strings yet
         */
 
         val knownGoodTests = arrayOf(
@@ -104,7 +107,14 @@ class CoreTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             "import-after-table.fail.wast",
             "int_exprs.wast",
             "int_literals.wast",
-            "labels.wast"
+            "labels.wast",
+            "load-align-0.fail.wast",
+            "load-align-odd.fail.wast",
+            "loop.wast",
+            "loop-end-label-mismatch.fail.wast",
+            "loop-end-label-superfluous.fail.wast",
+            "memory_redundancy.wast",
+            "memory_trap.wast"
         )
 
         val unitsPath = "/spec/test/core"

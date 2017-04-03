@@ -180,11 +180,11 @@ open class InsnReworker {
         is Node.Instr.End, is Node.Instr.Br, is Node.Instr.BrIf,
         is Node.Instr.BrTable, is Node.Instr.Return -> NOP
         is Node.Instr.Call -> ctx.funcTypeAtIndex(insn.index).let {
-            // All calls pop "this" + params, and any return is a push
-            POP_THIS + (POP_PARAM + it.params.size) + (if (it.ret == null) NOP else PUSH_RESULT)
+            // All calls pop params and any return is a push
+            (POP_PARAM * it.params.size) + (if (it.ret == null) NOP else PUSH_RESULT)
         }
         is Node.Instr.CallIndirect -> ctx.mod.types[insn.index].let {
-            POP_THIS + (POP_PARAM + it.params.size) + (if (it.ret == null) NOP else PUSH_RESULT)
+            (POP_PARAM * it.params.size) + (if (it.ret == null) NOP else PUSH_RESULT)
         }
         is Node.Instr.Drop -> POP_PARAM
         is Node.Instr.Select -> (POP_PARAM * 3) + PUSH_RESULT
@@ -201,7 +201,7 @@ open class InsnReworker {
         is Node.Instr.I32Store8, is Node.Instr.I32Store16, is Node.Instr.I64Store8, is Node.Instr.I64Store16,
         is Node.Instr.I64Store32 -> POP_PARAM
         is Node.Instr.CurrentMemory -> PUSH_RESULT
-        is Node.Instr.GrowMemory -> POP_PARAM
+        is Node.Instr.GrowMemory -> POP_PARAM + PUSH_RESULT
         is Node.Instr.I32Const, is Node.Instr.I64Const,
         is Node.Instr.F32Const, is Node.Instr.F64Const -> PUSH_RESULT
         is Node.Instr.I32Add, is Node.Instr.I32Sub, is Node.Instr.I32Mul, is Node.Instr.I32DivS,

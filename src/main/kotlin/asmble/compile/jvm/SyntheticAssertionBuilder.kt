@@ -177,11 +177,6 @@ open class SyntheticAssertionBuilder {
         }
     }
 
-    fun MethodNode.addInsns(vararg insn: AbstractInsnNode): MethodNode {
-        insn.forEach(this.instructions::add)
-        return this
-    }
-
     fun MethodNode.throwArith(msg: String) = this.addInsns(
         TypeInsnNode(Opcodes.NEW, ArithmeticException::class.ref.asmName),
         InsnNode(Opcodes.DUP),

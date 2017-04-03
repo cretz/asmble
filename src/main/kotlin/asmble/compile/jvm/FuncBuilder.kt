@@ -145,7 +145,7 @@ open class FuncBuilder {
         is Node.Instr.CurrentMemory ->
             applyCurrentMemory(ctx, fn)
         is Node.Instr.GrowMemory ->
-            applyGrowMemory(ctx, fn, index)
+            applyGrowMemory(ctx, fn)
         is Node.Instr.I32Const ->
             fn.addInsns(i.value.const).push(Int::class.ref)
         is Node.Instr.I64Const ->
@@ -1029,13 +1029,10 @@ open class FuncBuilder {
         ).push(Int::class.ref)
     }
 
-    fun applyGrowMemory(ctx: FuncContext, fn: Func, insnIndex: Int) =
+    fun applyGrowMemory(ctx: FuncContext, fn: Func) =
         // Grow mem is a special case where the memory ref is already pre-injected on
-        // the stack before this call. But it can have a memory leftover on the stack
-        // so we pop it if we need to
-        ctx.cls.mem.growMemory(ctx, fn).let { fn ->
-            popMemoryIfNecessary(ctx, fn, ctx.insns.getOrNull(insnIndex + 1))
-        }
+        // the stack before this call. Result is an int.
+        ctx.cls.mem.growMemory(ctx, fn)
 
     fun applyCurrentMemory(ctx: FuncContext, fn: Func) =
         // Curr mem is not specially injected, so we have to put the memory on the

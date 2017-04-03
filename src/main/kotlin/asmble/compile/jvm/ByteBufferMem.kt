@@ -3,10 +3,7 @@ package asmble.compile.jvm
 import asmble.ast.Node
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
-import org.objectweb.asm.tree.InsnNode
-import org.objectweb.asm.tree.IntInsnNode
-import org.objectweb.asm.tree.MethodInsnNode
-import org.objectweb.asm.tree.TypeInsnNode
+import org.objectweb.asm.tree.*
 import java.nio.Buffer
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -56,13 +53,47 @@ open class ByteBufferMem(val direct: Boolean = true) : Mem {
         InsnNode(Opcodes.IDIV)
     ).push(Int::class.ref)
 
-    override fun growMemory(ctx: FuncContext, func: Func) =
-        func.popExpecting(memType).popExpecting(Int::class.ref).addInsns(
-            Mem.PAGE_SIZE.const,
-            // TODO: overflow check, e.g. Math.multiplyExact
-            InsnNode(Opcodes.IMUL),
-            forceFnType<ByteBuffer.(Int) -> Buffer>(ByteBuffer::limit).invokeVirtual()
-        ).push(ByteBuffer::class.ref)
+    override fun growMemory(ctx: FuncContext, func: Func) = getOrCreateGrowMemoryMethod(ctx, func).let { method ->
+        func.popExpecting(Int::class.ref).popExpecting(memType).addInsns(
+            // This is complicated enough to need a synthetic method
+            MethodInsnNode(Opcodes.INVOKESTATIC, ctx.cls.thisRef.asmName, method.name, method.desc, false)
+        ).push(Int::class.ref)
+    }
+
+    fun getOrCreateGrowMemoryMethod(ctx: FuncContext, func: Func): MethodNode =
+        ctx.cls.cls.methods.find { (it as? MethodNode)?.name == "\$\$growMemory" }?.let { it as MethodNode } ?: run {
+            val okLim = LabelNode()
+            val node = MethodNode(
+                Opcodes.ACC_PRIVATE + Opcodes.ACC_STATIC + Opcodes.ACC_SYNTHETIC,
+                "\$\$growMemory", "(Ljava/nio/ByteBuffer;I)I", null, null
+            ).addInsns(
+                VarInsnNode(Opcodes.ALOAD, 0), // [mem]
+                forceFnType<ByteBuffer.() -> Int>(ByteBuffer::limit).invokeVirtual(), // [lim]
+                InsnNode(Opcodes.DUP), // [lim, lim]
+                VarInsnNode(Opcodes.ALOAD, 0), // [lim, lim, mem]
+                InsnNode(Opcodes.SWAP), // [lim, mem, lim]
+                VarInsnNode(Opcodes.ILOAD, 1), // [lim, mem, lim, pagedelt]
+                Mem.PAGE_SIZE.const, // [lim, mem, lim, pagedelt, pagesize]
+                // TODO: overflow check w/ Math.multiplyExact?
+                InsnNode(Opcodes.IMUL), // [lim, mem, lim, memdelt]
+                InsnNode(Opcodes.IADD), // [lim, mem, newlim]
+                InsnNode(Opcodes.DUP), // [lim, mem, newlim, newlim]
+                VarInsnNode(Opcodes.ALOAD, 0), // [lim, mem, newlim, newlim, mem]
+                ByteBuffer::capacity.invokeVirtual(), // [lim, mem, newlim, newlim, cap]
+                JumpInsnNode(Opcodes.IF_ICMPLE, okLim), // [lim, mem, newlim]
+                InsnNode(Opcodes.POP2), InsnNode(Opcodes.POP),
+                (-1).const,
+                InsnNode(Opcodes.IRETURN),
+                okLim, // [lim, mem, newlim]
+                forceFnType<ByteBuffer.(Int) -> Buffer>(ByteBuffer::limit).invokeVirtual(), // [lim, mem]
+                InsnNode(Opcodes.POP), // [lim]
+                Mem.PAGE_SIZE.const, // [lim, pagesize]
+                InsnNode(Opcodes.IDIV), // [limpages]
+                InsnNode(Opcodes.IRETURN)
+            )
+            ctx.cls.cls.methods.add(node)
+            node
+        }
 
     override fun loadOp(ctx: FuncContext, func: Func, insn: Node.Instr.Args.AlignOffset): Func {
         // Ug, some tests expect this to be a runtime failure so we feature flagged it

@@ -131,6 +131,11 @@ val AbstractInsnNode.isUnconditionalJump: Boolean get() = when (this.opcode) {
     else -> false
 }
 
+fun MethodNode.addInsns(vararg insn: AbstractInsnNode): MethodNode {
+    insn.forEach(this.instructions::add)
+    return this
+}
+
 val Node.Type.Func.asmDesc: String get() =
     (this.ret?.typeRef ?: Void::class.ref).asMethodRetDesc(*this.params.map { it.typeRef }.toTypedArray())
 

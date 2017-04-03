@@ -23,9 +23,9 @@ interface Mem {
     // Caller can trust the mem instance is on the stack.
     fun currentMemory(ctx: FuncContext, func: Func): Func
 
-    // Caller can trust the mem instance and then i32 page count is on the stack.
-    // If it's already there after call anyways, this can leave the mem inst on
-    // the stack and it will be reused or popped.
+    // Caller can trust the mem instance and then i32 delta page count is on the
+    // stack. Per the spec, the result needs to be the previous page count or -1
+    // on failure (i.e. do not throw).
     fun growMemory(ctx: FuncContext, func: Func): Func
 
     // Caller can trust the mem instance is on the stack
