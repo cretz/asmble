@@ -454,28 +454,33 @@ open class FuncBuilder {
                 java.lang.Double::class.invokeStatic("longBitsToDouble", Double::class, Long::class))
     }
 
-    fun applyBr(ctx: FuncContext, fn: Func, i: Node.Instr.Br) =
-        fn.blockAtDepth(i.relativeDepth).let { block ->
-            // We have to pop all unnecessary values per the spec
-            val type = block.labelTypes.firstOrNull()
-            fun pop(fn: Func): Func {
-                // Have to swap first if there is a type expected
-                // Note, we check stack size because dead code is allowed to do some crazy
-                // things.
-                return (if (type != null && fn.stack.size > 1) fn.stackSwap(block) else fn).let { fn ->
-                    fn.pop().let { (fn, poppedType) ->
-                        fn.addInsns(InsnNode(if (poppedType.stackSize == 2) Opcodes.POP2 else Opcodes.POP))
-                    }
+    fun popForBlockEscape(ctx: FuncContext, fn: Func, block: Func.Block) =
+        popUntilStackSize(ctx, fn, block, block.origStack.size + block.labelTypes.size, block.labelTypes.isNotEmpty())
+
+    fun popUntilStackSize(
+        ctx: FuncContext,
+        fn: Func,
+        block: Func.Block,
+        untilStackSize: Int,
+        keepLast: Boolean
+    ): Func {
+        ctx.debug { "For block ${block.insn}, popping until stack size $untilStackSize, keeping last? $keepLast" }
+        // Just get the latest, don't actually pop...
+        val type = if (keepLast) fn.pop().second else null
+        return (0 until Math.max(0, fn.stack.size - untilStackSize)).fold(fn) { fn, _ ->
+            // Essentially swap and pop if they want to keep the latest
+            (if (type != null && fn.stack.size > 1) fn.stackSwap(block) else fn).let { fn ->
+                fn.pop(block).let { (fn, poppedType) ->
+                    fn.addInsns(InsnNode(if (poppedType.stackSize == 2) Opcodes.POP2 else Opcodes.POP))
                 }
             }
-            // How many do we have to pop to get back to expected block size
-            val currBlockStackSize = fn.stack.size - block.origStack.size
-            val needToPop = Math.max(0, if (type == null) currBlockStackSize else currBlockStackSize - 1)
-            ctx.debug {
-                "Unconditional branch on ${block.insn}, curr stack ${fn.stack}, " +
-                    " orig stack ${block.origStack}, need to pop $needToPop"
-            }
-            (0 until needToPop).fold(fn) { fn, _ -> pop(fn) }.
+        }
+    }
+
+    fun applyBr(ctx: FuncContext, fn: Func, i: Node.Instr.Br) =
+        fn.blockAtDepth(i.relativeDepth).let { block ->
+            ctx.debug { "Unconditional branch on ${block.insn}, curr stack ${fn.stack}, orig stack ${block.origStack}" }
+            popForBlockEscape(ctx, fn, block).
                 popExpectingMulti(block.labelTypes, block).
                 addInsns(JumpInsnNode(Opcodes.GOTO, block.requiredLabel)).
                 markUnreachable()
@@ -1162,20 +1167,25 @@ open class FuncBuilder {
             }
         }
 
-    fun applyReturnInsn(ctx: FuncContext, fn: Func) = when (ctx.node.type.ret) {
-        null ->
-            fn.addInsns(InsnNode(Opcodes.RETURN))
-        Node.Type.Value.I32 ->
-            fn.popExpecting(Int::class.ref).addInsns(InsnNode(Opcodes.IRETURN))
-        Node.Type.Value.I64 ->
-            fn.popExpecting(Long::class.ref).addInsns(InsnNode(Opcodes.LRETURN))
-        Node.Type.Value.F32 ->
-            fn.popExpecting(Float::class.ref).addInsns(InsnNode(Opcodes.FRETURN))
-        Node.Type.Value.F64 ->
-            fn.popExpecting(Double::class.ref).addInsns(InsnNode(Opcodes.DRETURN))
-    }.let { fn ->
-        if (fn.stack.isNotEmpty()) throw CompileErr.UnusedStackOnReturn(fn.stack)
-        fn.markUnreachable()
+    fun applyReturnInsn(ctx: FuncContext, fn: Func): Func {
+        val block = fn.blockStack.first()
+        popForBlockEscape(ctx, fn, block).let { fn ->
+            return when (ctx.node.type.ret) {
+                null ->
+                    fn.addInsns(InsnNode(Opcodes.RETURN))
+                Node.Type.Value.I32 ->
+                    fn.popExpecting(Int::class.ref, block).addInsns(InsnNode(Opcodes.IRETURN))
+                Node.Type.Value.I64 ->
+                    fn.popExpecting(Long::class.ref, block).addInsns(InsnNode(Opcodes.LRETURN))
+                Node.Type.Value.F32 ->
+                    fn.popExpecting(Float::class.ref, block).addInsns(InsnNode(Opcodes.FRETURN))
+                Node.Type.Value.F64 ->
+                    fn.popExpecting(Double::class.ref, block).addInsns(InsnNode(Opcodes.DRETURN))
+            }.let { fn ->
+                if (fn.stack.isNotEmpty()) throw CompileErr.UnusedStackOnReturn(fn.stack)
+                fn.markUnreachable()
+            }
+        }
     }
 
     companion object : FuncBuilder()

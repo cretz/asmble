@@ -146,7 +146,8 @@ class CoreTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             // "switch.wast" TODO: we are in trouble here on the "argument switch"
             "tee_local.wast",
             "traps.wast",
-            "unreached-invalid.wast"
+            "unreached-invalid.wast",
+            "unwind.wast"
         )
 
         val testsWithErrorToWarningPredicates: Map<String, (Throwable) -> Boolean> = mapOf(

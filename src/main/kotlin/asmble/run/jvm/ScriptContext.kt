@@ -126,7 +126,7 @@ data class ScriptContext(
     private fun assertFailure(a: Script.Cmd.Assertion, e: Throwable, expectedString: String) {
         val innerEx = exceptionFromCatch(e)
         val msg = exceptionTranslator.translate(innerEx) ?: "<unrecognized error>"
-        if (msg != expectedString)
+        if (!msg.contains(expectedString))
             throw ScriptAssertionError(a, "Expected failure '$expectedString' got '$msg'", cause = innerEx)
     }
 
