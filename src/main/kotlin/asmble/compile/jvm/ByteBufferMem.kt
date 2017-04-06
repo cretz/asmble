@@ -71,19 +71,24 @@ open class ByteBufferMem(val direct: Boolean = true) : Mem {
                 InsnNode(Opcodes.DUP), // [lim, lim]
                 VarInsnNode(Opcodes.ALOAD, 0), // [lim, lim, mem]
                 InsnNode(Opcodes.SWAP), // [lim, mem, lim]
-                VarInsnNode(Opcodes.ILOAD, 1), // [lim, mem, lim, pagedelt]
-                Mem.PAGE_SIZE.const, // [lim, mem, lim, pagedelt, pagesize]
-                // TODO: overflow check w/ Math.multiplyExact?
-                InsnNode(Opcodes.IMUL), // [lim, mem, lim, memdelt]
-                InsnNode(Opcodes.IADD), // [lim, mem, newlim]
-                InsnNode(Opcodes.DUP), // [lim, mem, newlim, newlim]
-                VarInsnNode(Opcodes.ALOAD, 0), // [lim, mem, newlim, newlim, mem]
-                ByteBuffer::capacity.invokeVirtual(), // [lim, mem, newlim, newlim, cap]
-                JumpInsnNode(Opcodes.IF_ICMPLE, okLim), // [lim, mem, newlim]
-                InsnNode(Opcodes.POP2), InsnNode(Opcodes.POP),
+                // We have to use longs because the page multiplication can overflow an int
+                InsnNode(Opcodes.I2L), // [lim, mem, limL]
+                VarInsnNode(Opcodes.ILOAD, 1), // [lim, mem, limL, pagedelt]
+                InsnNode(Opcodes.I2L), // [lim, mem, limL, pagedeltL]
+                Mem.PAGE_SIZE.toLong().const, // [lim, mem, limL, pagedeltL, pagesizeL]
+                InsnNode(Opcodes.LMUL), // [lim, mem, limL, memdeltL]
+                InsnNode(Opcodes.LADD), // [lim, mem, newlimL]
+                InsnNode(Opcodes.DUP2), // [lim, mem, newlimL, newlimL]
+                VarInsnNode(Opcodes.ALOAD, 0), // [lim, mem, newlimL, newlimL, mem]
+                ByteBuffer::capacity.invokeVirtual(), // [lim, mem, newlimL, newlimL, cap]
+                InsnNode(Opcodes.I2L), // [lim, mem, newlimL, newlimL, capL]
+                InsnNode(Opcodes.LCMP), // [lim, mem, newlimL, cmpres]
+                JumpInsnNode(Opcodes.IFLE, okLim), // [lim, mem, newlimL]
+                InsnNode(Opcodes.POP2), InsnNode(Opcodes.POP2),
                 (-1).const,
                 InsnNode(Opcodes.IRETURN),
-                okLim, // [lim, mem, newlim]
+                okLim, // [lim, mem, newlimL]
+                InsnNode(Opcodes.L2I), // [lim, mem, newlim]
                 forceFnType<ByteBuffer.(Int) -> Buffer>(ByteBuffer::limit).invokeVirtual(), // [lim, mem]
                 InsnNode(Opcodes.POP), // [lim]
                 Mem.PAGE_SIZE.const, // [lim, pagesize]

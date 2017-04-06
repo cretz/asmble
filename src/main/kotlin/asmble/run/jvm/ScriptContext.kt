@@ -86,6 +86,7 @@ data class ScriptContext(
     }
 
     fun assertReturnNan(ret: Script.Cmd.Assertion.ReturnNan) {
+        // TODO: validate canonical vs arithmetic
         val (retType, retVal) = doAction(ret.action)
         when (retType) {
             Node.Type.Value.F32 ->

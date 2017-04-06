@@ -86,7 +86,7 @@ data class Func(
     fun withoutAffectingStack(fn: (Func) -> Func) = fn(this).copy(stack = stack)
 
     fun stackSwap(currBlock: Block = currentBlock) =
-        if (isCurrentBlockDead) this else pop(currBlock).let { (fn, refLast) ->
+        pop(currBlock).let { (fn, refLast) ->
             fn.pop(currBlock).let { (fn, refFirst) ->
                 (if (refFirst.stackSize == 2) {
                     if (refLast.stackSize == 2)

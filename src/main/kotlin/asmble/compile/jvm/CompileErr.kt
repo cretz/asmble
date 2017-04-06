@@ -33,6 +33,13 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
         override val asmErrString get() = "type mismatch"
     }
 
+    class TableTargetMismatch(
+        val defaultTypes: List<TypeRef>,
+        val targetTypes: List<TypeRef>
+    ) : CompileErr("Table jump target has types $targetTypes, but default has $defaultTypes") {
+        override val asmErrString get() = "type mismatch"
+    }
+
     class IfThenValueWithoutElse() : CompileErr("If has value but no else clause") {
         override val asmErrString get() = "type mismatch"
     }

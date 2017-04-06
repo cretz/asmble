@@ -36,8 +36,10 @@ open class SExprToAst {
             "assert_return" ->
                 Script.Cmd.Assertion.Return(toAction(mult),
                     exp.vals.drop(2).map { toExprMaybe(it as SExpr.Multi, ExprContext(emptyMap())) })
-            "assert_return_nan" ->
-                Script.Cmd.Assertion.ReturnNan(toAction(mult))
+            "assert_return_canonical_nan" ->
+                Script.Cmd.Assertion.ReturnNan(toAction(mult), canonical = true)
+            "assert_return_arithmetic_nan" ->
+                Script.Cmd.Assertion.ReturnNan(toAction(mult), canonical = false)
             "assert_trap" ->
                 if (mult.vals.first().symbolStr() == "module")
                     Script.Cmd.Assertion.TrapModule(toModule(mult).second, exp.vals[2].symbolStr()!!)
@@ -69,13 +71,19 @@ open class SExprToAst {
     fun toCmd(exp: SExpr.Multi): Script.Cmd {
         val expName = exp.vals.first().symbolStr()
         return when(expName) {
-            "module" -> toModule(exp).let { Script.Cmd.Module(it.second, it.first) }
-            "register" -> toRegister(exp)
-            "invoke", "get" -> toAction(exp)
-            "assert_return", "assert_return_nan", "assert_trap", "assert_malformed", "assert_invalid",
-                "assert_soft_invalid", "assert_unlinkable", "assert_exhaustion" -> toAssertion(exp)
-            "script", "input", "output" -> toMeta(exp)
-            else -> error("Unrecognized cmd expr '$expName'")
+            "module" ->
+                toModule(exp).let { Script.Cmd.Module(it.second, it.first) }
+            "register" ->
+                toRegister(exp)
+            "invoke", "get" ->
+                toAction(exp)
+            "assert_return", "assert_return_canonical_nan", "assert_return_arithmetic_nan", "assert_trap",
+            "assert_malformed", "assert_invalid", "assert_soft_invalid", "assert_unlinkable", "assert_exhaustion" ->
+                toAssertion(exp)
+            "script", "input", "output" ->
+                toMeta(exp)
+            else ->
+                error("Unrecognized cmd expr '$expName'")
         }
     }
 

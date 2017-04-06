@@ -499,7 +499,11 @@ open class FuncBuilder {
     fun applyBrTable(ctx: FuncContext, fn: Func, insn: Node.Instr.BrTable) =
         fn.blockAtDepth(insn.default).let { defaultBlock ->
             insn.targetTable.fold(fn to emptyList<Func.Block>()) { (fn, blocks), targetDepth ->
-                fn to (blocks + fn.blockAtDepth(targetDepth))
+                // All of the target label types have to match the default one
+                val targetBlock = fn.blockAtDepth(targetDepth)
+                if (targetBlock.labelTypes != defaultBlock.labelTypes)
+                    throw CompileErr.TableTargetMismatch(defaultBlock.labelTypes, targetBlock.labelTypes)
+                fn to (blocks + targetBlock)
             }.let { (fn, targetBlocks) ->
                 // In some cases, the target labels is empty. We need to make 0 goto
                 // the default as well.
@@ -1130,13 +1134,12 @@ open class FuncBuilder {
             // Pop next two and confirm they are the same type
             pop().let { (fn, type1) ->
                 fn.pop().let { (fn, type2) ->
-                    // Don't check if unreachable
-                    if (!fn.isCurrentBlockDead && type1 != type2) throw CompileErr.SelectMismatch(type1, type2)
+                    if (!type1.equivalentTo(type2)) throw CompileErr.SelectMismatch(type1, type2)
                     // Label and pop
                     fn.addInsns(
                         nonZero,
                         InsnNode(if (type1.stackSize == 2) Opcodes.POP2 else Opcodes.POP)
-                    ).push(type1)
+                    ).push(type2)
                 }
             }
     }

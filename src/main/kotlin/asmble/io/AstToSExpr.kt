@@ -15,7 +15,8 @@ open class AstToSExpr {
         is Script.Cmd.Assertion.Return ->
             newMulti("assert_return") + fromAction(v.action) + v.exprs.flatMap(this::fromInstrs)
         is Script.Cmd.Assertion.ReturnNan ->
-            newMulti("assert_return_nan") + fromAction(v.action)
+            if (v.canonical) newMulti("assert_return_canonical_nan") + fromAction(v.action)
+            else newMulti("assert_return_arithmetic_nan") + fromAction(v.action)
         is Script.Cmd.Assertion.Trap ->
             newMulti("assert_trap") + fromAction(v.action) + v.failure
         is Script.Cmd.Assertion.Malformed ->

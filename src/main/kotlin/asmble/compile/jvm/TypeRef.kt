@@ -10,6 +10,8 @@ data class TypeRef(val asm: Type) {
 
     val stackSize: Int get() = if (asm == Type.DOUBLE_TYPE || asm == Type.LONG_TYPE) 2 else 1
 
+    fun equivalentTo(other: TypeRef) = this == other || this == Unknown || other == Unknown
+
     object UnknownType
 
     companion object {
