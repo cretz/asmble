@@ -4,6 +4,7 @@ import asmble.ast.SExpr
 import asmble.ast.Script
 import asmble.io.SExprToAst
 import asmble.io.StrToSExpr
+import asmble.run.jvm.ScriptAssertionError
 import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.nio.file.Paths
@@ -32,6 +33,8 @@ class CoreTestUnit(val name: String, val wast: String, val expectedOutput: Strin
 
     val script: Script by lazy { SExprToAst.toScript(SExpr.Multi(ast)) }
 
+    fun isWarningInsteadOfError(t: Throwable) = testsWithErrorToWarningPredicates[name]?.invoke(t) ?: false
+
     companion object {
 
         /*
@@ -52,10 +55,12 @@ class CoreTestUnit(val name: String, val wast: String, val expectedOutput: Strin
         - linking.wast - Not handling tables yet
         - memory.wast - Not handling mem data strings yet
         - return.wast - Not handling tables yet
+        - start.wast - Not handling mem data strings yet
+        - typecheck.wast - Not handling tables yet
+        - unreachable.wast - Not handling tables yet
         */
 
         val knownGoodTests = arrayOf(
-            "temp.wast",
             "address.wast",
             "address-offset-range.fail.wast",
             "block.wast",
@@ -131,7 +136,26 @@ class CoreTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             "of_string-overflow-u32.fail.wast",
             "of_string-overflow-u64.fail.wast",
             "resizing.wast",
-            "select.wast"
+            "select.wast",
+            "set_local.wast",
+            "skip-stack-guard-page.wast",
+            "stack.wast",
+            "store-align-0.fail.wast",
+            "store-align-odd.fail.wast",
+            "store_retval.wast",
+            // "switch.wast" TODO: we are in trouble here on the "argument switch"
+            "tee_local.wast",
+            "traps.wast"
+        )
+
+        val testsWithErrorToWarningPredicates: Map<String, (Throwable) -> Boolean> = mapOf(
+            // NaN bit patterns can be off
+            "float_literals" to { t ->
+                (((t as? ScriptAssertionError)?.
+                    assertion as? Script.Cmd.Assertion.Return)?.
+                        action as? Script.Cmd.Action.Invoke)?.
+                            string?.contains("nan") ?: false
+            }
         )
 
         val unitsPath = "/spec/test/core"

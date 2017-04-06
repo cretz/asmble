@@ -55,29 +55,32 @@ data class ScriptContext(
         require(ret.exprs.size < 2)
         val (retType, retVal) = doAction(ret.action)
         when (retType) {
-            null -> if (ret.exprs.isNotEmpty()) throw AssertionError("Got empty return, expected not empty")
+            null ->
+                if (ret.exprs.isNotEmpty())
+                    throw ScriptAssertionError(ret, "Got empty return, expected not empty", retVal)
             else -> {
-                if (ret.exprs.isEmpty()) throw AssertionError("Got return, expected empty")
+                if (ret.exprs.isEmpty()) throw ScriptAssertionError(ret, "Got return, expected empty", retVal)
                 val expectedVal = runExpr(ret.exprs.first(), retType)
-                if (expectedVal is Float && expectedVal.isNaN() && retVal is Float) {
-                    java.lang.Float.floatToRawIntBits(expectedVal).let { expectedBits ->
-                        java.lang.Float.floatToRawIntBits(retVal).let { actualBits ->
-                            if (expectedBits != actualBits) throw AssertionError(
-                                "Expected NaN ${java.lang.Integer.toHexString(expectedBits)}, " +
-                                    "got ${java.lang.Integer.toHexString(actualBits)}"
-                            )
-                        }
-                    }
-                } else if (expectedVal is Double && expectedVal.isNaN() && retVal is Double) {
-                    java.lang.Double.doubleToRawLongBits(expectedVal).let { expectedBits ->
-                        java.lang.Double.doubleToRawLongBits(retVal).let { actualBits ->
-                            if (expectedBits != actualBits) throw AssertionError(
-                                "Expected NaN ${java.lang.Long.toHexString(expectedBits)}, " +
-                                    "got ${java.lang.Long.toHexString(actualBits)}"
-                            )
-                        }
-                    }
-                } else if (retVal != expectedVal) throw AssertionError("Expected $expectedVal, got $retVal")
+                if (expectedVal is Float && expectedVal.isNaN() && retVal is Float && retVal.isNaN()) {
+                    if (java.lang.Float.floatToRawIntBits(expectedVal) != java.lang.Float.floatToRawIntBits(retVal))
+                        throw ScriptAssertionError(
+                            ret,
+                            "Mismatch NaN bits, got ${java.lang.Float.floatToRawIntBits(retVal).toString(16)}, " +
+                                "expected ${java.lang.Float.floatToRawIntBits(expectedVal).toString(16)}",
+                            retVal,
+                            expectedVal
+                        )
+                } else if (expectedVal is Double && expectedVal.isNaN() && retVal is Double && retVal.isNaN()) {
+                    if (java.lang.Double.doubleToRawLongBits(expectedVal) != java.lang.Double.doubleToRawLongBits(retVal))
+                        throw ScriptAssertionError(
+                            ret,
+                            "Mismatch NaN bits, got ${java.lang.Double.doubleToRawLongBits(retVal).toString(16)}, " +
+                                "expected ${java.lang.Double.doubleToRawLongBits(expectedVal).toString(16)}",
+                            retVal,
+                            expectedVal
+                        )
+                } else if (retVal != expectedVal)
+                    throw ScriptAssertionError(ret, "Expected $expectedVal, got $retVal", retVal, expectedVal)
             }
         }
     }
@@ -85,15 +88,21 @@ data class ScriptContext(
     fun assertReturnNan(ret: Script.Cmd.Assertion.ReturnNan) {
         val (retType, retVal) = doAction(ret.action)
         when (retType) {
-            Node.Type.Value.F32 -> if (!(retVal as Float).isNaN()) throw AssertionError("Expected NaN, got $retVal")
-            Node.Type.Value.F64 -> if (!(retVal as Double).isNaN()) throw AssertionError("Expected NaN, got $retVal")
-            else -> throw AssertionError("Expected NaN, got $retVal")
+            Node.Type.Value.F32 ->
+                if (!(retVal as Float).isNaN()) throw ScriptAssertionError(ret, "Expected NaN, got $retVal", retVal)
+            Node.Type.Value.F64 ->
+                if (!(retVal as Double).isNaN()) throw ScriptAssertionError(ret, "Expected NaN, got $retVal", retVal)
+            else ->
+                throw ScriptAssertionError(ret, "Expected NaN, got $retVal", retVal)
         }
     }
 
     fun assertTrap(trap: Script.Cmd.Assertion.Trap) {
-        try { doAction(trap.action).also { throw AssertionError("Expected exception but completed successfully") } }
-        catch (e: Throwable) { assertFailure(e, trap.failure) }
+        try {
+            doAction(trap.action).also {
+                throw ScriptAssertionError(trap, "Expected exception but completed successfully")
+            }
+        } catch (e: Throwable) { assertFailure(trap, e, trap.failure) }
     }
 
     fun assertInvalid(invalid: Script.Cmd.Assertion.Invalid) {
@@ -101,22 +110,23 @@ data class ScriptContext(
             debug { "Compiling invalid: " + SExprToStr.Compact.fromSExpr(AstToSExpr.fromModule(invalid.module.value)) }
             val className = "invalid" + UUID.randomUUID().toString().replace("-", "")
             compileModule(invalid.module.value, className, null)
-            throw AssertionError("Expected invalid module with error '${invalid.failure}', was valid")
-        } catch (e: Exception) { assertFailure(e, invalid.failure) }
+            throw ScriptAssertionError(invalid, "Expected invalid module with error '${invalid.failure}', was valid")
+        } catch (e: Exception) { assertFailure(invalid, e, invalid.failure) }
     }
 
     fun assertExhaustion(exhaustion: Script.Cmd.Assertion.Exhaustion) {
-        try { doAction(exhaustion.action).also { throw AssertionError("Expected exception") } }
-        catch (e: Throwable) { assertFailure(e, exhaustion.failure) }
+        try { doAction(exhaustion.action).also { throw ScriptAssertionError(exhaustion, "Expected exception") } }
+        catch (e: Throwable) { assertFailure(exhaustion, e, exhaustion.failure) }
     }
 
     private fun exceptionFromCatch(e: Throwable) =
-        e as? AssertionError ?: (e as? InvocationTargetException)?.targetException ?: e
+        e as? ScriptAssertionError ?: (e as? InvocationTargetException)?.targetException ?: e
 
-    private fun assertFailure(e: Throwable, expectedString: String) {
+    private fun assertFailure(a: Script.Cmd.Assertion, e: Throwable, expectedString: String) {
         val innerEx = exceptionFromCatch(e)
         val msg = exceptionTranslator.translate(innerEx) ?: "<unrecognized error>"
-        if (msg != expectedString) throw AssertionError("Expected failure '$expectedString' got '$msg'", innerEx)
+        if (msg != expectedString)
+            throw ScriptAssertionError(a, "Expected failure '$expectedString' got '$msg'", cause = innerEx)
     }
 
     fun doAction(cmd: Script.Cmd.Action) = when (cmd) {

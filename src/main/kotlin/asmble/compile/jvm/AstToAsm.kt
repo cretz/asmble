@@ -83,7 +83,7 @@ open class AstToAsm {
             VarInsnNode(Opcodes.ALOAD, 1),
             FieldInsnNode(Opcodes.PUTFIELD, ctx.thisRef.asmName, "memory", ctx.mem.memType.asmDesc),
             VarInsnNode(Opcodes.ALOAD, 1)
-        ).push(ctx.mem.memType)
+        ).pushBlock(Node.Instr.Block(null), null, null).push(ctx.mem.memType)
         // Do mem init and remove it from the stack if it's still there afterwards
         memCon = ctx.mem.init(memCon, ctx.mod.memories.firstOrNull()?.limits?.initial ?: 0)
         // Add all data loads
@@ -128,7 +128,7 @@ open class AstToAsm {
         var amountCon = Func("<init>", listOf(Int::class.ref) + importTypes).addInsns(
             VarInsnNode(Opcodes.ALOAD, 0),
             VarInsnNode(Opcodes.ILOAD, 1)
-        ).push(ctx.thisRef, Int::class.ref)
+        ).pushBlock(Node.Instr.Block(null), null, null).push(ctx.thisRef, Int::class.ref)
         amountCon = ctx.mem.create(amountCon).popExpectingMulti(ctx.thisRef, ctx.mem.memType)
         // In addition to this and mem on the stack, add all imports
         amountCon = amountCon.params.drop(1).indices.fold(amountCon) { amountCon, index ->

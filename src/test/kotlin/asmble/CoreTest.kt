@@ -21,7 +21,10 @@ class CoreTest(val unit: CoreTestUnit) : Logger by Logger.Print(Logger.Level.INF
         if (unit.name.endsWith(".fail")) {
             assertNotNull(ex, "Expected failure, but succeeded")
             debug { "Got expected failure: $ex" }
-        } else if (ex != null) throw ex
+        } else if (ex != null) {
+            if (unit.isWarningInsteadOfError(ex)) warn { "Unexpected error on ${unit.name}, but is a warning: $ex" }
+            else throw ex
+        }
     }
 
     private fun run() {

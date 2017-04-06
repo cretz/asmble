@@ -9,4 +9,10 @@ data class TypeRef(val asm: Type) {
     fun asMethodRetDesc(vararg args: TypeRef) = Type.getMethodDescriptor(asm, *args.map { it.asm }.toTypedArray())
 
     val stackSize: Int get() = if (asm == Type.DOUBLE_TYPE || asm == Type.LONG_TYPE) 2 else 1
+
+    object UnknownType
+
+    companion object {
+        val Unknown = UnknownType::class.ref
+    }
 }

@@ -12,18 +12,25 @@ data class Func(
     val insns: List<AbstractInsnNode> = emptyList(),
     val stack: List<TypeRef> = emptyList(),
     val blockStack: List<Block> = emptyList(),
-    // Contains index of JumpInsnNode that has a null label
+    // Contains index of JumpInsnNode that has a null label initially
     val ifStack: List<Int> = emptyList()
 ) {
 
     val desc: String get() = ret.asMethodRetDesc(*params.toTypedArray())
-    val isCurrentBlockDead get() = blockStack.lastOrNull()?.let { block ->
-        // It's dead if it's marked unconditional or it's an unconditional
-        // if/else and we are in that if/else area
-        block.unconditionalBranch ||
-            (block.unconditionalBranchInIf && !block.hasElse) ||
-            (block.unconditionalBranchInElse && block.hasElse)
-    } ?: false
+    val currentBlock get() = blockAtDepth(0)
+    val isCurrentBlockDead get() = blockStack.lastOrNull()?.unreachable ?: false
+
+    fun markUnreachable() = currentBlock.let { block ->
+        if (block.insn is Node.Instr.If) {
+            if (block.hasElse) {
+                block.unreachableInElse = true
+                block.unreachable = block.unreachableInElse && block.unreachableInIf
+            } else block.unreachableInIf = true
+        } else {
+            block.unreachable = true
+        }
+        copy(stack = currentBlock.origStack)
+    }
 
     fun addInsns(insns: List<AbstractInsnNode>) =
         if (isCurrentBlockDead) this else copy(insns = this.insns + insns)
@@ -31,38 +38,41 @@ data class Func(
     fun addInsns(vararg insns: AbstractInsnNode) =
         if (isCurrentBlockDead) this else copy(insns = this.insns + insns)
 
-    fun push(vararg types: TypeRef) = copy(stack = stack + types)
+    fun push(types: List<TypeRef>) = copy(stack = stack + types)
 
-    fun popExpectingMulti(types: List<TypeRef>) = types.reversed().fold(this, Func::popExpecting)
+    fun push(vararg types: TypeRef) = push(types.asList())
 
-    fun popExpectingMulti(vararg types: TypeRef) = types.reversed().fold(this, Func::popExpecting)
+    fun popExpectingMulti(types: List<TypeRef>, currBlock: Block = currentBlock) =
+        types.reversed().fold(this) { fn, typ -> fn.popExpecting(typ, currBlock) }
 
-    fun popExpecting(type: TypeRef): Func {
-        assertTopOfStack(type)
-        return pop().first
+    fun popExpectingMulti(vararg types: TypeRef) = popExpectingMulti(types.asList())
+
+    fun popExpecting(type: TypeRef, currBlock: Block = currentBlock): Func {
+        return pop(currBlock).let { (fn, poppedType) ->
+            if (poppedType != TypeRef.Unknown && type != TypeRef.Unknown && poppedType != type)
+                throw CompileErr.StackMismatch(arrayOf(type), poppedType)
+            fn
+        }
     }
 
-    fun isStackEmptyForBlock(currBlock: Block? = blockStack.lastOrNull()): Boolean {
+    fun isStackEmptyForBlock(currBlock: Block = currentBlock): Boolean {
         // Per https://github.com/WebAssembly/design/issues/1020, it's not whether the
         // stack is empty, but whether it's the same as the current block
-        return stack.isEmpty() || (currBlock != null && stack.size <= currBlock.origStack.size)
+        return stack.isEmpty() || stack.size <= currBlock.origStack.size
     }
 
-    fun pop(currBlock: Block? = blockStack.lastOrNull()): Pair<Func, TypeRef> {
+    fun pop(currBlock: Block = currentBlock): Pair<Func, TypeRef> {
         if (isStackEmptyForBlock(currBlock)) {
             // Just fake it if dead
-            if (isCurrentBlockDead) return this to Int::class.ref
+            if (currBlock.unreachable) return this to TypeRef.Unknown
             throw CompileErr.StackMismatch(emptyArray(), null)
         }
         return copy(stack = stack.dropLast(1)) to stack.last()
     }
 
-    fun assertTopOfStack(type: TypeRef, currBlock: Block? = blockStack.lastOrNull()): Unit {
-        // If it's dead, we just go with it
-        if (!isCurrentBlockDead) {
-            if (isStackEmptyForBlock(currBlock)) throw CompileErr.StackMismatch(arrayOf(type), null)
-            if (stack.lastOrNull() != type) throw CompileErr.StackMismatch(arrayOf(type), stack.lastOrNull())
-        }
+    fun peekExpecting(type: TypeRef, currBlock: Block = currentBlock): Unit {
+        // Just pop expecting
+        popExpecting(type, currBlock)
     }
 
     fun toMethodNode(): MethodNode {
@@ -75,7 +85,7 @@ data class Func(
 
     fun withoutAffectingStack(fn: (Func) -> Func) = fn(this).copy(stack = stack)
 
-    fun stackSwap(currBlock: Block? = blockStack.lastOrNull()) =
+    fun stackSwap(currBlock: Block = currentBlock) =
         if (isCurrentBlockDead) this else pop(currBlock).let { (fn, refLast) ->
             fn.pop(currBlock).let { (fn, refFirst) ->
                 (if (refFirst.stackSize == 2) {
@@ -96,22 +106,16 @@ data class Func(
             }
         }
 
-    fun pushBlock(insn: Node.Instr) = copy(blockStack = blockStack + Block(insn, insns.size, stack))
+    fun pushBlock(insn: Node.Instr, labelType: Node.Type.Value?, endType: Node.Type.Value?) =
+        pushBlock(insn, listOfNotNull(labelType?.typeRef), listOfNotNull(endType?.typeRef))
+
+    fun pushBlock(insn: Node.Instr, labelTypes: List<TypeRef>, endTypes: List<TypeRef>) =
+        copy(blockStack = blockStack + Block(insn, insns.size, stack, labelTypes, endTypes))
 
     fun popBlock() = copy(blockStack = blockStack.dropLast(1)) to blockStack.last()
 
-    fun blockAtDepth(depth: Int) = blockStack.getOrNull(blockStack.size - depth - 1).let { block ->
-        when (block) {
-            null -> throw CompileErr.NoBlockAtDepth(depth)
-            is Block.WithLabel -> this to block
-            // We have to lazily create it here
-            else -> blockStack.toMutableList().let {
-                val newBlock = block.withLabel(LabelNode())
-                it[blockStack.size - depth - 1] = newBlock
-                copy(blockStack = it) to newBlock
-            }
-        }
-    }
+    fun blockAtDepth(depth: Int): Block =
+        blockStack.getOrNull(blockStack.size - depth - 1) ?: throw CompileErr.NoBlockAtDepth(depth)
 
     fun pushIf() = copy(ifStack = ifStack + insns.size)
 
@@ -119,34 +123,24 @@ data class Func(
 
     fun popIf() = copy(ifStack = ifStack.dropLast(1)) to peekIf()
 
-    open class Block(
+    class Block(
         val insn: Node.Instr,
         val startIndex: Int,
-        val origStack: List<TypeRef>
+        val origStack: List<TypeRef>,
+        val labelTypes: List<TypeRef>,
+        val endTypes: List<TypeRef>
     ) {
-        open val label: LabelNode? get() = null
-        open val requiredEndStack: List<TypeRef>? get() = null
-        open val hasElse: Boolean get() = false
-        open val unconditionalBranch: Boolean get() = false
-        open val unconditionalBranchInIf: Boolean get() = false
-        open val unconditionalBranchInElse: Boolean get() = false
-        // First val is the insn, second is the type
-        open val blockExitVals: List<Pair<Node.Instr, TypeRef?>> = emptyList()
-        fun withLabel(label: LabelNode) = WithLabel(insn, startIndex, origStack, label)
-        val insnType: Node.Type.Value? get() = (insn as? Node.Instr.Args.Type)?.type
+        var unreachable = false
+        var unreachableInIf = false
+        var unreachableInElse = false
+        var hasElse = false
+        var thenStackOnIf = emptyList<TypeRef>()
 
-        class WithLabel(
-            insn: Node.Instr,
-            startIndex: Int,
-            origStack: List<TypeRef>,
-            override val label: LabelNode
-        ) : Block(insn, startIndex, origStack) {
-            override var blockExitVals: List<Pair<Node.Instr, TypeRef?>> = emptyList()
-            override var requiredEndStack: List<TypeRef>? = null
-            override var hasElse = false
-            override var unconditionalBranch = false
-            override var unconditionalBranchInIf = false
-            override var unconditionalBranchInElse = false
+        var _label: LabelNode? = null
+        val label get() = _label
+        val requiredLabel: LabelNode get() {
+            if (_label == null) _label = LabelNode()
+            return _label!!
         }
     }
 }

@@ -6,9 +6,7 @@ open class InsnReworker {
 
     fun rework(ctx: ClsContext, func: Node.Func): List<Insn> {
         return injectNeededStackVars(ctx, func.instructions).let { insns ->
-            addEagerLocalInitializers(ctx, func, insns).let { insns ->
-                wrapWithImplicitBlock(ctx, insns, func.type.ret)
-            }
+            addEagerLocalInitializers(ctx, func, insns)
         }
     }
 
@@ -87,9 +85,6 @@ open class InsnReworker {
             listOf(Insn.Node(const), Insn.Node(Node.Instr.SetLocal(it)))
         } + insns
     }
-
-    fun wrapWithImplicitBlock(ctx: ClsContext, insns: List<Insn>, retType: Node.Type.Value?) =
-        (listOf(Insn.Node(Node.Instr.Block(retType))) + insns) + Insn.Node(Node.Instr.End)
 
     fun injectNeededStackVars(ctx: ClsContext, insns: List<Node.Instr>): List<Insn> {
         // How we do this:

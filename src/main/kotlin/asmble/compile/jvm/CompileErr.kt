@@ -21,16 +21,9 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
 
     class BlockEndMismatch(
         val expectedStack: List<TypeRef>,
-        val possibleExtra: TypeRef?,
         val actualStack: List<TypeRef>
-    ) : CompileErr(msgString(expectedStack, possibleExtra, actualStack)) {
+    ) : CompileErr("At block end, expected stack $expectedStack, got $actualStack") {
         override val asmErrString get() = "type mismatch"
-
-        companion object {
-            fun msgString(expectedStack: List<TypeRef>, possibleExtra: TypeRef?, actualStack: List<TypeRef>) =
-                if (possibleExtra == null) "At block end, expected stack $expectedStack, got $actualStack"
-                else "At block end, expected stack $expectedStack and maybe $possibleExtra, got $actualStack"
-        }
     }
 
     class SelectMismatch(
