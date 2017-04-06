@@ -102,7 +102,9 @@ sealed class Node {
     ) : Node()
 
     data class CustomSection(
-        val sectionIndex: Int,
+        // The order of custom sections amongst themselves is based on how they
+        // appear in the module node.
+        val beforeSectionId: Int,
         val name: String,
         val payload: ByteArray
     ) : Node()
