@@ -4,6 +4,8 @@ import java.math.BigInteger
 
 internal const val INT_MASK = 0xffffffffL
 
+fun Byte.toUnsignedShort() = if (this >= 0) this.toShort() else (this.toInt() + 128).toShort()
+
 fun BigInteger.unsignedToSignedLong(): Long {
     if (this.signum() < 0 || this.bitLength() > java.lang.Long.SIZE) throw NumberFormatException()
     return this.toLong()
@@ -20,7 +22,7 @@ fun Float.Companion.fromIntBits(v: Int) = java.lang.Float.intBitsToFloat(v)
 fun Int.toUnsignedLong() = java.lang.Integer.toUnsignedLong(this)
 
 fun Long.toIntExact() =
-    if (this > Int.MAX_VALUE.toLong()) throw NumberFormatException()
+    if (this > Int.MAX_VALUE.toLong() || this < Int.MIN_VALUE.toLong()) throw NumberFormatException()
     else this.toInt()
 
 fun Long.toUnsignedBigInt() =

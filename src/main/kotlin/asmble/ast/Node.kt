@@ -386,6 +386,9 @@ sealed class Node {
             var strToOpMap = emptyMap<String, InstrOp<*>>(); private set
             var classToOpMap = emptyMap<KClass<out Instr>, InstrOp<*>>(); private set
             var strToOpcodeMap = emptyMap<String, Short>(); private set
+            var opcodeToStrMap = emptyMap<Short, String>(); private set
+
+            fun op(opcode: Short) = opcodeToStrMap[opcode]?.let(strToOpMap::get) ?: error("No opcode found: $opcode")
 
             init {
                 // Can't use reification here because inline funcs not allowed in nested context :-(
@@ -402,6 +405,7 @@ sealed class Node {
                     strToOpMap += name to op
                     classToOpMap += clazz to op
                     strToOpcodeMap += name to opcode
+                    opcodeToStrMap += opcode to name
                 }
 
                 opMapEntry("unreachable", 0x00, ::ControlFlowOpNoArg, Instr.Unreachable, Instr.Unreachable::class)
