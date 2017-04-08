@@ -160,6 +160,8 @@ open class AstToBinary(val version: Long = 0xd) {
         b.writeUInt32("magic_number", 0x6d736100)
         b.writeUInt32("version", version)
         // Sections
+        // Add all custom sections after 0
+        n.customSections.filter { it.afterSectionId == 0 }.forEach { fromCustomSection(b, it) }
         // We need to add all of the func decl types to the type list that are not already there
         val funcTypes = n.types + n.funcs.mapNotNull { if (n.types.contains(it.type)) null else it.type }
         wrapListSection(b, n, 1, funcTypes, this::fromFuncType)
@@ -175,7 +177,7 @@ open class AstToBinary(val version: Long = 0xd) {
         wrapListSection(b, n, 10, n.funcs, this::fromFuncBody)
         wrapListSection(b, n, 11, n.data, this::fromData)
         // All other custom sections after the previous
-        n.customSections.filter { it.beforeSectionId > 11 }.forEach { fromCustomSection(b, it) }
+        n.customSections.filter { it.afterSectionId > 11 }.forEach { fromCustomSection(b, it) }
     }
 
     fun fromResizableLimits(b: ByteWriter, n: Node.ResizableLimits) {
@@ -205,8 +207,6 @@ open class AstToBinary(val version: Long = 0xd) {
         sectionId: Short,
         handler: () -> Unit
     ) {
-        // Check for any custom section we need to write here
-        mod.customSections.filter { it.beforeSectionId == sectionId.toInt() }.forEach { fromCustomSection(b, it) }
         // Apply section
         b.writeVarUInt7("id", sectionId)
         val payloadLenIndex = b.index
@@ -215,6 +215,8 @@ open class AstToBinary(val version: Long = 0xd) {
         handler()
         // Go back and write payload
         b.writeVarUInt32("payload_len", (b.index - mark), payloadLenIndex)
+        // Add any custom sections after myself
+        mod.customSections.filter { it.afterSectionId == sectionId.toInt() }.forEach { fromCustomSection(b, it) }
     }
 
     fun ByteWriter.writeVarUInt32(field: String, v: Int, index: Int = this.index) {

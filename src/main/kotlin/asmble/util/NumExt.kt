@@ -19,6 +19,10 @@ fun Float.Companion.fromIntBits(v: Int) = java.lang.Float.intBitsToFloat(v)
 
 fun Int.toUnsignedLong() = java.lang.Integer.toUnsignedLong(this)
 
+fun Long.toIntExact() =
+    if (this > Int.MAX_VALUE.toLong()) throw NumberFormatException()
+    else this.toInt()
+
 fun Long.toUnsignedBigInt() =
     if (this >= 0) BigInteger.valueOf(this and 0x7fffffffffffffffL)
     else BigInteger.valueOf(this and 0x7fffffffffffffffL).setBit(java.lang.Long.SIZE - 1)
