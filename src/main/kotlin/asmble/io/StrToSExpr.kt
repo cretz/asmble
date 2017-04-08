@@ -1,8 +1,6 @@
 package asmble.io
 
 import asmble.ast.SExpr
-import asmble.util.IdentityMap
-import asmble.util.plus
 
 open class StrToSExpr {
     sealed class ParseResult {

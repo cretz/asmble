@@ -6,6 +6,8 @@ import asmble.compile.jvm.*
 import asmble.io.AstToSExpr
 import asmble.io.SExprToStr
 import asmble.util.Logger
+import asmble.util.toRawIntBits
+import asmble.util.toRawLongBits
 import java.io.PrintWriter
 import java.lang.invoke.MethodHandle
 import java.lang.invoke.MethodHandles
@@ -62,20 +64,20 @@ data class ScriptContext(
                 if (ret.exprs.isEmpty()) throw ScriptAssertionError(ret, "Got return, expected empty", retVal)
                 val expectedVal = runExpr(ret.exprs.first(), retType)
                 if (expectedVal is Float && expectedVal.isNaN() && retVal is Float && retVal.isNaN()) {
-                    if (java.lang.Float.floatToRawIntBits(expectedVal) != java.lang.Float.floatToRawIntBits(retVal))
+                    if (expectedVal.toRawIntBits() != retVal.toRawIntBits())
                         throw ScriptAssertionError(
                             ret,
-                            "Mismatch NaN bits, got ${java.lang.Float.floatToRawIntBits(retVal).toString(16)}, " +
-                                "expected ${java.lang.Float.floatToRawIntBits(expectedVal).toString(16)}",
+                            "Mismatch NaN bits, got ${retVal.toRawIntBits().toString(16)}, " +
+                                "expected ${expectedVal.toRawIntBits().toString(16)}",
                             retVal,
                             expectedVal
                         )
                 } else if (expectedVal is Double && expectedVal.isNaN() && retVal is Double && retVal.isNaN()) {
-                    if (java.lang.Double.doubleToRawLongBits(expectedVal) != java.lang.Double.doubleToRawLongBits(retVal))
+                    if (expectedVal.toRawLongBits() != retVal.toRawLongBits())
                         throw ScriptAssertionError(
                             ret,
-                            "Mismatch NaN bits, got ${java.lang.Double.doubleToRawLongBits(retVal).toString(16)}, " +
-                                "expected ${java.lang.Double.doubleToRawLongBits(expectedVal).toString(16)}",
+                            "Mismatch NaN bits, got ${retVal.toRawLongBits().toString(16)}, " +
+                                "expected ${expectedVal.toRawLongBits().toString(16)}",
                             retVal,
                             expectedVal
                         )
