@@ -1,8 +1,8 @@
-package asmble
+package asmble.run.jvm
 
+import asmble.SpecTestUnit
 import asmble.io.AstToSExpr
 import asmble.io.SExprToStr
-import asmble.run.jvm.ScriptContext
 import asmble.util.Logger
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -13,10 +13,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 
 @RunWith(Parameterized::class)
-class CoreTest(val unit: CoreTestUnit) : Logger by Logger.Print(Logger.Level.INFO) {
+class RunTest(val unit: SpecTestUnit) : Logger by Logger.Print(Logger.Level.INFO) {
 
     @Test
-    fun testName() {
+    fun testRun() {
         val ex = try { run(); null } catch (e: Throwable) { e }
         if (unit.name.endsWith(".fail")) {
             assertNotNull(ex, "Expected failure, but succeeded")
@@ -49,6 +49,6 @@ class CoreTest(val unit: CoreTestUnit) : Logger by Logger.Print(Logger.Level.INF
 
     companion object {
         @JvmStatic @Parameterized.Parameters(name = "{0}")
-        fun data() = CoreTestUnit.loadAll()
+        fun data() = SpecTestUnit.loadAll()
     }
 }

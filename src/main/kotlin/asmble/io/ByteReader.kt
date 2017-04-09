@@ -10,54 +10,54 @@ import java.nio.ByteOrder
 interface ByteReader {
     val isEof: Boolean
 
-    fun readByte(field: String): Byte
-    fun readBytes(field: String, amount: Int? = null): ByteArray
-    fun readUInt32(field: String): Long
-    fun readUInt64(field: String): BigInteger
-    fun readVarInt7(field: String): Byte
-    fun readVarInt32(field: String): Int
-    fun readVarInt64(field: String): Long
-    fun readVarUInt1(field: String): Boolean
-    fun readVarUInt7(field: String): Short
-    fun readVarUInt32(field: String): Long
-    fun slice(field: String, amount: Int): ByteReader
+    fun readByte(): Byte
+    fun readBytes(amount: Int? = null): ByteArray
+    fun readUInt32(): Long
+    fun readUInt64(): BigInteger
+    fun readVarInt7(): Byte
+    fun readVarInt32(): Int
+    fun readVarInt64(): Long
+    fun readVarUInt1(): Boolean
+    fun readVarUInt7(): Short
+    fun readVarUInt32(): Long
+    fun slice(amount: Int): ByteReader
 
     class Buffer(val buf: ByteBuffer) : ByteReader {
         init { buf.order(ByteOrder.LITTLE_ENDIAN) }
 
         override val isEof get() = buf.position() == buf.limit()
 
-        override fun readByte(field: String) = buf.get()
+        override fun readByte() = buf.get()
 
-        override fun readBytes(field: String, amount: Int?) =
+        override fun readBytes(amount: Int?) =
             ByteArray(amount ?: buf.limit() - buf.position()).also { buf.get(it) }
 
-        override fun readUInt32(field: String) = buf.getInt().toUnsignedLong()
+        override fun readUInt32() = buf.getInt().toUnsignedLong()
 
-        override fun readUInt64(field: String) = buf.getLong().toUnsignedBigInt()
+        override fun readUInt64() = buf.getLong().toUnsignedBigInt()
 
-        override fun readVarInt7(field: String) = readSignedLeb128().let {
+        override fun readVarInt7() = readSignedLeb128().let {
             require(it >= Byte.MIN_VALUE.toLong() && it <= Byte.MAX_VALUE.toLong())
             it.toByte()
         }
 
-        override fun readVarInt32(field: String) = readSignedLeb128().toIntExact()
+        override fun readVarInt32() = readSignedLeb128().toIntExact()
 
-        override fun readVarInt64(field: String) = readSignedLeb128()
+        override fun readVarInt64() = readSignedLeb128()
 
-        override fun readVarUInt1(field: String) = readUnsignedLeb128().let {
+        override fun readVarUInt1() = readUnsignedLeb128().let {
             require(it == 1 || it == 0)
             it == 1
         }
 
-        override fun readVarUInt7(field: String) = readUnsignedLeb128().let {
+        override fun readVarUInt7() = readUnsignedLeb128().let {
             require(it <= 255)
             it.toShort()
         }
 
-        override fun readVarUInt32(field: String) = readUnsignedLeb128().toUnsignedLong()
+        override fun readVarUInt32() = readUnsignedLeb128().toUnsignedLong()
 
-        override fun slice(field: String, amount: Int) = ByteReader.Buffer(buf.slice().also { it.limit(amount) })
+        override fun slice(amount: Int) = ByteReader.Buffer(buf.slice().also { it.limit(amount) })
 
         private fun readUnsignedLeb128(): Int {
             // Taken from Android source, Apache licensed

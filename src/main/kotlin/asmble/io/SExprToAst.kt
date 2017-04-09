@@ -6,6 +6,7 @@ import asmble.ast.SExpr
 import asmble.ast.Script
 import asmble.util.*
 import java.math.BigInteger
+import java.nio.ByteBuffer
 
 typealias NameMap = Map<String, Int>
 
@@ -411,8 +412,17 @@ open class SExprToAst {
     fun toModule(exp: SExpr.Multi): Pair<String?, Node.Module> {
         exp.requireFirstSymbol("module")
         val name = exp.maybeName(1)
-        var mod = Node.Module()
 
+        // If all of the other symbols after the name are quoted strings,
+        // this needs to be parsed as a binary
+        exp.vals.drop(if (name == null) 1 else 2).also { otherVals ->
+            if (otherVals.isNotEmpty() && otherVals.find { it !is SExpr.Symbol || !it.quoted } == null)
+                return name to toModuleFromBytes(otherVals.fold(byteArrayOf()) { bytes, strVal ->
+                    bytes + (strVal as SExpr.Symbol).contents.toByteArray()
+                })
+        }
+
+        var mod = Node.Module()
         // Go over each module element and apply to the module
         // But we have to do all imports first before anything else, so we separate them
         val (importExps, nonImportExps) = exp.vals.mapNotNull { it as? SExpr.Multi }.partition {
@@ -496,6 +506,8 @@ open class SExprToAst {
 
         return name to mod
     }
+
+    fun toModuleFromBytes(bytes: ByteArray) = BinaryToAst.toModule(ByteReader.Buffer(ByteBuffer.wrap(bytes)))
 
     fun toModuleNameMap(importExps: List<SExpr.Multi>, nonImportExps: List<SExpr.Multi>): NameMap {
         var typeCount = 0

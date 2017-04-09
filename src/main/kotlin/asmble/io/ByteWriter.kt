@@ -9,78 +9,79 @@ import java.nio.ByteOrder
 interface ByteWriter {
     val index: Int
 
-    fun writeByte(field: String, v: Byte, index: Int = index)
-    fun writeBytes(field: String, v: ByteArray, index: Int = index)
-    fun writeUInt32(field: String, v: Long, index: Int = index)
-    fun writeUInt64(field: String, v:  BigInteger, index: Int = index)
-    fun writeVarInt7(field: String, v: Byte, index: Int = index)
-    fun writeVarInt32(field: String, v: Int, index: Int = index)
-    fun writeVarInt64(field: String, v: Long, index: Int = index)
-    fun writeVarUInt1(field: String, v: Boolean, index: Int = index)
-    fun writeVarUInt7(field: String, v: Short, index: Int = index)
-    fun writeVarUInt32(field: String, v: Long, index: Int = index)
+    fun writeByte(v: Byte, index: Int? = null)
+    fun writeBytes(v: ByteArray, index: Int? = null)
+    fun writeUInt32(v: Long, index: Int? = null)
+    fun writeUInt64(v:  BigInteger, index: Int? = null)
+    fun writeVarInt7(v: Byte, index: Int? = null)
+    fun writeVarInt32(v: Int, index: Int? = null)
+    fun writeVarInt64(v: Long, index: Int? = null)
+    fun writeVarUInt1(v: Boolean, index: Int? = null)
+    fun writeVarUInt7(v: Short, index: Int? = null)
+    fun writeVarUInt32(v: Long, index: Int? = null)
 
     class Buffer(val buf: ByteBuffer) : ByteWriter {
         init { buf.order(ByteOrder.LITTLE_ENDIAN) }
 
         override val index get() = buf.position()
 
-        override fun writeByte(field: String, v: Byte, index: Int) {
-            buf.put(index, v)
+        override fun writeByte(v: Byte, index: Int?) {
+            if (index == null) buf.put(v) else buf.put(index, v)
         }
 
-        override fun writeBytes(field: String, v: ByteArray, index: Int) {
-            if (index == this.index) buf.put(v)
+        override fun writeBytes(v: ByteArray, index: Int?) {
+            if (index == null) buf.put(v)
             else v.forEachIndexed { byteIndex, byte -> buf.put(index + byteIndex, byte) }
         }
 
-        override fun writeUInt32(field: String, v: Long, index: Int) {
-            buf.putInt(index, v.unsignedToSignedInt())
+        override fun writeUInt32(v: Long, index: Int?) {
+            v.unsignedToSignedInt().also { if (index == null) buf.putInt(it) else buf.putInt(index, it) }
         }
 
-        override fun writeUInt64(field: String, v: BigInteger, index: Int) {
-            buf.putLong(index, v.unsignedToSignedLong())
+        override fun writeUInt64(v: BigInteger, index: Int?) {
+            v.unsignedToSignedLong().also { if (index == null) buf.putLong(it) else buf.putLong(index, it) }
         }
 
-        override fun writeVarInt7(field: String, v: Byte, index: Int) {
+        override fun writeVarInt7(v: Byte, index: Int?) {
             writeSignedLeb128(v.toLong(), index)
         }
 
-        override fun writeVarInt32(field: String, v: Int, index: Int) {
+        override fun writeVarInt32(v: Int, index: Int?) {
             writeSignedLeb128(v.toLong(), index)
         }
 
-        override fun writeVarInt64(field: String, v: Long, index: Int) {
+        override fun writeVarInt64(v: Long, index: Int?) {
             writeSignedLeb128(v, index)
         }
 
-        override fun writeVarUInt1(field: String, v: Boolean, index: Int) {
+        override fun writeVarUInt1(v: Boolean, index: Int?) {
             writeUnsignedLeb128(if (v) 1 else 0, index)
         }
 
-        override fun writeVarUInt7(field: String, v: Short, index: Int) {
+        override fun writeVarUInt7(v: Short, index: Int?) {
             writeUnsignedLeb128(v.toLong().unsignedToSignedInt(), index)
         }
 
-        override fun writeVarUInt32(field: String, v: Long, index: Int) {
+        override fun writeVarUInt32(v: Long, index: Int?) {
             writeUnsignedLeb128(v.unsignedToSignedInt(), index)
         }
 
-        private fun writeUnsignedLeb128(v: Int, index: Int) {
+        private fun writeUnsignedLeb128(v: Int, index: Int?) {
             // Taken from Android source, Apache licensed
             var index = index
             var v = v
             var remaining = v ushr 7
             while (remaining != 0) {
-                buf.put(index, ((v and 0x7f) or 0x80).toByte())
-                index++
+                val byte = ((v and 0x7f) or 0x80).toByte()
+                if (index == null) buf.put(byte) else buf.put(index, byte).also { index++ }
                 v = remaining
                 remaining = remaining ushr 7
             }
-            buf.put(index, (v and 0x7f).toByte())
+            val byte = (v and 0x7f).toByte()
+            if (index == null) buf.put(byte) else buf.put(index, byte)
         }
 
-        private fun writeSignedLeb128(v: Long, index: Int) {
+        private fun writeSignedLeb128(v: Long, index: Int?) {
             // Taken from Android source, Apache licensed
             var index = index
             var v = v
@@ -89,8 +90,8 @@ interface ByteWriter {
             val end = if (v and Long.MAX_VALUE == 0L) 0L else -1L
             while (hasMore) {
                 hasMore = remaining != end || remaining and 1 != (v shr 6) and 1
-                buf.put(index, ((v and 0x7f) or if (hasMore) 0x80 else 0).toByte())
-                index++
+                val byte = ((v and 0x7f) or if (hasMore) 0x80 else 0).toByte()
+                if (index == null) buf.put(byte) else buf.put(index, byte).also { index++ }
                 v = remaining
                 remaining = remaining shr 7
             }

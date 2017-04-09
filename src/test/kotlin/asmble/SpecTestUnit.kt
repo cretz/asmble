@@ -10,7 +10,7 @@ import java.nio.file.Files
 import java.nio.file.Paths
 import java.util.stream.Collectors
 
-class CoreTestUnit(val name: String, val wast: String, val expectedOutput: String?) {
+class SpecTestUnit(val name: String, val wast: String, val expectedOutput: String?) {
 
     override fun toString() = "Spec unit: $name"
 
@@ -161,13 +161,13 @@ class CoreTestUnit(val name: String, val wast: String, val expectedOutput: Strin
         )
 
         val unitsPath = "/spec/test/core"
-        fun loadAll(): List<CoreTestUnit> {
+        fun loadAll(): List<SpecTestUnit> {
             return loadFromResourcePath("/local-spec") + loadFromResourcePath(unitsPath)
         }
 
-        fun loadFromResourcePath(basePath: String): List<CoreTestUnit> {
+        fun loadFromResourcePath(basePath: String): List<SpecTestUnit> {
             require(basePath.last() != '/')
-            val jcls = CoreTestUnit::class.java
+            val jcls = SpecTestUnit::class.java
             val uri = jcls.getResource(basePath).toURI()
             val fs = if (uri.scheme == "jar") FileSystems.newFileSystem(uri, emptyMap<String, Any>()) else null
             fs.use { fs ->
@@ -178,7 +178,7 @@ class CoreTestUnit(val name: String, val wast: String, val expectedOutput: Strin
                     filter { knownGoodTests.contains(it.fileName.toString()) }
                 return testWastFiles.map {
                     val name = it.fileName.toString().substringBeforeLast(".wast")
-                    CoreTestUnit(
+                    SpecTestUnit(
                         name = name,
                         wast = it.toUri().toURL().readText(),
                         expectedOutput = jcls.getResource("$basePath/expected-output/$name.wast.log")?.readText()
