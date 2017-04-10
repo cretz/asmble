@@ -12,7 +12,7 @@ data class Script(val commands: List<Cmd>) {
             data class Return(val action: Action, val exprs: List<List<Node.Instr>>): Assertion()
             data class ReturnNan(val action: Action, val canonical: Boolean): Assertion()
             data class Trap(val action: Action, val failure: String): Assertion()
-            data class Malformed(val module: Node.Module, val failure: String): Assertion()
+            data class Malformed(val module: LazyModule, val failure: String): Assertion()
             data class Invalid(val module: LazyModule, val failure: String): Assertion()
             data class SoftInvalid(val module: Node.Module, val failure: String): Assertion()
             data class Unlinkable(val module: Node.Module, val failure: String): Assertion()

@@ -47,6 +47,7 @@ data class ScriptContext(
             is Script.Cmd.Assertion.Return -> assertReturn(cmd)
             is Script.Cmd.Assertion.ReturnNan -> assertReturnNan(cmd)
             is Script.Cmd.Assertion.Trap -> assertTrap(cmd)
+            is Script.Cmd.Assertion.Malformed -> assertMalformed(cmd)
             is Script.Cmd.Assertion.Invalid -> assertInvalid(cmd)
             is Script.Cmd.Assertion.Exhaustion -> assertExhaustion(cmd)
             else -> TODO()
@@ -106,6 +107,18 @@ data class ScriptContext(
                 throw ScriptAssertionError(trap, "Expected exception but completed successfully")
             }
         } catch (e: Throwable) { assertFailure(trap, e, trap.failure) }
+    }
+
+    fun assertMalformed(malformed: Script.Cmd.Assertion.Malformed) {
+        try {
+            debug { "Compiling malformed: " + SExprToStr.Compact.fromSExpr(AstToSExpr.fromModule(malformed.module.value)) }
+            val className = "malformed" + UUID.randomUUID().toString().replace("-", "")
+            compileModule(malformed.module.value, className, null)
+            throw ScriptAssertionError(
+                malformed,
+                "Expected malformed module with error '${malformed.failure}', was valid"
+            )
+        } catch (e: Exception) { assertFailure(malformed, e, malformed.failure) }
     }
 
     fun assertInvalid(invalid: Script.Cmd.Assertion.Invalid) {

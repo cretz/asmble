@@ -19,8 +19,10 @@ open class AstToSExpr {
             else newMulti("assert_return_arithmetic_nan") + fromAction(v.action)
         is Script.Cmd.Assertion.Trap ->
             newMulti("assert_trap") + fromAction(v.action) + v.failure
-        is Script.Cmd.Assertion.Malformed ->
-            newMulti("assert_malformed") + fromModule(v.module) + v.failure
+        is Script.Cmd.Assertion.Malformed -> when (v.module) {
+            is Script.LazyModule.SExpr -> newMulti("assert_malformed") + v.module.sexpr + v.failure
+            else -> newMulti("assert_malformed") + fromModule(v.module.value) + v.failure
+        }
         is Script.Cmd.Assertion.Invalid -> when (v.module) {
             is Script.LazyModule.SExpr -> newMulti("assert_invalid") + v.module.sexpr + v.failure
             else -> newMulti("assert_invalid") + fromModule(v.module.value) + v.failure

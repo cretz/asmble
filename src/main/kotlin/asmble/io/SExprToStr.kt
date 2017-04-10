@@ -25,7 +25,7 @@ open class SExprToStr(val depthBeforeNewline: Int, val countBeforeNewlineAll: In
                     else if (it == '\t') "\\t"
                     else if (it == ' ') " "
                     else if (!it.requiresQuote) it.toString()
-                    else "\\" + (it.toInt() and 0xFF).toString(16)
+                    else "\\" + (it.toInt() and 0xFF).toString(16).let { if (it.length < 2) "0$it" else it }
                 )
             }
             sb.append('"')

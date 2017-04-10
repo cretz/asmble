@@ -31,6 +31,9 @@ class IoTest(val unit: SpecTestUnit) : Logger by Logger.Print(Logger.Level.INFO)
             trace { "Bytes for AST (${it.size}): ${it.asList()}" }
             BinaryToAst(logger = this).toModule(ByteReader.InputStream(ByteArrayInputStream(it))).also {
                 trace { "AST from bytes:\n" + SExprToStr.fromSExpr(AstToSExpr.fromModule(it)) }
+                it.customSections.forEach {
+                    trace { "Custom section ${it.name} after ${it.afterSectionId} with payload ${it.payload.asList()}" }
+                }
             }
         }
         // Compare AST's, but we reset ast2's types because those can change

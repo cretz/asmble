@@ -5,8 +5,8 @@ import asmble.util.toUnsignedBigInt
 import asmble.util.toUnsignedLong
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.EOFException
 import java.math.BigInteger
-import java.util.*
 
 abstract class ByteReader {
     abstract val isEof: Boolean
@@ -104,7 +104,7 @@ abstract class ByteReader {
             val b = ins.read()
             if (b >= 0) return b.toByte()
             sawEof = true
-            error("EOF")
+            throw IoErr.UnexpectedEnd()
         }
 
         override fun readBytes(amount: Int?): ByteArray {
@@ -123,7 +123,7 @@ abstract class ByteReader {
                     val read = ins.read(ret, off, remaining)
                     if (read == -1) {
                         sawEof = true
-                        return Arrays.copyOf(ret, off)
+                        throw IoErr.UnexpectedEnd()
                     }
                     remaining -= read
                 }

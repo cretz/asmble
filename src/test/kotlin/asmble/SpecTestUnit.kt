@@ -41,11 +41,9 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
 
         /*
         TODO: We are going down in order. One's we have not yet handled:
-        - binary.wast - No binary yet
         - br.wast - Not handling tables yet
         - br_table.wast - Not handling tables yet
         - call_indirect.wast - Not handling tables yet
-        - custom_section.wast - No binary yet
         - exports.wast - Not handling tables yet
         - float_exprs.wast - Not handling mem data strings yet
         - float_memory.wast - Not handling mem data strings yet
@@ -65,6 +63,7 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
         val knownGoodTests = arrayOf(
             "address.wast",
             "address-offset-range.fail.wast",
+            "binary.wast",
             "block.wast",
             "block-end-label-mismatch.fail.wast",
             "block-end-label-superfluous.wast",
@@ -73,6 +72,7 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             "call.wast",
             "comments.wast",
             "conversions.wast",
+            "custom_section.wast",
             "endianness.wast",
             "f32.load32.fail.wast",
             "f32.load64.fail.wast",

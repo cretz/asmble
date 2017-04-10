@@ -4,7 +4,7 @@ import asmble.ast.Node
 import asmble.util.*
 
 open class BinaryToAst(
-    val version: Long = 0xd,
+    val version: Long = 1L,
     val logger: Logger = Logger.Print(Logger.Level.OFF)
 ) : Logger by logger {
 
@@ -150,14 +150,15 @@ open class BinaryToAst(
     fun toMemoryType(b: ByteReader) = Node.Type.Memory(toResizableLimits(b))
 
     fun toModule(b: ByteReader): Node.Module {
-        require(b.readUInt32() == 0x6d736100L) { "Invalid magic number" }
-        require(b.readUInt32() == version) { "Invalid version" }
+        if (b.readUInt32() != 0x6d736100L) throw IoErr.InvalidMagicNumber()
+        b.readUInt32().let { if (it != version) throw IoErr.InvalidVersion(it, listOf(version)) }
 
         // Slice up all the sections
         var maxSectionId = 0
         var sections = emptyList<Pair<Int, ByteReader>>()
         while (!b.isEof) {
             val sectionId = b.readVarUInt7().toInt()
+            if (sectionId > 11) throw IoErr.InvalidSectionId(sectionId)
             if (sectionId != 0)
                 require(sectionId > maxSectionId) { "Section ID $sectionId came after $maxSectionId" }.
                     also { maxSectionId = sectionId }
@@ -179,7 +180,9 @@ open class BinaryToAst(
             exports = readSectionList(7, this::toExport),
             startFuncIndex = sections.find { it.first == 8 }?.second?.readVarUInt32AsInt(),
             elems = readSectionList(9, this::toElem),
-            funcs = readSectionList(10) { it }.zip(funcIndices.map { types[it] }, this::toFunc),
+            funcs = readSectionList(10) { it }.
+                also { if (it.size != funcIndices.size) throw IoErr.InvalidCodeLength(funcIndices.size, it.size) }.
+                zip(funcIndices.map { types[it] }, this::toFunc),
             data = readSectionList(11, this::toData),
             customSections = sections.foldIndexed(emptyList()) { index, customSections, (sectionId, b) ->
                 if (sectionId != 0) customSections else {

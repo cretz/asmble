@@ -46,7 +46,10 @@ open class SExprToAst {
                     Script.Cmd.Assertion.TrapModule(toModule(mult).second, exp.vals[2].symbolStr()!!)
                 else Script.Cmd.Assertion.Trap(toAction(mult), exp.vals[2].symbolStr()!!)
             "assert_malformed" ->
-                Script.Cmd.Assertion.Malformed(toModule(mult).second, exp.vals[2].symbolStr()!!)
+                Script.Cmd.Assertion.Malformed(
+                    Script.LazyModule.SExpr(mult) { toModule(mult).second },
+                    exp.vals[2].symbolStr()!!
+                )
             "assert_invalid" ->
                 Script.Cmd.Assertion.Invalid(
                     Script.LazyModule.SExpr(mult) { toModule(it).second },

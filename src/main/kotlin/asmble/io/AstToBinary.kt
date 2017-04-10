@@ -6,7 +6,7 @@ import asmble.util.toRawLongBits
 import asmble.util.toUnsignedBigInt
 import asmble.util.toUnsignedLong
 
-open class AstToBinary(val version: Long = 0xd) {
+open class AstToBinary(val version: Long = 1L) {
 
     fun fromCustomSection(b: ByteWriter, n: Node.CustomSection) {
         b.writeVarUInt7(0)
@@ -185,7 +185,9 @@ open class AstToBinary(val version: Long = 0xd) {
         n: List<T>,
         fn: (ByteWriter, T) -> Unit
     ) {
-        if (n.isNotEmpty()) wrapSection(b, mod, sectionId) { b -> fromListSection(b, n, fn) }
+        // We wrap the section if it has items OR it has a custom section
+        val hasCustomSection = mod.customSections.find { it.afterSectionId == sectionId.toInt() } != null
+        if (n.isNotEmpty() || hasCustomSection) wrapSection(b, mod, sectionId) { b -> fromListSection(b, n, fn) }
     }
 
     fun wrapSection(
