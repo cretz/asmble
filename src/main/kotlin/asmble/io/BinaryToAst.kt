@@ -148,8 +148,11 @@ open class BinaryToAst(val version: Long = 0xd) {
         var sections = emptyList<Pair<Int, ByteReader>>()
         while (!b.isEof) {
             val sectionId = b.readVarUInt7().toInt()
-            if (sectionId != 0) require(sectionId > maxSectionId).also { maxSectionId = sectionId }
-            sections += sectionId to b.slice(b.readVarUInt32AsInt())
+            if (sectionId != 0)
+                require(sectionId > maxSectionId) { "Section ID $sectionId came after $maxSectionId" }.
+                    also { maxSectionId = sectionId }
+            val sectionLen = b.readVarUInt32AsInt()
+            sections += sectionId to b.read(sectionLen)
         }
 
         // Now build the module
@@ -200,7 +203,9 @@ open class BinaryToAst(val version: Long = 0xd) {
     }
 
     fun ByteReader.readString() = this.readVarUInt32AsInt().let { String(this.readBytes(it)) }
-    fun <T> ByteReader.readList(fn: (ByteReader) -> T) = (0 until this.readVarUInt32()).map { _ -> fn(this) }
+    fun <T> ByteReader.readList(fn: (ByteReader) -> T) = this.readVarUInt32().let { listSize ->
+        (0 until listSize).map { fn(this) }
+    }
     fun ByteReader.readVarUInt32AsInt() = this.readVarUInt32().toIntExact()
 
     companion object : BinaryToAst()

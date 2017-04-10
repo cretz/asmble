@@ -10,15 +10,10 @@ open class AstToBinary(val version: Long = 0xd) {
 
     fun fromCustomSection(b: ByteWriter, n: Node.CustomSection) {
         b.writeVarUInt7(0)
-        val payloadLenIndex = b.index
-        b.writeVarUInt32(0)
-        val mark = b.index
-        val nameBytes = n.name.toByteArray()
-        b.writeVarUInt32(nameBytes.size)
-        b.writeBytes(nameBytes)
-        b.writeBytes(n.payload)
-        // Go back and write payload
-        b.writeVarUInt32((b.index - mark), payloadLenIndex)
+        b.withVarUInt32PayloadSizePrepended { b ->
+            b.writeString(n.name)
+            b.writeBytes(n.payload)
+        }
     }
 
     fun fromData(b: ByteWriter, n: Node.Data) {
@@ -36,32 +31,28 @@ open class AstToBinary(val version: Long = 0xd) {
     }
 
     fun fromExport(b: ByteWriter, n: Node.Export) {
-        val fieldBytes = n.field.toByteArray()
-        b.writeVarUInt32(fieldBytes.size)
-        b.writeBytes(fieldBytes)
+        b.writeString(n.field)
         b.writeByte(n.kind.externalKind)
         b.writeVarUInt32(n.index)
     }
 
     fun fromFuncBody(b: ByteWriter, n: Node.Func) {
-        val bodySizeIndex = b.index
-        b.writeVarUInt32(0)
-        val mark = b.index
-        b.writeVarUInt32(n.locals.size)
-        val localsWithCounts = n.locals.fold(emptyList<Pair<Node.Type.Value, Int>>()) { localsWithCounts, local ->
-            if (local != localsWithCounts.lastOrNull()) localsWithCounts + (local to 1)
-            else localsWithCounts.dropLast(1) + (local to localsWithCounts.last().second + 1)
+        b.withVarUInt32PayloadSizePrepended { b ->
+            b.writeVarUInt32(n.locals.size)
+            val localsWithCounts = n.locals.fold(emptyList<Pair<Node.Type.Value, Int>>()) { localsWithCounts, local ->
+                if (local != localsWithCounts.lastOrNull()) localsWithCounts + (local to 1)
+                else localsWithCounts.dropLast(1) + (local to localsWithCounts.last().second + 1)
+            }
+            require(localsWithCounts.distinctBy { it.first }.size != localsWithCounts.size) {
+                "Not all types together for set of locals: ${n.locals}"
+            }
+            localsWithCounts.forEach { (localType, count) ->
+                b.writeVarUInt32(count)
+                b.writeVarInt7(localType.valueType)
+            }
+            n.instructions.forEach { fromInstr(b, it) }
+            fromInstr(b, Node.Instr.End)
         }
-        require(localsWithCounts.distinctBy { it.first }.size != localsWithCounts.size) {
-            "Not all types together for set of locals: ${n.locals}"
-        }
-        localsWithCounts.forEach { (localType, count) ->
-            b.writeVarUInt32(count)
-            b.writeVarInt7(localType.valueType)
-        }
-        n.instructions.forEach { fromInstr(b, it) }
-        fromInstr(b, Node.Instr.End)
-        b.writeVarUInt32((b.index - mark), bodySizeIndex)
     }
 
     fun fromFuncType(b: ByteWriter, n: Node.Type.Func) {
@@ -83,12 +74,8 @@ open class AstToBinary(val version: Long = 0xd) {
     }
 
     fun fromImport(b: ByteWriter, import: Node.Import) {
-        val moduleBytes = import.module.toByteArray()
-        b.writeVarUInt32(moduleBytes.size)
-        b.writeBytes(moduleBytes)
-        val fieldBytes = import.field.toByteArray()
-        b.writeVarUInt32(fieldBytes.size)
-        b.writeBytes(fieldBytes)
+        b.writeString(import.module)
+        b.writeString(import.field)
         b.writeByte(import.kind.externalKind)
         when (import.kind) {
             is Node.Import.Kind.Func -> b.writeVarUInt32(import.kind.typeIndex)
@@ -172,7 +159,7 @@ open class AstToBinary(val version: Long = 0xd) {
         wrapListSection(b, n, 6, n.globals, this::fromGlobal)
         wrapListSection(b, n, 7, n.exports, this::fromExport)
         if (n.startFuncIndex != null)
-            wrapSection(b, n, 8) { b.writeVarUInt32(n.startFuncIndex) }
+            wrapSection(b, n, 8) { b -> b.writeVarUInt32(n.startFuncIndex) }
         wrapListSection(b, n, 9, n.elems, this::fromElem)
         wrapListSection(b, n, 10, n.funcs, this::fromFuncBody)
         wrapListSection(b, n, 11, n.data, this::fromData)
@@ -198,29 +185,36 @@ open class AstToBinary(val version: Long = 0xd) {
         n: List<T>,
         fn: (ByteWriter, T) -> Unit
     ) {
-        wrapSection(b, mod, sectionId) { fromListSection(b, n, fn) }
+        if (n.isNotEmpty()) wrapSection(b, mod, sectionId) { b -> fromListSection(b, n, fn) }
     }
 
     fun wrapSection(
         b: ByteWriter,
         mod: Node.Module,
         sectionId: Short,
-        handler: () -> Unit
+        handler: (ByteWriter) -> Unit
     ) {
-        // Apply section
         b.writeVarUInt7(sectionId)
-        val payloadLenIndex = b.index
-        b.writeVarUInt32(0)
-        val mark = b.index
-        handler()
-        // Go back and write payload
-        b.writeVarUInt32((b.index - mark), payloadLenIndex)
+        b.withVarUInt32PayloadSizePrepended(handler)
         // Add any custom sections after myself
         mod.customSections.filter { it.afterSectionId == sectionId.toInt() }.forEach { fromCustomSection(b, it) }
     }
 
-    fun ByteWriter.writeVarUInt32(v: Int, index: Int = this.index) {
-        this.writeVarUInt32(v.toUnsignedLong(), index)
+    fun ByteWriter.writeVarUInt32(v: Int) {
+        this.writeVarUInt32(v.toUnsignedLong())
+    }
+
+    fun ByteWriter.withVarUInt32PayloadSizePrepended(fn: (ByteWriter) -> Unit) {
+        val temp = this.createTemp()
+        fn(temp)
+        this.writeVarUInt32(temp.written)
+        this.write(temp)
+    }
+
+    fun ByteWriter.writeString(str: String) {
+        val bytes = str.toByteArray()
+        this.writeVarUInt32(bytes.size)
+        this.writeBytes(bytes)
     }
 
     val Node.ExternalKind.externalKind: Byte get() = when(this) {

@@ -18,7 +18,7 @@ class RunTest(val unit: SpecTestUnit) : Logger by Logger.Print(Logger.Level.INFO
     @Test
     fun testRun() {
         val ex = try { run(); null } catch (e: Throwable) { e }
-        if (unit.name.endsWith(".fail")) {
+        if (unit.shouldFail) {
             assertNotNull(ex, "Expected failure, but succeeded")
             debug { "Got expected failure: $ex" }
         } else if (ex != null) {
@@ -49,6 +49,6 @@ class RunTest(val unit: SpecTestUnit) : Logger by Logger.Print(Logger.Level.INFO
 
     companion object {
         @JvmStatic @Parameterized.Parameters(name = "{0}")
-        fun data() = SpecTestUnit.loadAll()
+        fun data() = SpecTestUnit.allUnits
     }
 }

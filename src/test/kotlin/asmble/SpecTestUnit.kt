@@ -14,6 +14,8 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
 
     override fun toString() = "Spec unit: $name"
 
+    val shouldFail get() = name.endsWith(".fail")
+
     val defaultMaxMemPages get() = when (name) {
         "nop"-> 20
         "resizing" -> 830
@@ -161,9 +163,8 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
         )
 
         val unitsPath = "/spec/test/core"
-        fun loadAll(): List<SpecTestUnit> {
-            return loadFromResourcePath("/local-spec") + loadFromResourcePath(unitsPath)
-        }
+
+        val allUnits by lazy { loadFromResourcePath("/local-spec") + loadFromResourcePath(unitsPath) }
 
         fun loadFromResourcePath(basePath: String): List<SpecTestUnit> {
             require(basePath.last() != '/')

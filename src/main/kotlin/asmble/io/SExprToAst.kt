@@ -5,6 +5,7 @@ import asmble.ast.Node.InstrOp
 import asmble.ast.SExpr
 import asmble.ast.Script
 import asmble.util.*
+import java.io.ByteArrayInputStream
 import java.math.BigInteger
 import java.nio.ByteBuffer
 
@@ -507,7 +508,7 @@ open class SExprToAst {
         return name to mod
     }
 
-    fun toModuleFromBytes(bytes: ByteArray) = BinaryToAst.toModule(ByteReader.Buffer(ByteBuffer.wrap(bytes)))
+    fun toModuleFromBytes(bytes: ByteArray) = BinaryToAst.toModule(ByteReader.InputStream(ByteArrayInputStream(bytes)))
 
     fun toModuleNameMap(importExps: List<SExpr.Multi>, nonImportExps: List<SExpr.Multi>): NameMap {
         var typeCount = 0
