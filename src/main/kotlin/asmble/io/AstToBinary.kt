@@ -38,14 +38,14 @@ open class AstToBinary(val version: Long = 0xd) {
 
     fun fromFuncBody(b: ByteWriter, n: Node.Func) {
         b.withVarUInt32PayloadSizePrepended { b ->
-            b.writeVarUInt32(n.locals.size)
             val localsWithCounts = n.locals.fold(emptyList<Pair<Node.Type.Value, Int>>()) { localsWithCounts, local ->
-                if (local != localsWithCounts.lastOrNull()) localsWithCounts + (local to 1)
+                if (local != localsWithCounts.lastOrNull()?.first) localsWithCounts + (local to 1)
                 else localsWithCounts.dropLast(1) + (local to localsWithCounts.last().second + 1)
             }
-            require(localsWithCounts.distinctBy { it.first }.size != localsWithCounts.size) {
-                "Not all types together for set of locals: ${n.locals}"
+            require(localsWithCounts.distinctBy { it.first }.size == localsWithCounts.size) {
+                "Not all types together for set of locals (with counts): $localsWithCounts"
             }
+            b.writeVarUInt32(localsWithCounts.size)
             localsWithCounts.forEach { (localType, count) ->
                 b.writeVarUInt32(count)
                 b.writeVarInt7(localType.valueType)
@@ -93,7 +93,7 @@ open class AstToBinary(val version: Long = 0xd) {
 
     fun fromInstr(b: ByteWriter, n: Node.Instr) {
         val op = n.op()
-        b.writeVarUInt7(op.opcode)
+        b.writeByte(op.opcode.toByte())
         fun <A : Node.Instr.Args> Node.InstrOp<A>.args() = this.argsOf(n)
         when (op) {
             is Node.InstrOp.ControlFlowOp.NoArg, is Node.InstrOp.ParamOp.NoArg,

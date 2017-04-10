@@ -20,14 +20,18 @@ class IoTest(val unit: SpecTestUnit) : Logger by Logger.Print(Logger.Level.INFO)
         // Ignore things that are supposed to fail
         if (unit.shouldFail) return
         // Go from the AST to binary then back to AST then back to binary and confirm values are as expected
-        val ast1 = unit.script.commands.mapNotNull { (it as? Script.Cmd.Module)?.module }
+        val ast1 = unit.script.commands.mapNotNull { (it as? Script.Cmd.Module)?.module?.also {
+            trace { "AST from script:\n" + SExprToStr.fromSExpr(AstToSExpr.fromModule(it)) }
+        } }
         val out = ByteArrayOutputStream()
         fun toBinary(mod: Node.Module) =
             AstToBinary.fromModule(ByteWriter.OutputStream(out.also { it.reset() }), mod).run { out.toByteArray() }
         val binaries1 = ast1.map(::toBinary)
         val ast2 = binaries1.map {
-            trace { "Bytes for AST: ${it.asList()}" }
-            BinaryToAst.toModule(ByteReader.InputStream(ByteArrayInputStream(it)))
+            trace { "Bytes for AST (${it.size}): ${it.asList()}" }
+            BinaryToAst(logger = this).toModule(ByteReader.InputStream(ByteArrayInputStream(it))).also {
+                trace { "AST from bytes:\n" + SExprToStr.fromSExpr(AstToSExpr.fromModule(it)) }
+            }
         }
         // Compare AST's, but we reset ast2's types because those can change
         assertEquals(ast1.size, ast2.size)

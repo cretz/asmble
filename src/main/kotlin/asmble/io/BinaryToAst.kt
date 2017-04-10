@@ -1,15 +1,15 @@
 package asmble.io
 
 import asmble.ast.Node
-import asmble.util.fromIntBits
-import asmble.util.fromLongBits
-import asmble.util.toIntExact
-import asmble.util.toUnsignedShort
+import asmble.util.*
 
-open class BinaryToAst(val version: Long = 0xd) {
+open class BinaryToAst(
+    val version: Long = 0xd,
+    val logger: Logger = Logger.Print(Logger.Level.OFF)
+) : Logger by logger {
 
     fun toBlockType(b: ByteReader) = b.readVarInt7().toInt().let {
-        if (it == -0x40) null else toValueType(b, it)
+        if (it == -0x40) null else toValueType(it)
     }
 
     fun toCustomSection(b: ByteReader, afterSectionId: Int) = Node.CustomSection(
@@ -51,11 +51,17 @@ open class BinaryToAst(val version: Long = 0xd) {
         index = b.readVarUInt32AsInt()
     )
 
-    fun toFunc(b: ByteReader, type: Node.Type.Func) = Node.Func(
-        type = type,
-        locals = b.readList(this::toValueType),
-        instructions = toInstrs(b).let { it.dropLast(1).also { require(it == listOf(Node.Instr.End)) } }
-    )
+    fun toFunc(b: ByteReader, type: Node.Type.Func) = b.read(b.readVarUInt32AsInt()).let { b ->
+        Node.Func(
+            type = type,
+            locals = b.readList(this::toLocals).flatten(),
+            instructions = toInstrs(b).let {
+                require(it.lastOrNull() == Node.Instr.End) {
+                    "Expected function to end with 'end', but got ${it.lastOrNull()}"
+                }.run { it.dropLast(1) }
+            }
+        )
+    }
 
     fun toFuncType(b: ByteReader): Node.Type.Func {
         require(b.readVarInt7().toInt() == -0x20)
@@ -123,9 +129,9 @@ open class BinaryToAst(val version: Long = 0xd) {
             is Node.InstrOp.ConstOp.LongArg ->
                 op.create(b.readVarInt64())
             is Node.InstrOp.ConstOp.FloatArg ->
-                op.create(Float.fromIntBits(b.readUInt32().toIntExact()))
+                op.create(Float.fromIntBits(b.readUInt32().unsignedToSignedInt()))
             is Node.InstrOp.ConstOp.DoubleArg ->
-                op.create(Double.fromLongBits(b.readUInt64().longValueExact()))
+                op.create(Double.fromLongBits(b.readUInt64().unsignedToSignedLong()))
             is Node.InstrOp.CompareOp.NoArg ->
                 op.create
             is Node.InstrOp.NumOp.NoArg ->
@@ -135,6 +141,10 @@ open class BinaryToAst(val version: Long = 0xd) {
             is Node.InstrOp.ReinterpretOp.NoArg ->
                 op.create
         }
+    }
+
+    fun toLocals(b: ByteReader) = b.readVarUInt32AsInt().let { size ->
+        toValueType(b).let { type -> List(size) { type } }
     }
 
     fun toMemoryType(b: ByteReader) = Node.Type.Memory(toResizableLimits(b))
@@ -193,13 +203,13 @@ open class BinaryToAst(val version: Long = 0xd) {
 
     fun toTableType(b: ByteReader) = Node.Type.Table(toElemType(b), toResizableLimits(b))
 
-    fun toValueType(b: ByteReader) = toValueType(b, b.readVarInt7().toInt())
-    fun toValueType(b: ByteReader, type: Int) = when (type) {
+    fun toValueType(b: ByteReader) = toValueType(b.readVarInt7().toInt())
+    fun toValueType(type: Int) = when (type) {
         -0x01 -> Node.Type.Value.I32
         -0x02 -> Node.Type.Value.I64
         -0x03 -> Node.Type.Value.F32
         -0x04 -> Node.Type.Value.F64
-        else -> error("Unknown value type")
+        else -> error("Unknown value type: $type")
     }
 
     fun ByteReader.readString() = this.readVarUInt32AsInt().let { String(this.readBytes(it)) }

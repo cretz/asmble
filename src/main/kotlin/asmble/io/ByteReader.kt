@@ -94,7 +94,7 @@ abstract class ByteReader {
                 val b = ins.read()
                 if (b == -1) sawEof = true else nextByte = b.toByte()
             }
-            return sawEof
+            return sawEof && nextByte == null
         }
 
         override fun read(amount: Int) = ByteReader.InputStream(ByteArrayInputStream(readBytes(amount)))
