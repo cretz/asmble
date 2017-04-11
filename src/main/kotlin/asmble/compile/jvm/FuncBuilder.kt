@@ -1054,25 +1054,29 @@ open class FuncBuilder {
         }
     }
 
-    fun applySelfSetGlobal(ctx: FuncContext, fn: Func, index: Int, global: Node.Global) =
+    fun applySelfSetGlobal(ctx: FuncContext, fn: Func, index: Int, global: Node.Global): Func {
+        if (!global.type.mutable) throw CompileErr.SetImmutableGlobal(index)
         // Just call putfield
         // Note, this is special and "this" has already been injected on the stack for us
-        fn.popExpecting(global.type.contentType.typeRef).
-            popExpecting(MethodHandle::class.ref).
+        return fn.popExpecting(global.type.contentType.typeRef).
+            popExpecting(ctx.cls.thisRef).
             addInsns(
                 FieldInsnNode(Opcodes.PUTFIELD, ctx.cls.thisRef.asmName, ctx.cls.globalName(index),
                     global.type.contentType.typeRef.asmDesc)
             )
+    }
 
-    fun applyImportSetGlobal(ctx: FuncContext, fn: Func, index: Int, import: Node.Import.Kind.Global) =
+    fun applyImportSetGlobal(ctx: FuncContext, fn: Func, index: Int, import: Node.Import.Kind.Global): Func {
+        if (!import.type.mutable) throw CompileErr.SetImmutableGlobal(index)
         // Load the setter method handle field, then invoke it with stack val
         // Note, this is special and the method handle has already been injected on the stack for us
-        fn.popExpecting(import.type.contentType.typeRef).
+        return fn.popExpecting(import.type.contentType.typeRef).
             popExpecting(MethodHandle::class.ref).
             addInsns(
                 MethodInsnNode(Opcodes.INVOKEVIRTUAL, MethodHandle::class.ref.asmName, "invokeExact",
                     "(${import.type.contentType.typeRef.asmDesc})V", false)
             )
+    }
 
     fun applyGetGlobal(ctx: FuncContext, fn: Func, index: Int) = ctx.cls.globalAtIndex(index).let {
         when (it) {

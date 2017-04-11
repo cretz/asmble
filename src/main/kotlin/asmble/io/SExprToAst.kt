@@ -422,15 +422,16 @@ open class SExprToAst {
         exp.vals.drop(if (name == null) 1 else 2).also { otherVals ->
             if (otherVals.isNotEmpty() && otherVals.find { it !is SExpr.Symbol || !it.quoted } == null)
                 return name to toModuleFromBytes(otherVals.fold(byteArrayOf()) { bytes, strVal ->
-                    bytes + (strVal as SExpr.Symbol).contents.toByteArray()
+                    bytes + (strVal as SExpr.Symbol).rawContentCharsToBytes()
                 })
         }
 
         var mod = Node.Module()
         // Go over each module element and apply to the module
         // But we have to do all imports first before anything else, so we separate them
+        var foundNonImport = false
         val (importExps, nonImportExps) = exp.vals.mapNotNull { it as? SExpr.Multi }.partition {
-            when(it.vals.firstOrNull()?.symbolStr()) {
+            val isImport = when(it.vals.firstOrNull()?.symbolStr()) {
                 "import" -> true
                 "func", "global", "table", "memory" -> {
                     val possibleImportIndex = if (it.maybeName(1) == null) 1 else 2
@@ -438,6 +439,9 @@ open class SExprToAst {
                 }
                 else -> false
             }
+            if (!isImport && !foundNonImport) foundNonImport = true
+            if (isImport && foundNonImport) error("Import after non-import")
+            isImport
         }
 
         // Eagerly build the names (for forward decls)

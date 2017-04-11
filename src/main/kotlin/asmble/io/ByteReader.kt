@@ -5,7 +5,6 @@ import asmble.util.toUnsignedBigInt
 import asmble.util.toUnsignedLong
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
-import java.io.EOFException
 import java.math.BigInteger
 
 abstract class ByteReader {
@@ -58,7 +57,7 @@ abstract class ByteReader {
     protected fun readUnsignedLeb128(): Int {
         // Taken from Android source, Apache licensed
         var result = 0
-        var cur = 0
+        var cur: Int
         var count = 0
         do {
             cur = readByte().toInt() and 0xff
@@ -72,7 +71,7 @@ abstract class ByteReader {
     private fun readSignedLeb128(): Long {
         // Taken from Android source, Apache licensed
         var result = 0L
-        var cur = 0
+        var cur: Int
         var count = 0
         var signBits = -1L
         do {

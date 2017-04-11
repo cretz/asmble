@@ -40,6 +40,14 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
         override val asmErrString get() = "type mismatch"
     }
 
+    class GlobalConstantMismatch(
+        val index: Int,
+        val expected: TypeRef,
+        val actual: TypeRef
+    ) : CompileErr("Global $index expected const of type $expected, got $actual") {
+        override val asmErrString get() = "type mismatch"
+    }
+
     class IfThenValueWithoutElse() : CompileErr("If has value but no else clause") {
         override val asmErrString get() = "type mismatch"
     }
@@ -72,5 +80,29 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
         val index: Int
     ) : CompileErr("Unknown global at index $index") {
         override val asmErrString get() = "unknown global"
+    }
+
+    class SetImmutableGlobal(
+        val index: Int
+    ) : CompileErr("Attempting to set global $index which is immutable") {
+        override val asmErrString get() = "global is immutable"
+    }
+
+    class MutableGlobalImport(
+        val index: Int
+    ) : CompileErr("Attempted to import mutable global at index $index") {
+        override val asmErrString get() = "mutable globals cannot be imported"
+    }
+
+    class MutableGlobalExport(
+        val index: Int
+    ) : CompileErr("Attempted to export global $index which is mutable") {
+        override val asmErrString get() = "mutable globals cannot be exported"
+    }
+
+    class GlobalInitNonConstant(
+        val index: Int
+    ) : CompileErr("Expected init for global $index to be constant") {
+        override val asmErrString get() = "constant expression required"
     }
 }

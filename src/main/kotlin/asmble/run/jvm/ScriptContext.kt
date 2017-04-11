@@ -225,6 +225,16 @@ data class ScriptContext(
         )
     }
 
+    fun resolveImportGlobal(import: Node.Import, kind: Node.Type.Global): MethodHandle {
+        // Find a getter that matches the name
+        val module = registrations[import.module] ?: error("Unable to find module ${import.module}")
+        return MethodHandles.lookup().bind(
+            module.instance,
+            "get" + import.field.javaIdent.capitalize(),
+            MethodType.methodType(kind.contentType.jclass)
+        )
+    }
+
     interface Module {
         val cls: Class<*>
         val instance: Any
@@ -251,14 +261,19 @@ data class ScriptContext(
                     it.parameterTypes.firstOrNull() == Int::class.java
                 } ?: error("Unable to find no-arg or mem-accepting construtor")
             }
+
             // Now resolve the imports
-            constructorParams += mod.imports.map {
-                val kind = it.kind
-                when (kind) {
-                    is Node.Import.Kind.Func -> resolveImportFunc(it, mod.types[kind.typeIndex])
-                    else -> TODO()
-                }
+            // First, the function imports
+            constructorParams += mod.imports.mapNotNull {
+                if (it.kind is Node.Import.Kind.Func) resolveImportFunc(it, mod.types[it.kind.typeIndex])
+                else null
             }
+            // Then the global imports
+            constructorParams += mod.imports.mapNotNull {
+                if (it.kind is Node.Import.Kind.Global) resolveImportGlobal(it, it.kind.type)
+                else null
+            }
+
             // Construct
             constructor!!.newInstance(*constructorParams.toTypedArray())
         }

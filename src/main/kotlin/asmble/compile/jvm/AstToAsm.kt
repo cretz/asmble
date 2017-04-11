@@ -31,33 +31,16 @@ open class AstToAsm {
                 MethodHandle::class.ref.asmDesc, null, null)
         })
         // Now all import globals as getter (and maybe setter) method handles
-        ctx.cls.fields.addAll(ctx.importGlobals.withIndex().flatMap { (index, import) ->
-            val ret = listOf(FieldNode(Opcodes.ACC_PRIVATE + Opcodes.ACC_FINAL, ctx.importGlobalGetterFieldName(index),
-                MethodHandle::class.ref.asmDesc, null, null))
-            if (!(import.kind as Node.Import.Kind.Global).type.mutable) ret else {
-                ret + FieldNode(Opcodes.ACC_PRIVATE + Opcodes.ACC_FINAL, ctx.importGlobalSetterFieldName(index),
-                    MethodHandle::class.ref.asmDesc, null, null)
-            }
+        ctx.cls.fields.addAll(ctx.importGlobals.mapIndexed { index, import ->
+            if ((import.kind as Node.Import.Kind.Global).type.mutable) throw CompileErr.MutableGlobalImport(index)
+            FieldNode(Opcodes.ACC_PRIVATE + Opcodes.ACC_FINAL, ctx.importGlobalGetterFieldName(index),
+                MethodHandle::class.ref.asmDesc, null, null)
         })
         // Now all non-import globals
-        ctx.cls.fields.addAll(ctx.mod.globals.withIndex().map { (index, global) ->
-            // In the MVP, we can trust the init is constant stuff and a single instr
-            require(global.init.size <= 1) { "Global init has more than 1 insn" }
-            val init: Number = global.init.firstOrNull().let {
-                when (it) {
-                    is Node.Instr.Args.Const<*> -> it.value
-                    null -> when (global.type.contentType) {
-                        is Node.Type.Value.I32 -> 0
-                        is Node.Type.Value.I64 -> 0L
-                        is Node.Type.Value.F32 -> 0F
-                        is Node.Type.Value.F64 -> 0.0
-                    }
-                    else -> throw RuntimeException("Unsupported init insn: $it")
-                }
-            }
+        ctx.cls.fields.addAll(ctx.mod.globals.mapIndexed { index, global ->
             val access = Opcodes.ACC_PRIVATE + if (!global.type.mutable) Opcodes.ACC_FINAL else 0
             FieldNode(access, ctx.globalName(ctx.importGlobals.size + index),
-                global.type.contentType.typeRef.asmDesc, null, init)
+                global.type.contentType.typeRef.asmDesc, null, null)
         })
     }
 
@@ -69,14 +52,13 @@ open class AstToAsm {
         // <init>(imports...)
         // TODO: what happens w/ more than 254 imports?
 
-        val importTypes = ctx.mod.imports.map {
-            when (it.kind) {
-                is Node.Import.Kind.Func -> MethodHandle::class.ref
-                else -> TODO()
-            }
-        }
+        val importTypes =
+            ctx.importFuncs.map { MethodHandle::class.ref } +
+            // We know it's only getters
+            ctx.importGlobals.map { MethodHandle::class.ref }
 
         // <init>(MemClass maxMemory, imports...)
+        // This is the one that actually does everything and is always deferred to
         // Set the mem field then call init then put it back on the stack
         var memCon = Func("<init>", listOf(ctx.mem.memType) + importTypes).addInsns(
             VarInsnNode(Opcodes.ALOAD, 0),
@@ -116,7 +98,78 @@ open class AstToAsm {
                 FieldInsnNode(Opcodes.PUTFIELD, ctx.thisRef.asmName,
                     ctx.funcName(importIndex), MethodHandle::class.ref.asmDesc)
             )
-        }.addInsns(
+        }
+
+        // Set all import globals
+        memCon = ctx.importGlobals.indices.fold(memCon) { memCon, importIndex ->
+            memCon.addInsns(
+                VarInsnNode(Opcodes.ALOAD, 0),
+                VarInsnNode(Opcodes.ALOAD, ctx.importFuncs.size + importIndex + 2),
+                FieldInsnNode(Opcodes.PUTFIELD, ctx.thisRef.asmName,
+                    ctx.globalName(importIndex), MethodHandle::class.ref.asmDesc)
+            )
+        }
+
+        // Initialize all globals
+        memCon = ctx.mod.globals.foldIndexed(memCon) { index, memCon, global ->
+            // In the MVP, we can trust the init is constant stuff and a single instr
+            if (global.init.size > 1) throw CompileErr.GlobalInitNonConstant(index)
+            memCon.addInsns(VarInsnNode(Opcodes.ALOAD, 0)).
+                addInsns(
+                    global.init.firstOrNull().let {
+                        when (it) {
+                            is Node.Instr.Args.Const<*> -> {
+                                if (it.value::class.javaPrimitiveType?.ref != global.type.contentType.typeRef)
+                                    throw CompileErr.GlobalConstantMismatch(
+                                        index,
+                                        global.type.contentType.typeRef,
+                                        it.value::class.ref
+                                    )
+                                listOf(LdcInsnNode(it.value))
+                            }
+                            // Initialize from an import global means we'll just grab the MH as from the param and call
+                            is Node.Instr.GetGlobal -> {
+                                val refGlobal = ctx.globalAtIndex(it.index)
+                                when (refGlobal) {
+                                    is Either.Right -> throw CompileErr.UnknownGlobal(it.index)
+                                    is Either.Left -> (refGlobal.v.kind as Node.Import.Kind.Global).let { refGlobalKind ->
+                                        if (refGlobalKind.type.contentType != global.type.contentType)
+                                            throw CompileErr.GlobalConstantMismatch(
+                                                index,
+                                                global.type.contentType.typeRef,
+                                                refGlobalKind.type.contentType.typeRef
+                                            )
+                                        listOf(
+                                            VarInsnNode(Opcodes.ALOAD, ctx.importFuncs.size + it.index + 2),
+                                            MethodInsnNode(
+                                                Opcodes.INVOKEVIRTUAL,
+                                                MethodHandle::class.ref.asmName,
+                                                "invokeExact",
+                                                "()" + refGlobalKind.type.contentType.typeRef.asmDesc,
+                                                false
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                            // Otherwise, global constant
+                            null -> listOf(when (global.type.contentType) {
+                                is Node.Type.Value.I32 -> 0.const
+                                is Node.Type.Value.I64 -> 0L.const
+                                is Node.Type.Value.F32 -> 0F.const
+                                is Node.Type.Value.F64 -> 0.0.const
+                            })
+                            else -> throw CompileErr.GlobalInitNonConstant(index)
+                        }
+                    }
+                ).addInsns(
+                    FieldInsnNode(Opcodes.PUTFIELD, ctx.thisRef.asmName,
+                        ctx.globalName(ctx.importGlobals.size + index), global.type.contentType.typeRef.asmDesc)
+                )
+        }
+
+        // Call object init
+        memCon = memCon.addInsns(
             // Gotta call super()
             VarInsnNode(Opcodes.ALOAD, 0),
             MethodInsnNode(Opcodes.INVOKESPECIAL, Object::class.ref.asmName, "<init>", "()V", false),
@@ -165,6 +218,7 @@ open class AstToAsm {
         ctx.mod.exports.forEach {
             when (it.kind) {
                 Node.ExternalKind.FUNCTION -> addExportFunc(ctx, it)
+                Node.ExternalKind.GLOBAL -> addExportGlobal(ctx, it)
                 else -> TODO()
             }
         }
@@ -213,6 +267,21 @@ open class AstToAsm {
             Node.Type.Value.F64 -> Opcodes.DRETURN
         }))
         ctx.cls.methods.plusAssign(method)
+    }
+
+    fun addExportGlobal(ctx: ClsContext, export: Node.Export) {
+        val global = ctx.globalAtIndex(export.index)
+        when (global) {
+            is Either.Left -> {
+                if ((global.v.kind as Node.Import.Kind.Global).type.mutable)
+                    throw CompileErr.MutableGlobalExport(export.index)
+            }
+            is Either.Right -> {
+                if (global.v.type.mutable)
+                    throw CompileErr.MutableGlobalExport(export.index)
+            }
+        }
+        TODO()
     }
 
     fun addFuncs(ctx: ClsContext) {

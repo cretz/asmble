@@ -49,7 +49,6 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
         - float_memory.wast - Not handling mem data strings yet
         - func.wast - Not handling tables yet
         - func_ptrs.wast - Not handling tables yet
-        - globals.wast - No binary yet
         - imports.wast - No memory exports yet
         - left-to-right.wast - Not handling tables yet
         - linking.wast - Not handling tables yet
@@ -97,6 +96,7 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             "func-result-after-body.fail.wast",
             "func-result-before-param.fail.wast",
             "get_local.wast",
+            "globals.wast",
             "i32.load32_s.fail.wast",
             "i32.load32_u.fail.wast",
             "i32.load64_s.fail.wast",

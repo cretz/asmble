@@ -75,7 +75,7 @@ open class BinaryToAst(
 
     fun toGlobalType(b: ByteReader) = Node.Type.Global(
         contentType = toValueType(b),
-        mutable = b.readVarUInt1()
+        mutable = try { b.readVarUInt1() } catch (_: Exception) { throw IoErr.InvalidMutability() }
     )
 
     fun toImport(b: ByteReader) = Node.Import(

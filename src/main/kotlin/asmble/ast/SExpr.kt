@@ -8,5 +8,6 @@ sealed class SExpr {
     }
     data class Symbol(val contents: String = "", val quoted: Boolean = false) : SExpr() {
         override fun toString() = SExprToStr.Compact.fromSExpr(this)
+        fun rawContentCharsToBytes() = contents.toCharArray().map(Char::toByte)
     }
 }

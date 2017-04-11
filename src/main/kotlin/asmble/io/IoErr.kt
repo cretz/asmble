@@ -22,4 +22,8 @@ sealed class IoErr(message: String, cause: Throwable? = null) : RuntimeException
     class InvalidCodeLength(funcLen: Int, codeLen: Int) : IoErr("Got $funcLen funcs but only $codeLen bodies") {
         override val asmErrString get() = "function and code section have inconsistent lengths"
     }
+
+    class InvalidMutability : IoErr("Invalid mutability boolean") {
+        override val asmErrString = "invalid mutability"
+    }
 }
