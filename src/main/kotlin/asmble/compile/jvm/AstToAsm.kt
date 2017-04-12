@@ -66,8 +66,17 @@ open class AstToAsm {
             FieldInsnNode(Opcodes.PUTFIELD, ctx.thisRef.asmName, "memory", ctx.mem.memType.asmDesc),
             VarInsnNode(Opcodes.ALOAD, 1)
         ).pushBlock(Node.Instr.Block(null), null, null).push(ctx.mem.memType)
+
+        // Call object init
+        memCon = memCon.addInsns(
+            // Gotta call super()
+            VarInsnNode(Opcodes.ALOAD, 0),
+            MethodInsnNode(Opcodes.INVOKESPECIAL, Object::class.ref.asmName, "<init>", "()V", false)
+        )
+
         // Do mem init and remove it from the stack if it's still there afterwards
         memCon = ctx.mem.init(memCon, ctx.mod.memories.firstOrNull()?.limits?.initial ?: 0)
+
         // Add all data loads
         memCon = ctx.mod.data.fold(memCon) { origMemCon, data ->
             // Add the mem on the stack if it's not already there
@@ -106,7 +115,7 @@ open class AstToAsm {
                 VarInsnNode(Opcodes.ALOAD, 0),
                 VarInsnNode(Opcodes.ALOAD, ctx.importFuncs.size + importIndex + 2),
                 FieldInsnNode(Opcodes.PUTFIELD, ctx.thisRef.asmName,
-                    ctx.globalName(importIndex), MethodHandle::class.ref.asmDesc)
+                    ctx.importGlobalGetterFieldName(importIndex), MethodHandle::class.ref.asmDesc)
             )
         }
 
@@ -168,13 +177,31 @@ open class AstToAsm {
                 )
         }
 
-        // Call object init
-        memCon = memCon.addInsns(
-            // Gotta call super()
-            VarInsnNode(Opcodes.ALOAD, 0),
-            MethodInsnNode(Opcodes.INVOKESPECIAL, Object::class.ref.asmName, "<init>", "()V", false),
-            InsnNode(Opcodes.RETURN)
-        )
+        // Execute start function
+        if (ctx.mod.startFuncIndex != null) {
+            val funcType = ctx.funcTypeAtIndex(ctx.mod.startFuncIndex)
+            if (funcType.params.isNotEmpty() || funcType.ret != null)
+                throw CompileErr.InvalidStartFunctionType(ctx.mod.startFuncIndex)
+            when (ctx.funcAtIndex(ctx.mod.startFuncIndex)) {
+                is Either.Left ->
+                    // This is an import, so we can just access it as a param
+                    memCon = memCon.addInsns(
+                        VarInsnNode(Opcodes.ALOAD, ctx.mod.startFuncIndex + 2),
+                        MethodInsnNode(Opcodes.INVOKEVIRTUAL, MethodHandle::class.ref.asmName,
+                            "invokeExact", funcType.asmDesc, false)
+                    )
+                is Either.Right ->
+                    // This is a local func, so invoke it virtual
+                    memCon = memCon.addInsns(
+                        VarInsnNode(Opcodes.ALOAD, 0),
+                        MethodInsnNode(Opcodes.INVOKEVIRTUAL, ctx.thisRef.asmName,
+                            ctx.funcName(ctx.mod.startFuncIndex), funcType.asmDesc, false)
+                    )
+            }
+        }
+
+        // Return
+        memCon = memCon.addInsns(InsnNode(Opcodes.RETURN))
 
         // <init>(int maxMemory, imports...)
         // Just call this(createMem(maxMemory), imports...)

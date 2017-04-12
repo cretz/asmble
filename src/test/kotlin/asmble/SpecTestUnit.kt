@@ -50,9 +50,8 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
         - imports.wast - No memory exports yet
         - left-to-right.wast - Not handling tables yet
         - linking.wast - Not handling tables yet
-        - memory.wast - Not handling mem data strings yet
+        - memory.wast - No memory exports yet
         - return.wast - Not handling tables yet
-        - start.wast - Not handling mem data strings yet
         - typecheck.wast - Not handling tables yet
         - unreachable.wast - Not handling tables yet
         */
@@ -142,6 +141,7 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             "set_local.wast",
             "skip-stack-guard-page.wast",
             "stack.wast",
+            "start.wast",
             "store-align-0.fail.wast",
             "store-align-odd.fail.wast",
             "store_retval.wast",

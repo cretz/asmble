@@ -533,7 +533,8 @@ open class SExprToAst {
                 else -> throw Exception("Unknown non-import exp $exp")
             }
         }
-        require(mod.memories.size <= 1) { "Only single memory allowed" }
+
+        if (mod.memories.size > 1) throw IoErr.MultipleMemories()
 
         return name to mod
     }

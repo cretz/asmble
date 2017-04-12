@@ -105,4 +105,10 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
     ) : CompileErr("Expected init for global $index to be constant") {
         override val asmErrString get() = "constant expression required"
     }
+
+    class InvalidStartFunctionType(
+        val index: Int
+    ) : CompileErr("Start function at $index must take no params and return nothing") {
+        override val asmErrString get() = "start function"
+    }
 }

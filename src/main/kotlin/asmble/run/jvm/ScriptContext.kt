@@ -32,12 +32,19 @@ data class ScriptContext(
         ))
 
     fun runCommand(cmd: Script.Cmd) = when (cmd) {
-        is Script.Cmd.Module -> copy(modules = modules + compileModule(cmd.module, "Module${modules.size}", cmd.name))
-        is Script.Cmd.Register -> copy(registrations = registrations + (
-            cmd.string to (modules.lastOrNull() ?: error("No module to register"))
-        ))
-        is Script.Cmd.Action -> doAction(cmd).let { this }
-        is Script.Cmd.Assertion -> doAssertion(cmd).let { this }
+        is Script.Cmd.Module ->
+            // We ask for the module instance because some things are built on <init> expectation
+            compileModule(cmd.module, "Module${modules.size}", cmd.name).also { it.instance }.let {
+                copy(modules = modules + it)
+            }
+        is Script.Cmd.Register ->
+            copy(registrations = registrations + (
+                cmd.string to (modules.lastOrNull() ?: error("No module to register"))
+            ))
+        is Script.Cmd.Action ->
+            doAction(cmd).let { this }
+        is Script.Cmd.Assertion ->
+            doAssertion(cmd).let { this }
         else -> TODO("BOO: $cmd")
     }
 
@@ -49,8 +56,9 @@ data class ScriptContext(
             is Script.Cmd.Assertion.Trap -> assertTrap(cmd)
             is Script.Cmd.Assertion.Malformed -> assertMalformed(cmd)
             is Script.Cmd.Assertion.Invalid -> assertInvalid(cmd)
+            is Script.Cmd.Assertion.TrapModule -> assertTrapModule(cmd)
             is Script.Cmd.Assertion.Exhaustion -> assertExhaustion(cmd)
-            else -> TODO()
+            else -> TODO("Assertion misssing: $cmd")
         }
     }
 
@@ -128,6 +136,14 @@ data class ScriptContext(
             compileModule(invalid.module.value, className, null)
             throw ScriptAssertionError(invalid, "Expected invalid module with error '${invalid.failure}', was valid")
         } catch (e: Exception) { assertFailure(invalid, e, invalid.failure) }
+    }
+
+    fun assertTrapModule(trap: Script.Cmd.Assertion.TrapModule) {
+        try {
+            val className = "trapmod" + UUID.randomUUID().toString().replace("-", "")
+            compileModule(trap.module, className, null).instance
+            throw ScriptAssertionError(trap, "Expected module init error with '${trap.failure}', was valid")
+        } catch (e: Throwable) { assertFailure(trap, e, trap.failure) }
     }
 
     fun assertExhaustion(exhaustion: Script.Cmd.Assertion.Exhaustion) {

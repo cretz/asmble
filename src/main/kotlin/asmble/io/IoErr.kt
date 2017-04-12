@@ -24,6 +24,10 @@ sealed class IoErr(message: String, cause: Throwable? = null) : RuntimeException
     }
 
     class InvalidMutability : IoErr("Invalid mutability boolean") {
-        override val asmErrString = "invalid mutability"
+        override val asmErrString get() = "invalid mutability"
+    }
+
+    class MultipleMemories : IoErr("Only single memory allowed") {
+        override val asmErrString get() = "multiple memories"
     }
 }
