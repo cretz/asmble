@@ -7,7 +7,6 @@ import asmble.ast.Script
 import asmble.util.*
 import java.io.ByteArrayInputStream
 import java.math.BigInteger
-import java.nio.ByteBuffer
 
 typealias NameMap = Map<String, Int>
 
@@ -101,8 +100,10 @@ open class SExprToAst {
             toInstrs(offsetMulti, 1, ExprContext(nameMap)).first
         } else toExprMaybe(offsetMulti, ExprContext(nameMap))
         currIndex++
-        val strs = exp.vals.drop(currIndex).fold("") { str, sym -> str + (sym as SExpr.Symbol).contents }
-        return Node.Data(index ?: 0, instrs, strs.toByteArray(Charsets.UTF_8))
+        val bytes = exp.vals.drop(currIndex).fold(byteArrayOf()) { bytes, sym ->
+            bytes + (sym as SExpr.Symbol).rawContentCharsToBytes()
+        }
+        return Node.Data(index ?: 0, instrs, bytes)
     }
 
     fun toElem(exp: SExpr.Multi, nameMap: NameMap): Node.Elem {
@@ -386,16 +387,28 @@ open class SExprToAst {
         return Pair(null, exp.vals.drop(1).map { toType(it.symbol()!!) })
     }
 
-    fun toMemory(exp: SExpr.Multi): Triple<String?, Node.Type.Memory, ImportOrExport?> {
+    fun toMemory(exp: SExpr.Multi): Triple<String?, Either<Node.Type.Memory, Node.Data>, ImportOrExport?> {
         exp.requireFirstSymbol("memory")
         var currIndex = 1
         val name = exp.maybeName(currIndex)
         if (name != null) currIndex++
         val maybeImpExp = toImportOrExportMaybe(exp, currIndex)
         if (maybeImpExp != null) currIndex++
-        // Try data approach
-        if (exp.vals[currIndex] is SExpr.Multi) throw Exception("Data string not yet supported for memory")
-        return Triple(name, toMemorySig(exp, currIndex), maybeImpExp)
+        // If it's a multi we assume "data", otherwise assume sig
+        val memOrData = exp.vals[currIndex].let {
+            when (it) {
+                is SExpr.Multi -> {
+                    it.requireFirstSymbol("data")
+                    Either.Right(Node.Data(
+                        0,
+                        listOf(Node.Instr.I32Const(0)),
+                        it.vals.drop(1).fold(byteArrayOf()) { b, exp -> b + exp.symbol()!!.rawContentCharsToBytes() }
+                    ))
+                }
+                else -> Either.Left(toMemorySig(exp, currIndex))
+            }
+        }
+        return Triple(name, memOrData, maybeImpExp)
     }
 
     fun toMemorySig(exp: SExpr.Multi, offset: Int): Node.Type.Memory {
@@ -465,7 +478,8 @@ open class SExprToAst {
                     Triple(impExp!!.importModule!!, impExp.field, tbl)
                 }
                 "memory" -> toMemory(it).let { (_, mem, impExp) ->
-                    Triple(impExp!!.importModule!!, impExp.field, mem)
+                    if (mem !is Either.Left) error("Data segment on import mem")
+                    Triple(impExp!!.importModule!!, impExp.field, mem.v)
                 }
                 else -> throw Exception("Unknown import exp: $it")
             }
@@ -503,7 +517,15 @@ open class SExprToAst {
                 }
                 "memory" -> toMemory(it).also { (_, mem, impExp) ->
                     addMaybeExport(impExp, Node.ExternalKind.MEMORY, memoryCount++)
-                    mod = mod.copy(memories = mod.memories + mem)
+                    when (mem) {
+                        is Either.Left -> mod = mod.copy(memories = mod.memories + mem.v)
+                        is Either.Right -> mod = mod.copy(
+                            memories = mod.memories + Node.Type.Memory(
+                                Node.ResizableLimits(mem.v.data.size, mem.v.data.size)
+                            ),
+                            data = mod.data + mem.v
+                        )
+                    }
                 }
                 "elem" -> mod = mod.copy(elems = mod.elems + toElem(it, nameMap))
                 "data" -> mod = mod.copy(data = mod.data + toData(it, nameMap))
@@ -511,6 +533,7 @@ open class SExprToAst {
                 else -> throw Exception("Unknown non-import exp $exp")
             }
         }
+        require(mod.memories.size <= 1) { "Only single memory allowed" }
 
         return name to mod
     }

@@ -5,12 +5,12 @@ import org.objectweb.asm.tree.*
 
 open class SyntheticAssertionBuilder {
 
-    fun buildIDivAssertion(ctx: ClsContext) =
+    fun buildIDivAssertion(ctx: ClsContext, name: String) =
         LabelNode().let { safeLabel ->
             LabelNode().let { overflowLabel ->
                 MethodNode(
                     Opcodes.ACC_PRIVATE + Opcodes.ACC_STATIC + Opcodes.ACC_SYNTHETIC,
-                    "\$\$assertIDiv", "(II)V", null, null
+                    name, "(II)V", null, null
                 ).addInsns(
                     VarInsnNode(Opcodes.ILOAD, 0),
                     Int.MIN_VALUE.const,
@@ -25,12 +25,12 @@ open class SyntheticAssertionBuilder {
             }
         }
 
-    fun buildLDivAssertion(ctx: ClsContext) =
+    fun buildLDivAssertion(ctx: ClsContext, name: String) =
         LabelNode().let { safeLabel ->
             LabelNode().let { overflowLabel ->
                 MethodNode(
                     Opcodes.ACC_PRIVATE + Opcodes.ACC_STATIC + Opcodes.ACC_SYNTHETIC,
-                    "\$\$assertLDiv", "(JJ)V", null, null
+                    name, "(JJ)V", null, null
                 ).addInsns(
                     VarInsnNode(Opcodes.LLOAD, 0),
                     Long.MIN_VALUE.const,
@@ -49,54 +49,54 @@ open class SyntheticAssertionBuilder {
 
     // TODO: add tests for +- 4 near overflow for each combo compared with spec
 
-    fun buildF2SIAssertion(ctx: ClsContext) =
+    fun buildF2SIAssertion(ctx: ClsContext, name: String) =
         MethodNode(
             Opcodes.ACC_PRIVATE + Opcodes.ACC_STATIC + Opcodes.ACC_SYNTHETIC,
-            "\$\$assertF2SI", "(F)V", null, null
+            name, "(F)V", null, null
         ).floatNanCheck().floatRangeCheck(2147483648f, -2147483648f).addInsns(InsnNode(Opcodes.RETURN))
 
-    fun buildF2UIAssertion(ctx: ClsContext) =
+    fun buildF2UIAssertion(ctx: ClsContext, name: String) =
         MethodNode(
             Opcodes.ACC_PRIVATE + Opcodes.ACC_STATIC + Opcodes.ACC_SYNTHETIC,
-            "\$\$assertF2UI", "(F)V", null, null
+            name, "(F)V", null, null
         ).floatNanCheck().floatUnsignedRangeCheck(4294967296f).addInsns(InsnNode(Opcodes.RETURN))
 
-    fun buildF2SLAssertion(ctx: ClsContext) =
+    fun buildF2SLAssertion(ctx: ClsContext, name: String) =
         MethodNode(
             Opcodes.ACC_PRIVATE + Opcodes.ACC_STATIC + Opcodes.ACC_SYNTHETIC,
-            "\$\$assertF2SL", "(F)V", null, null
+            name, "(F)V", null, null
         ).floatNanCheck().floatRangeCheck(9223372036854775807f, -9223372036854775807f).
             addInsns(InsnNode(Opcodes.RETURN))
 
-    fun buildF2ULAssertion(ctx: ClsContext) =
+    fun buildF2ULAssertion(ctx: ClsContext, name: String) =
         MethodNode(
             Opcodes.ACC_PRIVATE + Opcodes.ACC_STATIC + Opcodes.ACC_SYNTHETIC,
-            "\$\$assertF2UL", "(F)V", null, null
+            name, "(F)V", null, null
         ).floatNanCheck().floatUnsignedRangeCheck(18446744073709551616f).addInsns(InsnNode(Opcodes.RETURN))
 
-    fun buildD2SIAssertion(ctx: ClsContext) =
+    fun buildD2SIAssertion(ctx: ClsContext, name: String) =
         MethodNode(
             Opcodes.ACC_PRIVATE + Opcodes.ACC_STATIC + Opcodes.ACC_SYNTHETIC,
-            "\$\$assertD2SI", "(D)V", null, null
+            name, "(D)V", null, null
         ).doubleNanCheck().doubleRangeCheck(2147483648.0, -2147483648.0).addInsns(InsnNode(Opcodes.RETURN))
 
-    fun buildD2UIAssertion(ctx: ClsContext) =
+    fun buildD2UIAssertion(ctx: ClsContext, name: String) =
         MethodNode(
             Opcodes.ACC_PRIVATE + Opcodes.ACC_STATIC + Opcodes.ACC_SYNTHETIC,
-            "\$\$assertD2UI", "(D)V", null, null
+            name, "(D)V", null, null
         ).doubleNanCheck().doubleUnsignedRangeCheck(4294967296.0).addInsns(InsnNode(Opcodes.RETURN))
 
-    fun buildD2SLAssertion(ctx: ClsContext) =
+    fun buildD2SLAssertion(ctx: ClsContext, name: String) =
         MethodNode(
             Opcodes.ACC_PRIVATE + Opcodes.ACC_STATIC + Opcodes.ACC_SYNTHETIC,
-            "\$\$assertD2SL", "(D)V", null, null
+            name, "(D)V", null, null
         ).doubleNanCheck().doubleRangeCheck(9223372036854775807.0, -9223372036854775807.0).
             addInsns(InsnNode(Opcodes.RETURN))
 
-    fun buildD2ULAssertion(ctx: ClsContext) =
+    fun buildD2ULAssertion(ctx: ClsContext, name: String) =
         MethodNode(
             Opcodes.ACC_PRIVATE + Opcodes.ACC_STATIC + Opcodes.ACC_SYNTHETIC,
-            "\$\$assertD2UL", "(D)V", null, null
+            name, "(D)V", null, null
         ).doubleNanCheck().doubleUnsignedRangeCheck(18446744073709551616.0).addInsns(InsnNode(Opcodes.RETURN))
 
     fun MethodNode.floatNanCheck() = LabelNode().let { okLabel ->

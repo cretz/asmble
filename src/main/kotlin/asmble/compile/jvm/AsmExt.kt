@@ -161,12 +161,16 @@ fun MethodNode.addInsns(vararg insn: AbstractInsnNode): MethodNode {
     return this
 }
 
+fun MethodNode.toAsmString(): String {
+    val stringWriter = StringWriter()
+    val cv = TraceClassVisitor(PrintWriter(stringWriter))
+    this.accept(cv)
+    cv.p.print(PrintWriter(stringWriter))
+    return stringWriter.toString()
+}
+
 val Node.Type.Func.asmDesc: String get() =
     (this.ret?.typeRef ?: Void::class.ref).asMethodRetDesc(*this.params.map { it.typeRef }.toTypedArray())
-
-fun ClassNode.addMethodIfNotPresent(m: MethodNode) {
-    this.methods.find { (it as MethodNode).let { it.name == m.name && it.desc == it.desc } } ?: this.methods.add(m)
-}
 
 fun ClassNode.withComputedFramesAndMaxs(): ByteArray {
     // TODO: compute maxs adds a bunch of NOPs for unreachable code

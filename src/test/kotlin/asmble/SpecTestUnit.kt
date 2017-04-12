@@ -45,8 +45,6 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
         - br_table.wast - Not handling tables yet
         - call_indirect.wast - Not handling tables yet
         - exports.wast - Not handling tables yet
-        - float_exprs.wast - Not handling mem data strings yet
-        - float_memory.wast - Not handling mem data strings yet
         - func.wast - Not handling tables yet
         - func_ptrs.wast - Not handling tables yet
         - imports.wast - No memory exports yet
@@ -86,7 +84,9 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             "f64.wast",
             "f64_cmp.wast",
             "fac.wast",
+            "float_exprs.wast",
             "float_literals.wast",
+            "float_memory.wast",
             "float_misc.wast",
             "forward.wast",
             "func-local-after-body.fail.wast",

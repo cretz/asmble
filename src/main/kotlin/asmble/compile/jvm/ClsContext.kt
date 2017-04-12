@@ -59,20 +59,25 @@ data class ClsContext(
     fun globalName(index: Int) = "\$global$index"
     fun funcName(index: Int) = "\$func$index"
 
-    private fun syntheticAssertion(fn: SyntheticAssertionBuilder.(ClsContext) -> MethodNode) =
-        fn(syntheticAssertionBuilder, this).let { method ->
-            cls.addMethodIfNotPresent(method)
-            MethodInsnNode(Opcodes.INVOKESTATIC, thisRef.asmName, method.name, method.desc, false)
-        }
+    private fun syntheticAssertion(
+        nameSuffix: String,
+        fn: SyntheticAssertionBuilder.(ClsContext, String) -> MethodNode
+    ): MethodInsnNode {
+        val name = "\$\$$nameSuffix"
+        val method =
+            cls.methods.find { (it as MethodNode).name == name }?.let { it as MethodNode } ?:
+                fn(syntheticAssertionBuilder, this, name).also { cls.methods.add(it) }
+        return MethodInsnNode(Opcodes.INVOKESTATIC, thisRef.asmName, method.name, method.desc, false)
+    }
 
-    val truncAssertF2SI by lazy { syntheticAssertion(SyntheticAssertionBuilder::buildF2SIAssertion) }
-    val truncAssertF2UI by lazy { syntheticAssertion(SyntheticAssertionBuilder::buildF2UIAssertion) }
-    val truncAssertF2SL by lazy { syntheticAssertion(SyntheticAssertionBuilder::buildF2SLAssertion) }
-    val truncAssertF2UL by lazy { syntheticAssertion(SyntheticAssertionBuilder::buildF2ULAssertion) }
-    val truncAssertD2SI by lazy { syntheticAssertion(SyntheticAssertionBuilder::buildD2SIAssertion) }
-    val truncAssertD2UI by lazy { syntheticAssertion(SyntheticAssertionBuilder::buildD2UIAssertion) }
-    val truncAssertD2SL by lazy { syntheticAssertion(SyntheticAssertionBuilder::buildD2SLAssertion) }
-    val truncAssertD2UL by lazy { syntheticAssertion(SyntheticAssertionBuilder::buildD2ULAssertion) }
-    val divAssertI by lazy { syntheticAssertion(SyntheticAssertionBuilder::buildIDivAssertion) }
-    val divAssertL by lazy { syntheticAssertion(SyntheticAssertionBuilder::buildLDivAssertion) }
+    val truncAssertF2SI get() = syntheticAssertion("assertF2SI", SyntheticAssertionBuilder::buildF2SIAssertion)
+    val truncAssertF2UI get() = syntheticAssertion("assertF2UI", SyntheticAssertionBuilder::buildF2UIAssertion)
+    val truncAssertF2SL get() = syntheticAssertion("assertF2SL", SyntheticAssertionBuilder::buildF2SLAssertion)
+    val truncAssertF2UL get() = syntheticAssertion("assertF2UL", SyntheticAssertionBuilder::buildF2ULAssertion)
+    val truncAssertD2SI get() = syntheticAssertion("assertD2SI", SyntheticAssertionBuilder::buildD2SIAssertion)
+    val truncAssertD2UI get() = syntheticAssertion("assertD2UI", SyntheticAssertionBuilder::buildD2UIAssertion)
+    val truncAssertD2SL get() = syntheticAssertion("assertD2SL", SyntheticAssertionBuilder::buildD2SLAssertion)
+    val truncAssertD2UL get() = syntheticAssertion("assertD2UL", SyntheticAssertionBuilder::buildD2ULAssertion)
+    val divAssertI get() = syntheticAssertion("assertIDiv", SyntheticAssertionBuilder::buildIDivAssertion)
+    val divAssertL get() = syntheticAssertion("assertLDiv", SyntheticAssertionBuilder::buildLDivAssertion)
 }
