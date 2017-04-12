@@ -12,6 +12,7 @@ import java.io.PrintWriter
 import java.lang.invoke.MethodHandle
 import java.lang.invoke.MethodHandles
 import java.lang.invoke.MethodType
+import java.lang.reflect.Constructor
 import java.lang.reflect.InvocationTargetException
 import java.util.*
 
@@ -56,6 +57,7 @@ data class ScriptContext(
             is Script.Cmd.Assertion.Trap -> assertTrap(cmd)
             is Script.Cmd.Assertion.Malformed -> assertMalformed(cmd)
             is Script.Cmd.Assertion.Invalid -> assertInvalid(cmd)
+            is Script.Cmd.Assertion.Unlinkable -> assertUnlinkable(cmd)
             is Script.Cmd.Assertion.TrapModule -> assertTrapModule(cmd)
             is Script.Cmd.Assertion.Exhaustion -> assertExhaustion(cmd)
             else -> TODO("Assertion misssing: $cmd")
@@ -138,6 +140,14 @@ data class ScriptContext(
         } catch (e: Exception) { assertFailure(invalid, e, invalid.failure) }
     }
 
+    fun assertUnlinkable(unlink: Script.Cmd.Assertion.Unlinkable) {
+        try {
+            val className = "unlinkable" + UUID.randomUUID().toString().replace("-", "")
+            compileModule(unlink.module, className, null).instance
+            throw ScriptAssertionError(unlink, "Expected module link error with '${unlink.failure}', was valid")
+        } catch (e: Throwable) { assertFailure(unlink, e, unlink.failure) }
+    }
+
     fun assertTrapModule(trap: Script.Cmd.Assertion.TrapModule) {
         try {
             val className = "trapmod" + UUID.randomUUID().toString().replace("-", "")
@@ -156,9 +166,9 @@ data class ScriptContext(
 
     private fun assertFailure(a: Script.Cmd.Assertion, e: Throwable, expectedString: String) {
         val innerEx = exceptionFromCatch(e)
-        val msg = exceptionTranslator.translate(innerEx) ?: "<unrecognized error>"
-        if (!msg.contains(expectedString))
-            throw ScriptAssertionError(a, "Expected failure '$expectedString' got '$msg'", cause = innerEx)
+        val msgs = exceptionTranslator.translate(innerEx)
+        if (!msgs.any { it.contains(expectedString) })
+            throw ScriptAssertionError(a, "Expected failure '$expectedString' in $msgs", cause = innerEx)
     }
 
     fun doAction(cmd: Script.Cmd.Action) = when (cmd) {
@@ -228,7 +238,7 @@ data class ScriptContext(
             logger = logger
         ).let(adjustContext)
         AstToAsm.fromModule(ctx)
-        return CompiledModule(mod, classLoader.fromBuiltContext(ctx), name)
+        return CompiledModule(mod, classLoader.fromBuiltContext(ctx), name, ctx.mem)
     }
 
     fun resolveImportFunc(import: Node.Import, funcType: Node.Type.Func): MethodHandle {
@@ -241,14 +251,23 @@ data class ScriptContext(
         )
     }
 
-    fun resolveImportGlobal(import: Node.Import, kind: Node.Type.Global): MethodHandle {
+    fun resolveImportGlobal(import: Node.Import, globalType: Node.Type.Global): MethodHandle {
         // Find a getter that matches the name
         val module = registrations[import.module] ?: error("Unable to find module ${import.module}")
         return MethodHandles.lookup().bind(
             module.instance,
             "get" + import.field.javaIdent.capitalize(),
-            MethodType.methodType(kind.contentType.jclass)
+            MethodType.methodType(globalType.contentType.jclass)
         )
+    }
+
+    fun resolveImportMemory(import: Node.Import, memoryType: Node.Type.Memory, mem: Mem): Any {
+        // Find a getter that matches the name
+        val module = registrations[import.module] ?: error("Unable to find module ${import.module}")
+        val getter = module.instance.javaClass.getDeclaredMethod("get" + import.field.javaIdent.capitalize())
+        val memInst = getter.invoke(module.instance)
+        mem.assertValidImport(memInst, memoryType)
+        return memInst
     }
 
     interface Module {
@@ -258,39 +277,52 @@ data class ScriptContext(
 
     class NativeModule(override val cls: Class<*>, override val instance: Any) : Module
 
-    inner class CompiledModule(val mod: Node.Module, override val cls: Class<*>, val name: String?) : Module {
+    inner class CompiledModule(
+        val mod: Node.Module,
+        override val cls: Class<*>,
+        val name: String?,
+        val mem: Mem
+    ) : Module {
         override val instance by lazy {
-            // Find the constructor with no max mem amount (i.e. methodhandle or nothing as first param)
-            // TODO: genericize which constructor is the no-mem one
-            var constructor = cls.declaredConstructors.find {
-                when (it.parameterTypes.firstOrNull()) {
-                    null, MethodHandle::class.java -> true
-                    else -> false
+            // Find the constructor
+            var constructorParams = emptyList<Any>()
+            var constructor: Constructor<*>?
+            // If there is a memory import, we have to get the one with the mem class as the first
+            val memImport = mod.imports.find { it.kind is Node.Import.Kind.Memory }
+            if (memImport != null) {
+                constructor = cls.declaredConstructors.find { it.parameterTypes.firstOrNull()?.ref == mem.memType }
+                constructorParams += resolveImportMemory(memImport, memImport.kind as Node.Type.Memory, mem)
+            } else {
+                // Find the constructor with no max mem amount (i.e. methodhandle or nothing as first param)
+                constructor = cls.declaredConstructors.find {
+                    when (it.parameterTypes.firstOrNull()) {
+                        null, MethodHandle::class.java -> true
+                        else -> false
+                    }
+                }
+                // If it is not there, find the one w/ the max mem amount
+                if (constructor == null) {
+                    val maxMem = Math.max(mod.memories.firstOrNull()?.limits?.initial ?: 0, defaultMaxMemPages)
+                    constructor = cls.declaredConstructors.find { it.parameterTypes.firstOrNull() == Int::class.java }
+                    constructorParams += maxMem * Mem.PAGE_SIZE
                 }
             }
-            var constructorParams = emptyList<Any>()
-            // If it is not there, find the one w/ the max mem amount
-            if (constructor == null) {
-                val maxMem = Math.max(mod.memories.firstOrNull()?.limits?.initial ?: 0, defaultMaxMemPages)
-                constructorParams += maxMem * Mem.PAGE_SIZE
-                constructor = cls.declaredConstructors.find {
-                    it.parameterTypes.firstOrNull() == Int::class.java
-                } ?: error("Unable to find no-arg or mem-accepting construtor")
-            }
+            if (constructor == null) error("Unable to find suitable module constructor")
 
-            // Now resolve the imports
-            // First, the function imports
+            // Function imports
             constructorParams += mod.imports.mapNotNull {
                 if (it.kind is Node.Import.Kind.Func) resolveImportFunc(it, mod.types[it.kind.typeIndex])
                 else null
             }
-            // Then the global imports
+
+            // Global imports
             constructorParams += mod.imports.mapNotNull {
                 if (it.kind is Node.Import.Kind.Global) resolveImportGlobal(it, it.kind.type)
                 else null
             }
 
             // Construct
+            debug { "Instantiating $cls using $constructor with params $constructorParams" }
             constructor!!.newInstance(*constructorParams.toTypedArray())
         }
     }

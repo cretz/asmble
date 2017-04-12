@@ -21,10 +21,7 @@ class RunTest(val unit: SpecTestUnit) : Logger by Logger.Print(Logger.Level.INFO
         if (unit.shouldFail) {
             assertNotNull(ex, "Expected failure, but succeeded")
             debug { "Got expected failure: $ex" }
-        } else if (ex != null) {
-            if (unit.isWarningInsteadOfError(ex)) warn { "Unexpected error on ${unit.name}, but is a warning: $ex" }
-            else throw ex
-        }
+        } else if (ex != null) throw ex
     }
 
     private fun run() {
@@ -42,7 +39,15 @@ class RunTest(val unit: SpecTestUnit) : Logger by Logger.Print(Logger.Level.INFO
         ).withHarnessRegistered(PrintWriter(out))
 
         // This will fail assertions as necessary
-        unit.script.commands.fold(scriptContext, ScriptContext::runCommand)
+        unit.script.commands.fold(scriptContext) { scriptContext, cmd ->
+            try {
+                scriptContext.runCommand(cmd)
+            } catch (t: Throwable) {
+                if (!unit.isWarningInsteadOfError(t)) throw t
+                warn { "Unexpected error on ${unit.name}, but is a warning: $t" }
+                scriptContext
+            }
+        }
 
         unit.expectedOutput?.let { assertEquals(it, out.toString()) }
     }

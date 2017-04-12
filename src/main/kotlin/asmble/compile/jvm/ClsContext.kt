@@ -29,6 +29,11 @@ data class ClsContext(
     val importFuncs: List<Node.Import> by lazy { mod.imports.filter { it.kind is Node.Import.Kind.Func } }
     val importGlobals: List<Node.Import> by lazy { mod.imports.filter { it.kind is Node.Import.Kind.Global } }
     val thisRef = TypeRef(Type.getObjectType((packageName.replace('.', '/') + "/$className").trimStart('/')))
+    val hasMemory: Boolean by lazy {
+        mod.memories.isNotEmpty() || mod.imports.any { it.kind is Node.Import.Kind.Memory }
+    }
+
+    fun assertHasMemory() { if (!hasMemory) throw CompileErr.UnknownMemory() }
 
     fun funcAtIndex(index: Int) = importFuncs.getOrNull(index).let {
         when (it) {

@@ -13,6 +13,12 @@ import kotlin.reflect.KFunction
 open class ByteBufferMem(val direct: Boolean = true) : Mem {
     override val memType = ByteBuffer::class.ref
 
+    override fun assertValidImport(instance: Any, expected: Node.Type.Memory) {
+        if (instance !is ByteBuffer) error("Unrecognized memory instance: $instance")
+        require(instance.limit() >= expected.limits.initial)
+        expected.limits.maximum?.let { require(instance.capacity() <= it) }
+    }
+
     override fun create(func: Func) = func.popExpecting(Int::class.ref).addInsns(
         (if (direct) ByteBuffer::allocateDirect else ByteBuffer::allocate).invokeStatic()
     ).push(memType)
@@ -27,24 +33,36 @@ open class ByteBufferMem(val direct: Boolean = true) : Mem {
         forceFnType<ByteBuffer.(ByteOrder) -> ByteBuffer>(ByteBuffer::order).invokeVirtual()
     ).push(ByteBuffer::class.ref)
 
-    override fun data(func: Func, bytes: ByteArray, buildOffset: (Func) -> Func) = func.
-        popExpecting(memType).
-        addInsns(
-            bytes.size.const,
-            IntInsnNode(Opcodes.NEWARRAY, Opcodes.T_BYTE)
-        ).
-        // TODO: Is there a cheaper bulk approach? What's the harm of using a
-        // String in the constant pool instead?
-        addInsns(bytes.withIndex().flatMap { (index, byte) ->
-            listOf(InsnNode(Opcodes.DUP), index.const, byte.toInt().const, InsnNode(Opcodes.BASTORE))
-        }).
-        let(buildOffset).popExpecting(Int::class.ref).
-        // BOO! https://discuss.kotlinlang.org/t/overload-resolution-ambiguity-function-reference-requiring-local-var/2425
-        addInsns(
-            bytes.size.const,
-            forceFnType<ByteBuffer.(ByteArray, Int, Int) -> ByteBuffer>(ByteBuffer::put).invokeVirtual()
-        ).
-        push(memType)
+    override fun data(func: Func, bytes: ByteArray, buildOffset: (Func) -> Func) =
+        // Sadly there is no absolute bulk put, so we need to fake one. Ref:
+        // http://stackoverflow.com/questions/15409727/missing-some-absolute-methods-on-bytebuffer.
+        // To maintain some thread safety and what not, we're going to duplicate the buffer
+        // then set the position, then put the whole array. Technically there is an opportunity
+        // for performance improvement by knowing this is the first data call and it's offset
+        // is 0, we can not even call duplicate/position or any of that, but it's negligible for now.
+        // There is also an opportunity for performance improvement if only one byte was given
+        // where we could call put directly, but it too is negligible for now.
+        // Note, with this approach, the mem not be left on the stack for future data() calls which is fine.
+        func.popExpecting(memType).
+            addInsns(ByteBuffer::duplicate.invokeVirtual()).
+            let(buildOffset).popExpecting(Int::class.ref).
+            addInsns(
+                forceFnType<ByteBuffer.(Int) -> Buffer>(ByteBuffer::position).invokeVirtual(),
+                TypeInsnNode(Opcodes.CHECKCAST, memType.asmName),
+                // TODO: Is there a cheaper bulk approach instead of manually building
+                // a byte array? What's the harm of using a String in the constant pool instead?
+                bytes.size.const,
+                IntInsnNode(Opcodes.NEWARRAY, Opcodes.T_BYTE)
+            ).
+            addInsns(bytes.withIndex().flatMap { (index, byte) ->
+                listOf(InsnNode(Opcodes.DUP), index.const, byte.toInt().const, InsnNode(Opcodes.BASTORE))
+            }).
+            addInsns(
+                0.const,
+                bytes.size.const,
+                forceFnType<ByteBuffer.(ByteArray, Int, Int) -> ByteBuffer>(ByteBuffer::put).invokeVirtual(),
+                InsnNode(Opcodes.POP)
+            )
 
     override fun currentMemory(ctx: FuncContext, func: Func) = func.popExpecting(memType).addInsns(
         forceFnType<ByteBuffer.() -> Int>(ByteBuffer::limit).invokeVirtual(),

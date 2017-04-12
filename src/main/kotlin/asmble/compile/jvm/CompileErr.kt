@@ -82,6 +82,10 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
         override val asmErrString get() = "unknown global"
     }
 
+    class UnknownMemory() : CompileErr("No memory present") {
+        override val asmErrString get() = "unknown memory"
+    }
+
     class SetImmutableGlobal(
         val index: Int
     ) : CompileErr("Attempting to set global $index which is immutable") {
@@ -100,9 +104,13 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
         override val asmErrString get() = "mutable globals cannot be exported"
     }
 
-    class GlobalInitNonConstant(
+    class GlobalInitNotConstant(
         val index: Int
     ) : CompileErr("Expected init for global $index to be constant") {
+        override val asmErrString get() = "constant expression required"
+    }
+
+    class DataInitNotConstant() : CompileErr("Expected init for data to be constant") {
         override val asmErrString get() = "constant expression required"
     }
 

@@ -6,7 +6,10 @@ interface Mem {
     // The class to accept as "memory"
     val memType: TypeRef
 
-    // Caller can trust the max is on the stack as an i32. The result
+    // Make sure the given instance matches the expected for import
+    fun assertValidImport(instance: Any, expected: Node.Type.Memory)
+
+    // Caller can trust the max is on the stack as an i32 in bytes. The result
     // must be put on the stack
     fun create(func: Func): Func
 

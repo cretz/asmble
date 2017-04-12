@@ -45,85 +45,163 @@ open class AstToAsm {
     }
 
     fun addConstructors(ctx: ClsContext) {
-        // We have at least two constructors:
-        // <init>(int maxMemory, imports...)
-        // <init>(MemClass mem, imports...)
+        // With no memory, we only have the constructor:
+        //  <init>(funcImports..., memImports...)
+        // With memory we have at least two constructors:
+        //  <init>(int maxMemory, funcImports..., memImports...)
+        //  <init>(MemClass mem, funcImports..., memImports...)
         // If the max memory was supplied in the mem section, we also have
-        // <init>(imports...)
-        // TODO: what happens w/ more than 254 imports?
+        //  <init>(funcImports..., memImports...)
 
-        val importTypes =
-            ctx.importFuncs.map { MethodHandle::class.ref } +
-            // We know it's only getters
-            ctx.importGlobals.map { MethodHandle::class.ref }
+        if (ctx.mod.data.isNotEmpty()) ctx.assertHasMemory()
+        if (!ctx.hasMemory) {
+            addNoMemConstructor(ctx)
+        } else {
+            addMaxMemConstructor(ctx)
+            addMemClassConstructor(ctx)
+            addMemDefaultConstructor(ctx)
+        }
+    }
 
-        // <init>(MemClass maxMemory, imports...)
-        // This is the one that actually does everything and is always deferred to
-        // Set the mem field then call init then put it back on the stack
-        var memCon = Func("<init>", listOf(ctx.mem.memType) + importTypes).addInsns(
+    fun addNoMemConstructor(ctx: ClsContext) {
+        // <init>(funcImports..., memImports...)
+        var func = Func("<init>", constructorImportTypes(ctx)).addInsns(
+            // Gotta call super()
+            VarInsnNode(Opcodes.ALOAD, 0),
+            MethodInsnNode(Opcodes.INVOKESPECIAL, Object::class.ref.asmName, "<init>", "()V", false)
+        ).pushBlock(Node.Instr.Block(null), null, null)
+        func = setConstructorGlobalImports(ctx, func, 0)
+        func = setConstructorFunctionImports(ctx, func, 0)
+        func = initializeConstructorGlobals(ctx, func, 0)
+        func = executeConstructorStartFunction(ctx, func, 0)
+        func = func.addInsns(InsnNode(Opcodes.RETURN))
+        ctx.cls.methods.add(func.toMethodNode())
+    }
+
+    fun addMaxMemConstructor(ctx: ClsContext) {
+        // <init>(int maxMemory, funcImports..., memImports...)
+        // Just call this(createMem(maxMemory), imports...)
+        val importTypes = constructorImportTypes(ctx)
+        var func = Func("<init>", listOf(Int::class.ref) + importTypes).addInsns(
+            VarInsnNode(Opcodes.ALOAD, 0),
+            VarInsnNode(Opcodes.ILOAD, 1)
+        ).pushBlock(Node.Instr.Block(null), null, null).push(ctx.thisRef, Int::class.ref)
+        func = ctx.mem.create(func).popExpectingMulti(ctx.thisRef, ctx.mem.memType)
+        // In addition to this and mem on the stack, add all imports
+        func = func.params.drop(1).indices.fold(func) { amountCon, index ->
+            amountCon.addInsns(VarInsnNode(Opcodes.ALOAD, 2 + index))
+        }
+        // Make call
+        val desc = "(${ctx.mem.memType.asmDesc}${importTypes.map { it.asmDesc }.joinToString("")})V"
+        func = func.addInsns(
+            MethodInsnNode(Opcodes.INVOKESPECIAL, ctx.thisRef.asmName, "<init>", desc, false),
+            InsnNode(Opcodes.RETURN)
+        )
+        ctx.cls.methods.add(func.toMethodNode())
+    }
+
+    fun addMemClassConstructor(ctx: ClsContext) {
+        // <init>(MemClass, funcImports..., memImports...)
+        var func = Func("<init>", listOf(ctx.mem.memType) + constructorImportTypes(ctx)).addInsns(
+            // Gotta call super()
+            VarInsnNode(Opcodes.ALOAD, 0),
+            MethodInsnNode(Opcodes.INVOKESPECIAL, Object::class.ref.asmName, "<init>", "()V", false)
+        ).pushBlock(Node.Instr.Block(null), null, null)
+        func = setConstructorGlobalImports(ctx, func, 1)
+        func = setConstructorFunctionImports(ctx, func, 1)
+        func = initializeConstructorGlobals(ctx, func, 1)
+
+        // Set the mem field
+        func = func.addInsns(
             VarInsnNode(Opcodes.ALOAD, 0),
             VarInsnNode(Opcodes.ALOAD, 1),
             FieldInsnNode(Opcodes.PUTFIELD, ctx.thisRef.asmName, "memory", ctx.mem.memType.asmDesc),
             VarInsnNode(Opcodes.ALOAD, 1)
-        ).pushBlock(Node.Instr.Block(null), null, null).push(ctx.mem.memType)
+        ).push(ctx.mem.memType)
 
-        // Call object init
-        memCon = memCon.addInsns(
-            // Gotta call super()
-            VarInsnNode(Opcodes.ALOAD, 0),
-            MethodInsnNode(Opcodes.INVOKESPECIAL, Object::class.ref.asmName, "<init>", "()V", false)
-        )
-
-        // Do mem init and remove it from the stack if it's still there afterwards
-        memCon = ctx.mem.init(memCon, ctx.mod.memories.firstOrNull()?.limits?.initial ?: 0)
+        // Do mem init
+        func = ctx.mem.init(func, ctx.mod.memories.firstOrNull()?.limits?.initial ?: 0)
 
         // Add all data loads
-        memCon = ctx.mod.data.fold(memCon) { origMemCon, data ->
+        func = ctx.mod.data.fold(func) { origFunc, data ->
+            // Assert it's valid data
+            if (data.offset.size > 1) throw CompileErr.DataInitNotConstant()
+            if (data.offset.first() !is Node.Instr.Args.Const<*> && data.offset.first() !is Node.Instr.GetGlobal)
+                throw CompileErr.DataInitNotConstant()
             // Add the mem on the stack if it's not already there
-            val memCon =
-                if (origMemCon.stack.lastOrNull() == ctx.mem.memType) origMemCon
-                else origMemCon.addInsns(VarInsnNode(Opcodes.ALOAD, 1)).push(ctx.mem.memType)
+            val func =
+                if (origFunc.stack.lastOrNull() == ctx.mem.memType) origFunc
+                else origFunc.addInsns(VarInsnNode(Opcodes.ALOAD, 1)).push(ctx.mem.memType)
             // Ask mem to build the data, giving it a callback to put the offset on the stack
-            ctx.mem.data(memCon, data.data) { memCon ->
-                val func = Node.Func(
+            ctx.mem.data(func, data.data) { func ->
+                val tempFunc = Node.Func(
                     type = Node.Type.Func(emptyList(), Node.Type.Value.I32),
                     locals = emptyList(),
                     instructions = data.offset
                 )
-                val funcCtx = FuncContext(ctx, func, ctx.reworker.rework(ctx, func))
-                funcCtx.insns.foldIndexed(memCon) { index, memCon, insn ->
-                    ctx.funcBuilder.applyInsn(funcCtx, memCon, insn, index)
+                val funcCtx = FuncContext(ctx, tempFunc, ctx.reworker.rework(ctx, tempFunc))
+                funcCtx.insns.foldIndexed(func) { index, func, insn ->
+                    ctx.funcBuilder.applyInsn(funcCtx, func, insn, index)
                 }
             }
         }
         // Take the mem off the stack if it's still left
-        if (memCon.stack.lastOrNull() == ctx.mem.memType) memCon = memCon.popExpecting(ctx.mem.memType)
+        if (func.stack.lastOrNull() == ctx.mem.memType) func = func.popExpecting(ctx.mem.memType)
 
-        // Set all import functions
-        memCon = ctx.importFuncs.indices.fold(memCon) { memCon, importIndex ->
-            memCon.addInsns(
+        func = executeConstructorStartFunction(ctx, func, 1)
+        func = func.addInsns(InsnNode(Opcodes.RETURN))
+        ctx.cls.methods.add(func.toMethodNode())
+    }
+
+    fun addMemDefaultConstructor(ctx: ClsContext) {
+        //<init>(funcImports..., memImports...) only if there was a given max
+        // Just defer to the maxMem int one
+        val memoryMax = ctx.mod.memories.first().limits.maximum ?: return
+        val importTypes = constructorImportTypes(ctx)
+        val desc = "(I${importTypes.map { it.asmDesc }.joinToString("")})V"
+        val func = Func("<init>", importTypes).
+            addInsns(
                 VarInsnNode(Opcodes.ALOAD, 0),
-                VarInsnNode(Opcodes.ALOAD, importIndex + 2),
-                FieldInsnNode(Opcodes.PUTFIELD, ctx.thisRef.asmName,
-                    ctx.funcName(importIndex), MethodHandle::class.ref.asmDesc)
+                (memoryMax * Mem.PAGE_SIZE).const
+            ).
+            addInsns(importTypes.indices.map { VarInsnNode(Opcodes.ALOAD, it + 1) }).
+            addInsns(
+                MethodInsnNode(Opcodes.INVOKESPECIAL, ctx.thisRef.asmName, "<init>", desc, false),
+                InsnNode(Opcodes.RETURN)
             )
-        }
+        ctx.cls.methods.add(func.toMethodNode())
+    }
 
-        // Set all import globals
-        memCon = ctx.importGlobals.indices.fold(memCon) { memCon, importIndex ->
-            memCon.addInsns(
+    fun constructorImportTypes(ctx: ClsContext) =
+        ctx.importFuncs.map { MethodHandle::class.ref } +
+        // We know it's only getters
+        ctx.importGlobals.map { MethodHandle::class.ref }
+
+    fun setConstructorGlobalImports(ctx: ClsContext, func: Func, paramsBeforeImports: Int) =
+        ctx.importGlobals.indices.fold(func) { func, importIndex ->
+            func.addInsns(
                 VarInsnNode(Opcodes.ALOAD, 0),
-                VarInsnNode(Opcodes.ALOAD, ctx.importFuncs.size + importIndex + 2),
+                VarInsnNode(Opcodes.ALOAD, ctx.importFuncs.size + importIndex + paramsBeforeImports + 1),
                 FieldInsnNode(Opcodes.PUTFIELD, ctx.thisRef.asmName,
                     ctx.importGlobalGetterFieldName(importIndex), MethodHandle::class.ref.asmDesc)
             )
         }
 
-        // Initialize all globals
-        memCon = ctx.mod.globals.foldIndexed(memCon) { index, memCon, global ->
+    fun setConstructorFunctionImports(ctx: ClsContext, func: Func, paramsBeforeImports: Int) =
+        ctx.importFuncs.indices.fold(func) { func, importIndex ->
+            func.addInsns(
+                VarInsnNode(Opcodes.ALOAD, 0),
+                VarInsnNode(Opcodes.ALOAD, importIndex + paramsBeforeImports + 1),
+                FieldInsnNode(Opcodes.PUTFIELD, ctx.thisRef.asmName,
+                    ctx.funcName(importIndex), MethodHandle::class.ref.asmDesc)
+            )
+        }
+
+    fun initializeConstructorGlobals(ctx: ClsContext, func: Func, paramsBeforeImports: Int) =
+        ctx.mod.globals.foldIndexed(func) { index, func, global ->
             // In the MVP, we can trust the init is constant stuff and a single instr
-            if (global.init.size > 1) throw CompileErr.GlobalInitNonConstant(index)
-            memCon.addInsns(VarInsnNode(Opcodes.ALOAD, 0)).
+            if (global.init.size > 1) throw CompileErr.GlobalInitNotConstant(index)
+            func.addInsns(VarInsnNode(Opcodes.ALOAD, 0)).
                 addInsns(
                     global.init.firstOrNull().let {
                         when (it) {
@@ -149,7 +227,10 @@ open class AstToAsm {
                                                 refGlobalKind.type.contentType.typeRef
                                             )
                                         listOf(
-                                            VarInsnNode(Opcodes.ALOAD, ctx.importFuncs.size + it.index + 2),
+                                            VarInsnNode(
+                                                Opcodes.ALOAD,
+                                                ctx.importFuncs.size + it.index + paramsBeforeImports + 1
+                                            ),
                                             MethodInsnNode(
                                                 Opcodes.INVOKEVIRTUAL,
                                                 MethodHandle::class.ref.asmName,
@@ -168,31 +249,31 @@ open class AstToAsm {
                                 is Node.Type.Value.F32 -> 0F.const
                                 is Node.Type.Value.F64 -> 0.0.const
                             })
-                            else -> throw CompileErr.GlobalInitNonConstant(index)
+                            else -> throw CompileErr.GlobalInitNotConstant(index)
                         }
                     }
                 ).addInsns(
-                    FieldInsnNode(Opcodes.PUTFIELD, ctx.thisRef.asmName,
-                        ctx.globalName(ctx.importGlobals.size + index), global.type.contentType.typeRef.asmDesc)
-                )
+                FieldInsnNode(Opcodes.PUTFIELD, ctx.thisRef.asmName,
+                    ctx.globalName(ctx.importGlobals.size + index), global.type.contentType.typeRef.asmDesc)
+            )
         }
 
-        // Execute start function
-        if (ctx.mod.startFuncIndex != null) {
+    fun executeConstructorStartFunction(ctx: ClsContext, func: Func, paramsBeforeImports: Int) =
+        if (ctx.mod.startFuncIndex == null) func else {
             val funcType = ctx.funcTypeAtIndex(ctx.mod.startFuncIndex)
             if (funcType.params.isNotEmpty() || funcType.ret != null)
                 throw CompileErr.InvalidStartFunctionType(ctx.mod.startFuncIndex)
             when (ctx.funcAtIndex(ctx.mod.startFuncIndex)) {
                 is Either.Left ->
                     // This is an import, so we can just access it as a param
-                    memCon = memCon.addInsns(
-                        VarInsnNode(Opcodes.ALOAD, ctx.mod.startFuncIndex + 2),
+                    func.addInsns(
+                        VarInsnNode(Opcodes.ALOAD, ctx.mod.startFuncIndex + paramsBeforeImports + 1),
                         MethodInsnNode(Opcodes.INVOKEVIRTUAL, MethodHandle::class.ref.asmName,
                             "invokeExact", funcType.asmDesc, false)
                     )
                 is Either.Right ->
                     // This is a local func, so invoke it virtual
-                    memCon = memCon.addInsns(
+                    func.addInsns(
                         VarInsnNode(Opcodes.ALOAD, 0),
                         MethodInsnNode(Opcodes.INVOKEVIRTUAL, ctx.thisRef.asmName,
                             ctx.funcName(ctx.mod.startFuncIndex), funcType.asmDesc, false)
@@ -200,59 +281,19 @@ open class AstToAsm {
             }
         }
 
-        // Return
-        memCon = memCon.addInsns(InsnNode(Opcodes.RETURN))
-
-        // <init>(int maxMemory, imports...)
-        // Just call this(createMem(maxMemory), imports...)
-        var amountCon = Func("<init>", listOf(Int::class.ref) + importTypes).addInsns(
-            VarInsnNode(Opcodes.ALOAD, 0),
-            VarInsnNode(Opcodes.ILOAD, 1)
-        ).pushBlock(Node.Instr.Block(null), null, null).push(ctx.thisRef, Int::class.ref)
-        amountCon = ctx.mem.create(amountCon).popExpectingMulti(ctx.thisRef, ctx.mem.memType)
-        // In addition to this and mem on the stack, add all imports
-        amountCon = amountCon.params.drop(1).indices.fold(amountCon) { amountCon, index ->
-            amountCon.addInsns(VarInsnNode(Opcodes.ALOAD, 2 + index))
-        }
-        // Make call
-        amountCon = amountCon.addInsns(
-            MethodInsnNode(Opcodes.INVOKESPECIAL, ctx.thisRef.asmName, memCon.name, memCon.desc, false),
-            InsnNode(Opcodes.RETURN)
-        )
-
-        var constructors = listOf(amountCon, memCon)
-
-        //<init>(imports...) only if there was a given max
-        ctx.mod.memories.firstOrNull()?.limits?.maximum?.also {
-            val regCon = Func("<init>", importTypes).
-                addInsns(
-                    VarInsnNode(Opcodes.ALOAD, 0),
-                    (it * Mem.PAGE_SIZE).const
-                ).
-                addInsns(importTypes.indices.map { VarInsnNode(Opcodes.ALOAD, it + 1) }).
-                addInsns(
-                    MethodInsnNode(Opcodes.INVOKESPECIAL, ctx.thisRef.asmName, amountCon.name, amountCon.desc, false),
-                    InsnNode(Opcodes.RETURN)
-                )
-            constructors = listOf(regCon) + constructors
-        }
-
-        ctx.cls.methods.addAll(constructors.map(Func::toMethodNode))
-    }
-
     fun addExports(ctx: ClsContext) {
         // Export all functions as named methods that delegate
         ctx.mod.exports.forEach {
             when (it.kind) {
                 Node.ExternalKind.FUNCTION -> addExportFunc(ctx, it)
                 Node.ExternalKind.GLOBAL -> addExportGlobal(ctx, it)
+                Node.ExternalKind.MEMORY -> addExportMemory(ctx, it)
                 else -> TODO()
             }
         }
     }
 
     fun addExportFunc(ctx: ClsContext, export: Node.Export) {
-        // TODO: java safe name
         val funcType = ctx.funcTypeAtIndex(export.index)
         val method = MethodNode(Opcodes.ACC_PUBLIC, export.field.javaIdent, funcType.asmDesc, null, null)
         // Push all params
@@ -286,7 +327,7 @@ open class AstToAsm {
             }
         }
         // Return as necessary
-        method.instructions.add(InsnNode(when (funcType.ret) {
+        method.addInsns(InsnNode(when (funcType.ret) {
             null -> Opcodes.RETURN
             Node.Type.Value.I32 -> Opcodes.IRETURN
             Node.Type.Value.I64 -> Opcodes.LRETURN
@@ -298,17 +339,44 @@ open class AstToAsm {
 
     fun addExportGlobal(ctx: ClsContext, export: Node.Export) {
         val global = ctx.globalAtIndex(export.index)
-        when (global) {
-            is Either.Left -> {
-                if ((global.v.kind as Node.Import.Kind.Global).type.mutable)
-                    throw CompileErr.MutableGlobalExport(export.index)
-            }
-            is Either.Right -> {
-                if (global.v.type.mutable)
-                    throw CompileErr.MutableGlobalExport(export.index)
-            }
+        val type = when (global) {
+            is Either.Left -> (global.v.kind as Node.Import.Kind.Global).type
+            is Either.Right -> global.v.type
         }
-        TODO()
+        if (type.mutable) throw CompileErr.MutableGlobalExport(export.index)
+        // Create a simple getter
+        val method = MethodNode(Opcodes.ACC_PUBLIC, "get" + export.field.javaIdent.capitalize(),
+            "()" + type.contentType.typeRef.asmDesc, null, null)
+        method.addInsns(VarInsnNode(Opcodes.ALOAD, 0))
+        if (global is Either.Left) method.addInsns(
+            FieldInsnNode(Opcodes.GETFIELD, ctx.thisRef.asmName,
+                ctx.importGlobalGetterFieldName(export.index), MethodHandle::class.ref.asmDesc),
+            MethodInsnNode(Opcodes.INVOKEVIRTUAL, MethodHandle::class.ref.asmName, "invokeExact",
+                "()" + type.contentType.typeRef.asmDesc, false)
+        ) else method.addInsns(
+            FieldInsnNode(Opcodes.GETFIELD, ctx.thisRef.asmName, ctx.globalName(export.index),
+                type.contentType.typeRef.asmDesc)
+        )
+        method.addInsns(InsnNode(when (type.contentType) {
+            Node.Type.Value.I32 -> Opcodes.IRETURN
+            Node.Type.Value.I64 -> Opcodes.LRETURN
+            Node.Type.Value.F32 -> Opcodes.FRETURN
+            Node.Type.Value.F64 -> Opcodes.DRETURN
+        }))
+        ctx.cls.methods.plusAssign(method)
+    }
+
+    fun addExportMemory(ctx: ClsContext, export: Node.Export) {
+        // Create simple getter for the memory
+        require(export.index == 0) { "Only memory at index 0 supported" }
+        val method = MethodNode(Opcodes.ACC_PUBLIC, "get" + export.field.javaIdent.capitalize(),
+            "()" + ctx.mem.memType.asmDesc, null, null)
+        method.addInsns(
+            VarInsnNode(Opcodes.ALOAD, 0),
+            FieldInsnNode(Opcodes.GETFIELD, ctx.thisRef.asmName, "memory", ctx.mem.memType.asmDesc),
+            InsnNode(Opcodes.ARETURN)
+        )
+        ctx.cls.methods.plusAssign(method)
     }
 
     fun addFuncs(ctx: ClsContext) {

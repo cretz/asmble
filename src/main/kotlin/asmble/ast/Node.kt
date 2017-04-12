@@ -393,7 +393,18 @@ sealed class Node {
         }
 
         sealed class MemOp<out A : Instr.Args> : InstrOp<A>() {
-            data class AlignOffsetArg(override val name: String, val create: (Int, Long) -> Instr) : MemOp<Instr.Args.AlignOffset>()
+            data class AlignOffsetArg(override val name: String, val create: (Int, Long) -> Instr) : MemOp<Instr.Args.AlignOffset>() {
+                val argBits = when (name) {
+                    "i32.load8_s", "i32.load8_u", "i64.load8_s", "i64.load8_u",
+                    "i32.store8", "i64.store8" -> 8
+                    "i32.load16_s", "i32.load16_u", "i64.load16_s", "i64.load16_u",
+                    "i32.store16", "i64.store16" -> 16
+                    "i32.load", "f32.load", "i64.load32_s", "i64.load32_u",
+                    "i32.store", "f32.store", "i64.store32" -> 32
+                    "i64.load", "f64.load", "i64.store", "f64.store" -> 64
+                    else -> error("Unrecognized op: $name")
+                }
+            }
             data class ReservedArg(override val name: String, val create: (Boolean) -> Instr) : MemOp<Instr.Args.Reserved>()
         }
 

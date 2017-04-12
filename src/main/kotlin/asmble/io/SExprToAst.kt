@@ -4,6 +4,7 @@ import asmble.ast.Node
 import asmble.ast.Node.InstrOp
 import asmble.ast.SExpr
 import asmble.ast.Script
+import asmble.compile.jvm.Mem
 import asmble.util.*
 import java.io.ByteArrayInputStream
 import java.math.BigInteger
@@ -534,7 +535,8 @@ open class SExprToAst {
             }
         }
 
-        if (mod.memories.size > 1) throw IoErr.MultipleMemories()
+        if (mod.memories.size + mod.imports.count { it.kind is Node.Import.Kind.Memory } > 1)
+            throw IoErr.MultipleMemories()
 
         return name to mod
     }
@@ -632,6 +634,7 @@ open class SExprToAst {
                         require(instrAlign > 0 && instrAlign and (instrAlign - 1) == 0) {
                             "Alignment expected to be positive power of 2, but got $instrAlign"
                         }
+                        if (instrAlign > op.argBits / 8) throw IoErr.InvalidAlign(instrAlign, op.argBits)
                         count++
                     }
                 }
@@ -662,11 +665,15 @@ open class SExprToAst {
     }
 
     fun toResizeableLimits(exp: SExpr.Multi, offset: Int): Node.ResizableLimits {
-        var max: Int? = null
+        var max: Long? = null
         if (offset + 1 < exp.vals.size && exp.vals[offset + 1] is SExpr.Symbol) {
-            max = exp.vals[offset + 1].symbolStr()?.toIntOrNull()
+            max = exp.vals[offset + 1].symbolStr()?.toLongOrNull()
         }
-        return Node.ResizableLimits(exp.vals[offset].symbolStr()!!.toInt(), max)
+        val init = exp.vals[offset].symbolStr()!!.toLong()
+        if (init > Mem.PAGE_SIZE) throw IoErr.MemorySizeOverflow(init)
+        if (max != null && max > Mem.PAGE_SIZE) throw IoErr.MemorySizeOverflow(max)
+        if (max != null && init > max) throw IoErr.MemoryInitMaxMismatch(init.toInt(), max.toInt())
+        return Node.ResizableLimits(init.toInt(), max?.toInt())
     }
 
     fun toResult(exp: SExpr.Multi): Node.Type.Value {

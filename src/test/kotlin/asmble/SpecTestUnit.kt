@@ -50,7 +50,6 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
         - imports.wast - No memory exports yet
         - left-to-right.wast - Not handling tables yet
         - linking.wast - Not handling tables yet
-        - memory.wast - No memory exports yet
         - return.wast - Not handling tables yet
         - typecheck.wast - Not handling tables yet
         - unreachable.wast - Not handling tables yet
@@ -126,6 +125,7 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             "loop.wast",
             "loop-end-label-mismatch.fail.wast",
             "loop-end-label-superfluous.fail.wast",
+            "memory.wast",
             "memory_redundancy.wast",
             "memory_trap.wast",
             "names.wast",
@@ -154,13 +154,15 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
 
         val testsWithErrorToWarningPredicates: Map<String, (Throwable) -> Boolean> = mapOf(
             // NaN bit patterns can be off
-            "float_literals" to { t ->
-                (((t as? ScriptAssertionError)?.
-                    assertion as? Script.Cmd.Assertion.Return)?.
-                        action as? Script.Cmd.Action.Invoke)?.
-                            string?.contains("nan") ?: false
-            }
+            "float_literals" to this::isNanMismatch,
+            "float_exprs" to this::isNanMismatch
         )
+
+        fun isNanMismatch(t: Throwable) =
+            (((t as? ScriptAssertionError)?.
+                assertion as? Script.Cmd.Assertion.Return)?.
+                action as? Script.Cmd.Action.Invoke)?.
+                string?.contains("nan") ?: false
 
         val unitsPath = "/spec/test/core"
 

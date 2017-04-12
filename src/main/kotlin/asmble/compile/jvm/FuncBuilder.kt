@@ -1003,25 +1003,33 @@ open class FuncBuilder {
     fun applyGrowMemory(ctx: FuncContext, fn: Func) =
         // Grow mem is a special case where the memory ref is already pre-injected on
         // the stack before this call. Result is an int.
-        ctx.cls.mem.growMemory(ctx, fn)
+        ctx.cls.assertHasMemory().let {
+            ctx.cls.mem.growMemory(ctx, fn)
+        }
 
     fun applyCurrentMemory(ctx: FuncContext, fn: Func) =
         // Curr mem is not specially injected, so we have to put the memory on the
         // stack since we need it
-        putMemoryOnStackIfNecessary(ctx, fn).let { fn -> ctx.cls.mem.currentMemory(ctx, fn) }
+        ctx.cls.assertHasMemory().let {
+            putMemoryOnStackIfNecessary(ctx, fn).let { fn -> ctx.cls.mem.currentMemory(ctx, fn) }
+        }
 
     fun applyStoreOp(ctx: FuncContext, fn: Func, insn: Node.Instr.Args.AlignOffset, insnIndex: Int) =
         // Store is a special case where the memory ref is already pre-injected on
         // the stack before this call. But it can have a memory leftover on the stack
         // so we pop it if we need to
-        ctx.cls.mem.storeOp(ctx, fn, insn).let { fn ->
-            popMemoryIfNecessary(ctx, fn, ctx.insns.getOrNull(insnIndex + 1))
+        ctx.cls.assertHasMemory().let {
+            ctx.cls.mem.storeOp(ctx, fn, insn).let { fn ->
+                popMemoryIfNecessary(ctx, fn, ctx.insns.getOrNull(insnIndex + 1))
+            }
         }
 
     fun applyLoadOp(ctx: FuncContext, fn: Func, insn: Node.Instr.Args.AlignOffset) =
         // Load is a special case where the memory ref is already pre-injected on
         // the stack before this call
-        ctx.cls.mem.loadOp(ctx, fn, insn)
+        ctx.cls.assertHasMemory().let {
+            ctx.cls.mem.loadOp(ctx, fn, insn)
+        }
 
     fun putMemoryOnStackIfNecessary(ctx: FuncContext, fn: Func) =
         if (fn.stack.lastOrNull() == ctx.cls.mem.memType) fn
