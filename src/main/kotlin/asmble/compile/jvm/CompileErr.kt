@@ -82,8 +82,12 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
         override val asmErrString get() = "unknown global"
     }
 
-    class UnknownMemory() : CompileErr("No memory present") {
+    class UnknownMemory : CompileErr("No memory present") {
         override val asmErrString get() = "unknown memory"
+    }
+
+    class UnknownTable : CompileErr("No table present") {
+        override val asmErrString get() = "unknown table"
     }
 
     class SetImmutableGlobal(
@@ -110,7 +114,7 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
         override val asmErrString get() = "constant expression required"
     }
 
-    class DataInitNotConstant() : CompileErr("Expected init for data to be constant") {
+    class OffsetNotConstant : CompileErr("Expected offset to be constant") {
         override val asmErrString get() = "constant expression required"
     }
 

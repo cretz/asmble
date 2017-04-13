@@ -32,6 +32,9 @@ data class ClsContext(
     val hasMemory: Boolean by lazy {
         mod.memories.isNotEmpty() || mod.imports.any { it.kind is Node.Import.Kind.Memory }
     }
+    val hasTable: Boolean by lazy {
+        mod.tables.isNotEmpty() || mod.imports.any { it.kind is Node.Import.Kind.Table }
+    }
 
     fun assertHasMemory() { if (!hasMemory) throw CompileErr.UnknownMemory() }
 

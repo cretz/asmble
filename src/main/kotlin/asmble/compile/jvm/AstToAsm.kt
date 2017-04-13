@@ -3,8 +3,10 @@ package asmble.compile.jvm
 import asmble.ast.Node
 import asmble.util.Either
 import org.objectweb.asm.Opcodes
+import org.objectweb.asm.Type
 import org.objectweb.asm.tree.*
 import java.lang.invoke.MethodHandle
+import java.lang.invoke.MethodHandles
 
 open class AstToAsm {
     // Note, the class does not have a name out of here (yet)
@@ -20,10 +22,16 @@ open class AstToAsm {
     }
 
     fun addFields(ctx: ClsContext) {
-        // First field is always a private final memory field
-        // Ug, ambiguity on List<?> +=
-        ctx.cls.fields.add(FieldNode(Opcodes.ACC_PRIVATE + Opcodes.ACC_FINAL, "memory",
-            ctx.mem.memType.asmDesc, null, null))
+        // Mem field if present
+        if (ctx.hasMemory)
+            ctx.cls.fields.add(FieldNode(Opcodes.ACC_PRIVATE + Opcodes.ACC_FINAL, "memory",
+                ctx.mem.memType.asmDesc, null, null))
+        // Table field if present...
+        // Private final for now, but likely won't be final in future versions supporting
+        // mutable tables, may be not even a table but a list (and final)
+        if (ctx.hasTable)
+            ctx.cls.fields.add(FieldNode(Opcodes.ACC_PRIVATE + Opcodes.ACC_FINAL, "table",
+                Array<MethodHandle>::class.ref.asmDesc, null, null))
         // Now all method imports as method handles
         // TODO: why does this fail with asm-debug-all but not with just regular asm?
         ctx.cls.fields.addAll(ctx.importFuncs.indices.map {
@@ -46,12 +54,12 @@ open class AstToAsm {
 
     fun addConstructors(ctx: ClsContext) {
         // With no memory, we only have the constructor:
-        //  <init>(funcImports..., memImports...)
+        //  <init>(imports...)
         // With memory we have at least two constructors:
-        //  <init>(int maxMemory, funcImports..., memImports...)
-        //  <init>(MemClass mem, funcImports..., memImports...)
+        //  <init>(int maxMemory, imports...)
+        //  <init>(MemClass mem, imports...)
         // If the max memory was supplied in the mem section, we also have
-        //  <init>(funcImports..., memImports...)
+        //  <init>(imports...)
 
         if (ctx.mod.data.isNotEmpty()) ctx.assertHasMemory()
         if (!ctx.hasMemory) {
@@ -64,7 +72,7 @@ open class AstToAsm {
     }
 
     fun addNoMemConstructor(ctx: ClsContext) {
-        // <init>(funcImports..., memImports...)
+        // <init>(imports...)
         var func = Func("<init>", constructorImportTypes(ctx)).addInsns(
             // Gotta call super()
             VarInsnNode(Opcodes.ALOAD, 0),
@@ -72,14 +80,16 @@ open class AstToAsm {
         ).pushBlock(Node.Instr.Block(null), null, null)
         func = setConstructorGlobalImports(ctx, func, 0)
         func = setConstructorFunctionImports(ctx, func, 0)
+        func = setConstructorTableImports(ctx, func, 0)
         func = initializeConstructorGlobals(ctx, func, 0)
+        func = initializeConstructorTables(ctx, func, 0)
         func = executeConstructorStartFunction(ctx, func, 0)
         func = func.addInsns(InsnNode(Opcodes.RETURN))
         ctx.cls.methods.add(func.toMethodNode())
     }
 
     fun addMaxMemConstructor(ctx: ClsContext) {
-        // <init>(int maxMemory, funcImports..., memImports...)
+        // <init>(int maxMemory, imports...)
         // Just call this(createMem(maxMemory), imports...)
         val importTypes = constructorImportTypes(ctx)
         var func = Func("<init>", listOf(Int::class.ref) + importTypes).addInsns(
@@ -101,7 +111,7 @@ open class AstToAsm {
     }
 
     fun addMemClassConstructor(ctx: ClsContext) {
-        // <init>(MemClass, funcImports..., memImports...)
+        // <init>(MemClass, imports...)
         var func = Func("<init>", listOf(ctx.mem.memType) + constructorImportTypes(ctx)).addInsns(
             // Gotta call super()
             VarInsnNode(Opcodes.ALOAD, 0),
@@ -109,7 +119,9 @@ open class AstToAsm {
         ).pushBlock(Node.Instr.Block(null), null, null)
         func = setConstructorGlobalImports(ctx, func, 1)
         func = setConstructorFunctionImports(ctx, func, 1)
+        func = setConstructorTableImports(ctx, func, 1)
         func = initializeConstructorGlobals(ctx, func, 1)
+        func = initializeConstructorTables(ctx, func, 1)
 
         // Set the mem field
         func = func.addInsns(
@@ -124,26 +136,12 @@ open class AstToAsm {
 
         // Add all data loads
         func = ctx.mod.data.fold(func) { origFunc, data ->
-            // Assert it's valid data
-            if (data.offset.size > 1) throw CompileErr.DataInitNotConstant()
-            if (data.offset.first() !is Node.Instr.Args.Const<*> && data.offset.first() !is Node.Instr.GetGlobal)
-                throw CompileErr.DataInitNotConstant()
             // Add the mem on the stack if it's not already there
             val func =
                 if (origFunc.stack.lastOrNull() == ctx.mem.memType) origFunc
                 else origFunc.addInsns(VarInsnNode(Opcodes.ALOAD, 1)).push(ctx.mem.memType)
             // Ask mem to build the data, giving it a callback to put the offset on the stack
-            ctx.mem.data(func, data.data) { func ->
-                val tempFunc = Node.Func(
-                    type = Node.Type.Func(emptyList(), Node.Type.Value.I32),
-                    locals = emptyList(),
-                    instructions = data.offset
-                )
-                val funcCtx = FuncContext(ctx, tempFunc, ctx.reworker.rework(ctx, tempFunc))
-                funcCtx.insns.foldIndexed(func) { index, func, insn ->
-                    ctx.funcBuilder.applyInsn(funcCtx, func, insn, index)
-                }
-            }
+            ctx.mem.data(func, data.data) { func -> applyOffsetExpr(ctx, data.offset, func) }
         }
         // Take the mem off the stack if it's still left
         if (func.stack.lastOrNull() == ctx.mem.memType) func = func.popExpecting(ctx.mem.memType)
@@ -154,7 +152,7 @@ open class AstToAsm {
     }
 
     fun addMemDefaultConstructor(ctx: ClsContext) {
-        //<init>(funcImports..., memImports...) only if there was a given max
+        //<init>(imports...) only if there was a given max
         // Just defer to the maxMem int one
         val memoryMax = ctx.mod.memories.first().limits.maximum ?: return
         val importTypes = constructorImportTypes(ctx)
@@ -175,7 +173,8 @@ open class AstToAsm {
     fun constructorImportTypes(ctx: ClsContext) =
         ctx.importFuncs.map { MethodHandle::class.ref } +
         // We know it's only getters
-        ctx.importGlobals.map { MethodHandle::class.ref }
+        ctx.importGlobals.map { MethodHandle::class.ref } +
+        ctx.mod.imports.filter { it.kind is Node.Import.Kind.Table }.map { Array<MethodHandle>::class.ref }
 
     fun setConstructorGlobalImports(ctx: ClsContext, func: Func, paramsBeforeImports: Int) =
         ctx.importGlobals.indices.fold(func) { func, importIndex ->
@@ -194,6 +193,17 @@ open class AstToAsm {
                 VarInsnNode(Opcodes.ALOAD, importIndex + paramsBeforeImports + 1),
                 FieldInsnNode(Opcodes.PUTFIELD, ctx.thisRef.asmName,
                     ctx.funcName(importIndex), MethodHandle::class.ref.asmDesc)
+            )
+        }
+
+    fun setConstructorTableImports(ctx: ClsContext, func: Func, paramsBeforeImports: Int) =
+        if (ctx.mod.imports.none { it.kind is Node.Import.Kind.Table }) func else {
+            val importIndex = ctx.importFuncs.size + ctx.importGlobals.size + paramsBeforeImports + 1
+            func.addInsns(
+                VarInsnNode(Opcodes.ALOAD, 0),
+                VarInsnNode(Opcodes.ALOAD, importIndex),
+                FieldInsnNode(Opcodes.PUTFIELD, ctx.thisRef.asmName,
+                    "table", Array<MethodHandle>::class.ref.asmDesc)
             )
         }
 
@@ -258,6 +268,69 @@ open class AstToAsm {
             )
         }
 
+    fun initializeConstructorTables(ctx: ClsContext, func: Func, paramsBeforeImports: Int) =
+        ctx.mod.tables.singleOrNull().let { table ->
+            if (table == null) func else {
+                // Create the array of the "initial" size and ignore max for now...
+                func.addInsns(
+                    VarInsnNode(Opcodes.ALOAD, 0),
+                    table.limits.initial.const,
+                    TypeInsnNode(Opcodes.ANEWARRAY, MethodHandle::class.ref.asmName)
+                ).let { func ->
+                    // Go over each elem and add all of the indices to the table
+                    ctx.mod.elems.fold(func) { func, elem ->
+                        require(elem.index == 0)
+                        // Lots of possible perf improvements including:
+                        // * Resolve the initial offset before running each func index
+                        // * Don't add to offset if it's just + 0
+                        // Could be a perf improvement here by resolving the offset before running each thing here
+                        elem.funcIndices.foldIndexed(func) { offsetIndex, func, funcIndex ->
+                            // Dup the array
+                            func.addInsns(InsnNode(Opcodes.DUP)).
+                                // Load the initial offset
+                                let { func -> applyOffsetExpr(ctx, elem.offset, func) }.
+                                popExpecting(Int::class.ref).
+                                // Add to the offset
+                                addInsns(
+                                    offsetIndex.const,
+                                    InsnNode(Opcodes.IADD)
+                                ).addInsns(
+                                    // Load the proper method handle based on whether it's an import or not
+                                    ctx.funcAtIndex(funcIndex).let { funcRef ->
+                                        // TODO: validate func type
+                                        val funcType = ctx.funcTypeAtIndex(funcIndex)
+                                        when (funcRef) {
+                                            is Either.Left ->
+                                                // Imports we can just get from the param
+                                                listOf(VarInsnNode(
+                                                    Opcodes.ALOAD,
+                                                    funcIndex + paramsBeforeImports + 1
+                                                ))
+                                            is Either.Right -> {
+                                                listOf(
+                                                    MethodHandles::lookup.invokeStatic(),
+                                                    VarInsnNode(Opcodes.ALOAD, 0),
+                                                    ctx.funcName(funcIndex).const,
+                                                    // Method type const, yay
+                                                    LdcInsnNode(Type.getMethodType(funcType.asmDesc)),
+                                                    MethodHandles.Lookup::bind.invokeStatic()
+                                                )
+                                            }
+                                        }
+                                    }
+                                )
+                        }
+                    }
+                }.let { func ->
+                    // Put it on the field (we know that we have this + arr on the stack)
+                    func.addInsns(
+                        FieldInsnNode(Opcodes.PUTFIELD, ctx.thisRef.asmName, "table",
+                            Array<MethodHandle>::class.ref.asmDesc)
+                    )
+                }
+            }
+        }
+
     fun executeConstructorStartFunction(ctx: ClsContext, func: Func, paramsBeforeImports: Int) =
         if (ctx.mod.startFuncIndex == null) func else {
             val funcType = ctx.funcTypeAtIndex(ctx.mod.startFuncIndex)
@@ -281,6 +354,22 @@ open class AstToAsm {
             }
         }
 
+    fun applyOffsetExpr(ctx: ClsContext, instrs: List<Node.Instr>, func: Func): Func {
+        // Assert it's a valid offset
+        if (instrs.size > 1) throw CompileErr.OffsetNotConstant()
+        if (instrs.first() !is Node.Instr.Args.Const<*> && instrs.first() !is Node.Instr.GetGlobal)
+            throw CompileErr.OffsetNotConstant()
+        val tempFunc = Node.Func(
+            type = Node.Type.Func(emptyList(), Node.Type.Value.I32),
+            locals = emptyList(),
+            instructions = instrs
+        )
+        val funcCtx = FuncContext(ctx, tempFunc, ctx.reworker.rework(ctx, tempFunc))
+        return funcCtx.insns.foldIndexed(func) { index, func, insn ->
+            ctx.funcBuilder.applyInsn(funcCtx, func, insn, index)
+        }
+    }
+
     fun addExports(ctx: ClsContext) {
         // Export all functions as named methods that delegate
         ctx.mod.exports.forEach {
@@ -288,7 +377,7 @@ open class AstToAsm {
                 Node.ExternalKind.FUNCTION -> addExportFunc(ctx, it)
                 Node.ExternalKind.GLOBAL -> addExportGlobal(ctx, it)
                 Node.ExternalKind.MEMORY -> addExportMemory(ctx, it)
-                else -> TODO()
+                Node.ExternalKind.TABLE -> addExportTable(ctx, it)
             }
         }
     }
@@ -374,6 +463,19 @@ open class AstToAsm {
         method.addInsns(
             VarInsnNode(Opcodes.ALOAD, 0),
             FieldInsnNode(Opcodes.GETFIELD, ctx.thisRef.asmName, "memory", ctx.mem.memType.asmDesc),
+            InsnNode(Opcodes.ARETURN)
+        )
+        ctx.cls.methods.plusAssign(method)
+    }
+
+    fun addExportTable(ctx: ClsContext, export: Node.Export) {
+        // Create simple getter for the table
+        require(export.index == 0) { "Only table at index 0 supported" }
+        val method = MethodNode(Opcodes.ACC_PUBLIC, "get" + export.field.javaIdent.capitalize(),
+            "()" + Array<MethodHandle>::class.ref.asmDesc, null, null)
+        method.addInsns(
+            VarInsnNode(Opcodes.ALOAD, 0),
+            FieldInsnNode(Opcodes.GETFIELD, ctx.thisRef.asmName, "table", Array<MethodHandle>::class.ref.asmDesc),
             InsnNode(Opcodes.ARETURN)
         )
         ctx.cls.methods.plusAssign(method)

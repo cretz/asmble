@@ -119,7 +119,7 @@ open class FuncBuilder {
         is Node.Instr.Call ->
             applyCallInsn(ctx, fn, i.index)
         is Node.Instr.CallIndirect ->
-            TODO("To be determined w/ invokedynamic")
+            applyCallIndirectInsn(ctx, fn, i.index)
         is Node.Instr.Drop ->
             fn.pop().let { (fn, popped) ->
                 fn.addInsns(InsnNode(if (popped.stackSize == 2) Opcodes.POP2 else Opcodes.POP))
@@ -1178,6 +1178,23 @@ open class FuncBuilder {
                 }.let { fn -> funcType.ret?.let { fn.push(it.typeRef) } ?: fn }
             }
         }
+
+    fun applyCallIndirectInsn(ctx: FuncContext, fn: Func, index: Int): Func {
+        if (!ctx.cls.hasTable) throw CompileErr.UnknownTable()
+        // The index param is a type index, the on-stack value is the table index.
+        // So we'll put the table array on the stack, the swap, then aaload, then invoke exact
+        val funcType = ctx.cls.mod.types[index]
+        return fn.popExpecting(Int::class.ref).
+            addInsns(
+                VarInsnNode(Opcodes.ALOAD, 0),
+                FieldInsnNode(Opcodes.GETFIELD, ctx.cls.thisRef.asmName,
+                    "table", Array<MethodHandle>::class.ref.asmDesc),
+                InsnNode(Opcodes.SWAP),
+                InsnNode(Opcodes.AALOAD),
+                MethodInsnNode(Opcodes.INVOKEVIRTUAL, MethodHandle::class.ref.asmName,
+                    "invokeExact", funcType.asmDesc, false)
+            )
+    }
 
     fun applyReturnInsn(ctx: FuncContext, fn: Func): Func {
         val block = fn.blockStack.first()

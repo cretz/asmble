@@ -31,6 +31,10 @@ sealed class IoErr(message: String, cause: Throwable? = null) : RuntimeException
         override val asmErrString get() = "multiple memories"
     }
 
+    class MultipleTables : IoErr("Only single table allowed") {
+        override val asmErrString get() = "multiple tables"
+    }
+
     class MemoryInitMaxMismatch(val init: Int, val max: Int) : IoErr("Memory init $init is over max $max") {
         override val asmErrString get() = "memory size minimum must not be greater than maximum"
     }

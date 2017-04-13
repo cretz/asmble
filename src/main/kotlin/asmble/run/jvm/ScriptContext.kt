@@ -270,6 +270,14 @@ data class ScriptContext(
         return memInst
     }
 
+    fun resolveImportTable(import: Node.Import, tableType: Node.Type.Table): Any {
+        // Find a getter that matches the name
+        val module = registrations[import.module] ?: error("Unable to find module ${import.module}")
+        val getter = module.instance.javaClass.getDeclaredMethod("get" + import.field.javaIdent.capitalize())
+        require(getter.returnType == Array<MethodHandle>::class.java)
+        return getter.invoke(module.instance)
+    }
+
     interface Module {
         val cls: Class<*>
         val instance: Any
@@ -318,6 +326,12 @@ data class ScriptContext(
             // Global imports
             constructorParams += mod.imports.mapNotNull {
                 if (it.kind is Node.Import.Kind.Global) resolveImportGlobal(it, it.kind.type)
+                else null
+            }
+
+            // Table imports
+            constructorParams += mod.imports.mapNotNull {
+                if (it.kind is Node.Import.Kind.Table) resolveImportTable(it, it.kind.type)
                 else null
             }
 
