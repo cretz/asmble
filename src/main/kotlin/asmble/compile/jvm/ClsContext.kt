@@ -38,6 +38,8 @@ data class ClsContext(
 
     fun assertHasMemory() { if (!hasMemory) throw CompileErr.UnknownMemory() }
 
+    fun typeAtIndex(index: Int) = mod.types.getOrNull(index) ?: throw CompileErr.UnknownType(index)
+
     fun funcAtIndex(index: Int) = importFuncs.getOrNull(index).let {
         when (it) {
             null -> Either.Right(mod.funcs.getOrNull(index - importFuncs.size) ?: throw CompileErr.UnknownFunc(index))
@@ -47,7 +49,7 @@ data class ClsContext(
 
     fun funcTypeAtIndex(index: Int) = funcAtIndex(index).let {
         when (it) {
-            is Either.Left -> mod.types[(it.v.kind as Node.Import.Kind.Func).typeIndex]
+            is Either.Left -> typeAtIndex((it.v.kind as Node.Import.Kind.Func).typeIndex)
             is Either.Right -> it.v.type
         }
     }

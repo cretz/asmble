@@ -65,6 +65,7 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             "br_if.wast",
             "break-drop.wast",
             "call.wast",
+            "call_indirect.wast",
             "comments.wast",
             "conversions.wast",
             "custom_section.wast",

@@ -67,7 +67,7 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
     class UnknownFunc(
         val index: Int
     ) : CompileErr("Unknown function at index $index") {
-        override val asmErrString get() = "unknown function"
+        override val asmErrString get() = "unknown function $index"
     }
 
     class UnknownLocal(
@@ -88,6 +88,10 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
 
     class UnknownTable : CompileErr("No table present") {
         override val asmErrString get() = "unknown table"
+    }
+
+    class UnknownType(val index: Int) : CompileErr("No type present for index $index") {
+        override val asmErrString get() = "unknown type"
     }
 
     class SetImmutableGlobal(

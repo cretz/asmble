@@ -27,22 +27,4 @@ class RuntimeHelpers {
                 caller.findGetter(caller.lookupClass(), "table", MethodHandle[].class));
         return new ConstantCallSite(thisAndIndexAtEnd);
     }
-//    static CallSite bootstrapIndirect(MethodHandles.Lookup caller, String name, MethodType type, MethodHandle table) {
-//        MethodType withoutIndexOrThis = type.dropParameterTypes(type.parameterCount() - 1, type.parameterCount());
-//        // Handle with mh at the beginning
-//        MethodHandle mhFirst = MethodHandles.exactInvoker(withoutIndex);
-//        // Last index first, then move each up 1
-//        int[] reorder = new int[type.parameterCount()];
-//        for (int i = 0; i < reorder.length; i++) {
-//            if (i == 0) reorder[0] = reorder.length - 1;
-//            else reorder[i] = i - 1;
-//        }
-//        // Method handle that moves the method handle to the end
-//        MethodHandle mhAtEnd = MethodHandles.permuteArguments(mhFirst,
-//                mhFirst.type().dropParameterTypes(0, 1).appendParameterTypes(MethodHandle.class), reorder );
-//        // Method handle that changes an ending index to a method handle using the table
-//        MethodHandle indexAtEnd = MethodHandles.filterArguments(mhAtEnd, type.parameterCount() - 1,
-//                MethodHandles.arrayElementGetter(MethodHandle[].class).bindTo(table));
-//        return new ConstantCallSite(indexAtEnd);
-//    }
 }

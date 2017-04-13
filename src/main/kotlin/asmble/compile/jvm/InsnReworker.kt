@@ -180,7 +180,7 @@ open class InsnReworker {
             // All calls pop params and any return is a push
             (POP_PARAM * it.params.size) + (if (it.ret == null) NOP else PUSH_RESULT)
         }
-        is Node.Instr.CallIndirect -> ctx.mod.types[insn.index].let {
+        is Node.Instr.CallIndirect -> ctx.typeAtIndex(insn.index).let {
             // We add one for the table index
             POP_PARAM + (POP_PARAM * it.params.size) + (if (it.ret == null) NOP else PUSH_RESULT)
         }

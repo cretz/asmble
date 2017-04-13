@@ -1189,7 +1189,7 @@ open class FuncBuilder {
         // the table index. Stack manip prior to this has ensured "this" is on
         // the stack before the index.
         return ctx.cls.indirectBootstrap.let { indirectBootstrapNode ->
-            val funcType = ctx.cls.mod.types[index]
+            val funcType = ctx.cls.typeAtIndex(index)
             val desc = Type.getMethodDescriptor(
                 (funcType.ret?.jclass ?: Void.TYPE).asmType,
                 // All params

@@ -117,7 +117,7 @@ open class SExprToAst {
             toInstrs(offsetMulti, 1, ExprContext(nameMap)).first
         } else toExprMaybe(offsetMulti, ExprContext(nameMap))
         currIndex++
-        val vars = exp.vals.drop(currIndex + 1).map { toVar(it as SExpr.Symbol, nameMap, "func") }
+        val vars = exp.vals.drop(currIndex).map { toVar(it as SExpr.Symbol, nameMap, "func") }
         return Node.Elem(index ?: 0, instrs, vars)
     }
 
