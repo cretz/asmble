@@ -132,7 +132,9 @@ open class InsnReworker {
                         else Insn.ThisNeededOnStack
                     injectBeforeLastStackCount(inject, ctx.funcTypeAtIndex(insn.index).params.size)
                 }
-                is Node.Instr.CallIndirect -> TODO("Not sure what I need yet")
+                // Indirect calls require "this" before the index
+                is Node.Instr.CallIndirect ->
+                    injectBeforeLastStackCount(Insn.ThisNeededOnStack, 1)
                 // Global set requires "this" before the single param
                 is Node.Instr.SetGlobal -> {
                     val inject =
@@ -179,7 +181,8 @@ open class InsnReworker {
             (POP_PARAM * it.params.size) + (if (it.ret == null) NOP else PUSH_RESULT)
         }
         is Node.Instr.CallIndirect -> ctx.mod.types[insn.index].let {
-            (POP_PARAM * it.params.size) + (if (it.ret == null) NOP else PUSH_RESULT)
+            // We add one for the table index
+            POP_PARAM + (POP_PARAM * it.params.size) + (if (it.ret == null) NOP else PUSH_RESULT)
         }
         is Node.Instr.Drop -> POP_PARAM
         is Node.Instr.Select -> (POP_PARAM * 3) + PUSH_RESULT

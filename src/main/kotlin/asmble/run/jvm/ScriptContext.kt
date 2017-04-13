@@ -40,7 +40,10 @@ data class ScriptContext(
             }
         is Script.Cmd.Register ->
             copy(registrations = registrations + (
-                cmd.string to (modules.lastOrNull() ?: error("No module to register"))
+                cmd.string to (
+                    (if (cmd.name != null) modules.find { it.name == cmd.name } else modules.lastOrNull()) ?:
+                        error("No module to register")
+                )
             ))
         is Script.Cmd.Action ->
             doAction(cmd).let { this }

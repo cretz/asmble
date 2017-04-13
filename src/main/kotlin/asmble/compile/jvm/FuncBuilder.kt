@@ -3,7 +3,9 @@ package asmble.compile.jvm
 import asmble.ast.Node
 import asmble.util.Either
 import asmble.util.add
+import org.objectweb.asm.Handle
 import org.objectweb.asm.Opcodes
+import org.objectweb.asm.Type
 import org.objectweb.asm.tree.*
 import java.lang.invoke.MethodHandle
 
@@ -1181,19 +1183,33 @@ open class FuncBuilder {
 
     fun applyCallIndirectInsn(ctx: FuncContext, fn: Func, index: Int): Func {
         if (!ctx.cls.hasTable) throw CompileErr.UnknownTable()
-        // The index param is a type index, the on-stack value is the table index.
-        // So we'll put the table array on the stack, the swap, then aaload, then invoke exact
-        val funcType = ctx.cls.mod.types[index]
-        return fn.popExpecting(Int::class.ref).
-            addInsns(
-                VarInsnNode(Opcodes.ALOAD, 0),
-                FieldInsnNode(Opcodes.GETFIELD, ctx.cls.thisRef.asmName,
-                    "table", Array<MethodHandle>::class.ref.asmDesc),
-                InsnNode(Opcodes.SWAP),
-                InsnNode(Opcodes.AALOAD),
-                MethodInsnNode(Opcodes.INVOKEVIRTUAL, MethodHandle::class.ref.asmName,
-                    "invokeExact", funcType.asmDesc, false)
+        // For this we do an invokedynamic which calls the bootstrap method. The
+        // bootstrap method is a synthetic method embedded into this module. The
+        // resulting method handle accepts all method params THEN "this" THEN
+        // the table index. Stack manip prior to this has ensured "this" is on
+        // the stack before the index.
+        return ctx.cls.indirectBootstrap.let { indirectBootstrapNode ->
+            val funcType = ctx.cls.mod.types[index]
+            val desc = Type.getMethodDescriptor(
+                (funcType.ret?.jclass ?: Void.TYPE).asmType,
+                // All params
+                *funcType.params.map { it.jclass.asmType }.toTypedArray(),
+                // This
+                ctx.cls.thisRef.asm,
+                // The int index
+                Type.INT_TYPE
             )
+            fn.popExpecting(Int::class.ref).popExpecting(ctx.cls.thisRef).
+                popExpectingMulti(funcType.params.map(Node.Type.Value::typeRef)).
+                addInsns(
+                    InvokeDynamicInsnNode(
+                        "indirectBootstrap",
+                        desc,
+                        Handle(Opcodes.H_INVOKESTATIC, indirectBootstrapNode.owner,
+                            indirectBootstrapNode.name, indirectBootstrapNode.desc, false)
+                    )
+                ).let { fn -> funcType.ret?.let { fn.push(it.typeRef) } ?: fn }
+        }
     }
 
     fun applyReturnInsn(ctx: FuncContext, fn: Func): Func {

@@ -1,9 +1,27 @@
 package asmble.compile.jvm
 
+import org.objectweb.asm.ClassReader
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.tree.*
 
-open class SyntheticAssertionBuilder {
+open class SyntheticFuncBuilder {
+
+    fun buildIndirectBootstrap(ctx: ClsContext, name: String): MethodNode {
+        // With WASM, you have all parameters then the index of the method to call in the table.
+        // So we need to build a dynamic call that can take parameters + the table index.
+        // Just take the helper's instructions and add them here. For now we don't cache because
+        // ASM does some annoying state manip even when just looping over instructions. For now,
+        // none of the insns in the helper reference the "owner" so we don't have to change those.
+        val runtimeHelpers = ClassNode().also {
+            ClassReader(RuntimeHelpers::class.java.name).
+                accept(it, ClassReader.SKIP_DEBUG and ClassReader.SKIP_FRAMES)
+        }
+        val helperMeth = runtimeHelpers.methods.first { (it as MethodNode).name == "bootstrapIndirect" } as MethodNode
+        return MethodNode(
+            Opcodes.ACC_PRIVATE + Opcodes.ACC_STATIC + Opcodes.ACC_SYNTHETIC, name,
+            helperMeth.desc, null, null
+        ).addInsns(*helperMeth.instructions.toArray())
+    }
 
     fun buildIDivAssertion(ctx: ClsContext, name: String) =
         LabelNode().let { safeLabel ->
@@ -186,5 +204,5 @@ open class SyntheticAssertionBuilder {
         InsnNode(Opcodes.ATHROW)
     )
 
-    companion object : SyntheticAssertionBuilder()
+    companion object : SyntheticFuncBuilder()
 }

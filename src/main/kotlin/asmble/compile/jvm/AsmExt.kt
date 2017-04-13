@@ -27,6 +27,8 @@ fun KFunction<*>.invokeVirtual() =
 
 inline fun <T : Function<*>> forceFnType(fn: T) = fn as KFunction<*>
 
+val KClass<*>.const: LdcInsnNode get() = (if (this == Void::class) Void.TYPE else this.java).const
+val KClass<*>.asmType: Type get() = (if (this == Void::class) Void.TYPE else this.java).asmType
 val KClass<*>.ref: TypeRef get() = (if (this == Void::class) Void.TYPE else this.java).ref
 
 fun <T : Exception> KClass<T>.athrow(msg: String) = listOf(
@@ -43,7 +45,11 @@ fun KClass<*>.invokeStatic(name: String, retType: KClass<*>, vararg params: KCla
     MethodInsnNode(Opcodes.INVOKESTATIC, this.javaObjectType.ref.asmName, name,
         retType.ref.asMethodRetDesc(*params.map { it.ref }.toTypedArray()), false)
 
-val Class<*>.ref: TypeRef get() = TypeRef(Type.getType(this))
+val Class<*>.const: LdcInsnNode get() = LdcInsnNode(this)
+
+val Class<*>.asmType: Type get() = Type.getType(this)
+
+val Class<*>.ref: TypeRef get() = TypeRef(this.asmType)
 
 val Class<*>.valueType: Node.Type.Value? get() = when (this) {
     Void.TYPE -> null

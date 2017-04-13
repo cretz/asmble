@@ -313,11 +313,13 @@ open class AstToAsm {
                                                     ctx.funcName(funcIndex).const,
                                                     // Method type const, yay
                                                     LdcInsnNode(Type.getMethodType(funcType.asmDesc)),
-                                                    MethodHandles.Lookup::bind.invokeStatic()
+                                                    MethodHandles.Lookup::bind.invokeVirtual()
                                                 )
                                             }
                                         }
                                     }
+                                ).addInsns(
+                                    InsnNode(Opcodes.AASTORE)
                                 )
                         }
                     }
