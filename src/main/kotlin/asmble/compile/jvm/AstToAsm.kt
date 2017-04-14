@@ -373,6 +373,11 @@ open class AstToAsm {
     }
 
     fun addExports(ctx: ClsContext) {
+        // Make sure there are no dupes
+        ctx.mod.exports.fold(emptySet<String>()) { prev, exp ->
+            if (prev.contains(exp.field)) throw CompileErr.DuplicateExport(exp.field)
+            prev + exp.field
+        }
         // Export all functions as named methods that delegate
         ctx.mod.exports.forEach {
             when (it.kind) {
@@ -459,7 +464,7 @@ open class AstToAsm {
 
     fun addExportMemory(ctx: ClsContext, export: Node.Export) {
         // Create simple getter for the memory
-        require(export.index == 0) { "Only memory at index 0 supported" }
+        if (export.index != 0) throw CompileErr.UnknownMemory(export.index)
         val method = MethodNode(Opcodes.ACC_PUBLIC, "get" + export.field.javaIdent.capitalize(),
             "()" + ctx.mem.memType.asmDesc, null, null)
         method.addInsns(
@@ -472,7 +477,7 @@ open class AstToAsm {
 
     fun addExportTable(ctx: ClsContext, export: Node.Export) {
         // Create simple getter for the table
-        require(export.index == 0) { "Only table at index 0 supported" }
+        if (export.index != 0) throw CompileErr.UnknownTable(export.index)
         val method = MethodNode(Opcodes.ACC_PUBLIC, "get" + export.field.javaIdent.capitalize(),
             "()" + Array<MethodHandle>::class.ref.asmDesc, null, null)
         method.addInsns(

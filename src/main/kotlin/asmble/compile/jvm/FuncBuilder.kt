@@ -1,6 +1,8 @@
 package asmble.compile.jvm
 
 import asmble.ast.Node
+import asmble.io.AstToSExpr
+import asmble.io.SExprToStr
 import asmble.util.Either
 import asmble.util.add
 import org.objectweb.asm.Handle
@@ -16,6 +18,7 @@ open class FuncBuilder {
         // TODO: validate local size?
         // TODO: initialize non-param locals?
         ctx.debug { "Building function ${ctx.funcName(index)}" }
+        ctx.trace { "Function ast:\n${SExprToStr.fromSExpr(AstToSExpr.fromFunc(f))}" }
         var func = Func(
             access = Opcodes.ACC_PRIVATE,
             name = ctx.funcName(index),
@@ -582,7 +585,7 @@ open class FuncBuilder {
             if (block.endTypes.isNotEmpty() && !block.hasElse)
                 throw CompileErr.IfThenValueWithoutElse()
             // If the block was an if/then w/ a stack but the else doesn't match it
-            if (block.hasElse && block.thenStackOnIf != fn.stack)
+            if (block.hasElse && !block.unreachableInIf && !block.unreachableInElse && block.thenStackOnIf != fn.stack)
                 throw CompileErr.BlockEndMismatch(block.thenStackOnIf, fn.stack)
         }
         // Put the stack where it should be
@@ -1182,7 +1185,7 @@ open class FuncBuilder {
         }
 
     fun applyCallIndirectInsn(ctx: FuncContext, fn: Func, index: Int): Func {
-        if (!ctx.cls.hasTable) throw CompileErr.UnknownTable()
+        if (!ctx.cls.hasTable) throw CompileErr.UnknownTable(0)
         // For this we do an invokedynamic which calls the bootstrap method. The
         // bootstrap method is a synthetic method embedded into this module. The
         // resulting method handle accepts all method params THEN "this" THEN
@@ -1213,7 +1216,9 @@ open class FuncBuilder {
     }
 
     fun applyReturnInsn(ctx: FuncContext, fn: Func): Func {
-        val block = fn.blockStack.first()
+        // If the current stakc is unreachable, we consider that our block since it
+        // will pop properly.
+        val block = if (fn.currentBlock.unreachable) fn.currentBlock else fn.blockStack.first()
         popForBlockEscape(ctx, fn, block).let { fn ->
             return when (ctx.node.type.ret) {
                 null ->

@@ -65,6 +65,9 @@ data class Func(
         if (isStackEmptyForBlock(currBlock)) {
             // Just fake it if dead
             if (currBlock.unreachable) return this to TypeRef.Unknown
+            if (currBlock.insn is Node.Instr.If && !currBlock.hasElse && currBlock.unreachableInIf)
+                return this to TypeRef.Unknown
+            if (currBlock.hasElse && currBlock.unreachableInElse) return this to TypeRef.Unknown
             throw CompileErr.StackMismatch(emptyArray(), null)
         }
         return copy(stack = stack.dropLast(1)) to stack.last()

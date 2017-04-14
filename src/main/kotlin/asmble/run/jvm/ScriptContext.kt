@@ -180,7 +180,11 @@ data class ScriptContext(
     }
 
     fun doGet(cmd: Script.Cmd.Action.Get): Pair<Node.Type.Value, Any> {
-        TODO()
+        // Grab last module or named one
+        val module = if (cmd.name == null) modules.last() else modules.first { it.name == cmd.name }
+        // Just call the getter
+        val getter = module.cls.getDeclaredMethod("get" + cmd.string.javaIdent.capitalize())
+        return getter.returnType.valueType!! to getter.invoke(module.instance)
     }
 
     fun doInvoke(cmd: Script.Cmd.Action.Invoke): Pair<Node.Type.Value?, Any?> {

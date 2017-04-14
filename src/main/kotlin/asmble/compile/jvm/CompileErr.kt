@@ -82,11 +82,11 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
         override val asmErrString get() = "unknown global"
     }
 
-    class UnknownMemory : CompileErr("No memory present") {
+    class UnknownMemory(val index: Int) : CompileErr("No memory present at index $index") {
         override val asmErrString get() = "unknown memory"
     }
 
-    class UnknownTable : CompileErr("No table present") {
+    class UnknownTable(val index: Int) : CompileErr("No table present at index $index") {
         override val asmErrString get() = "unknown table"
     }
 
@@ -126,5 +126,9 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
         val index: Int
     ) : CompileErr("Start function at $index must take no params and return nothing") {
         override val asmErrString get() = "start function"
+    }
+
+    class DuplicateExport(val name: String) : CompileErr("Duplicate export '$name'") {
+        override val asmErrString get() = "duplicate export name"
     }
 }

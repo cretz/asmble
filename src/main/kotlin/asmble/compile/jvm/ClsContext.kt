@@ -36,7 +36,7 @@ data class ClsContext(
         mod.tables.isNotEmpty() || mod.imports.any { it.kind is Node.Import.Kind.Table }
     }
 
-    fun assertHasMemory() { if (!hasMemory) throw CompileErr.UnknownMemory() }
+    fun assertHasMemory() { if (!hasMemory) throw CompileErr.UnknownMemory(0) }
 
     fun typeAtIndex(index: Int) = mod.types.getOrNull(index) ?: throw CompileErr.UnknownType(index)
 

@@ -41,16 +41,14 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
 
         /*
         TODO: We are going down in order. One's we have not yet handled:
-        - br.wast - Not handling tables yet
-        - br_table.wast - Not handling tables yet
-        - call_indirect.wast - Not handling tables yet
-        - exports.wast - Not handling tables yet
+        - br_table.wast - Table issues on jumps
         - func.wast - Not handling tables yet
         - func_ptrs.wast - Not handling tables yet
         - imports.wast - No memory exports yet
         - left-to-right.wast - Not handling tables yet
         - linking.wast - Not handling tables yet
         - return.wast - Not handling tables yet
+        - switch.wast - Table issues on jumps (ref "argument switch")
         - typecheck.wast - Not handling tables yet
         - unreachable.wast - Not handling tables yet
         */
@@ -62,6 +60,7 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             "block.wast",
             "block-end-label-mismatch.fail.wast",
             "block-end-label-superfluous.wast",
+            "br.wast",
             "br_if.wast",
             "break-drop.wast",
             "call.wast",
@@ -70,6 +69,7 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             "conversions.wast",
             "custom_section.wast",
             "endianness.wast",
+            "exports.wast",
             "f32.load32.fail.wast",
             "f32.load64.fail.wast",
             "f32.store32.fail.wast",
@@ -146,7 +146,6 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             "store-align-0.fail.wast",
             "store-align-odd.fail.wast",
             "store_retval.wast",
-            // "switch.wast" TODO: we are in trouble here on the "argument switch"
             "tee_local.wast",
             "traps.wast",
             "unreached-invalid.wast",
@@ -159,11 +158,12 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             "float_exprs" to this::isNanMismatch
         )
 
-        fun isNanMismatch(t: Throwable) =
-            (((t as? ScriptAssertionError)?.
-                assertion as? Script.Cmd.Assertion.Return)?.
-                action as? Script.Cmd.Action.Invoke)?.
-                string?.contains("nan") ?: false
+        fun isNanMismatch(t: Throwable) = t is ScriptAssertionError && (
+            t.assertion is Script.Cmd.Assertion.ReturnNan ||
+            (t.assertion is Script.Cmd.Assertion.Return && (t.assertion as Script.Cmd.Assertion.Return).let {
+                (it.action as? Script.Cmd.Action.Invoke)?.string?.contains("nan") ?: false
+            })
+        )
 
         val unitsPath = "/spec/test/core"
 
