@@ -42,9 +42,6 @@ open class AstToBinary(val version: Long = 1L) {
                 if (local != localsWithCounts.lastOrNull()?.first) localsWithCounts + (local to 1)
                 else localsWithCounts.dropLast(1) + (local to localsWithCounts.last().second + 1)
             }
-            require(localsWithCounts.distinctBy { it.first }.size == localsWithCounts.size) {
-                "Not all types together for set of locals (with counts): $localsWithCounts"
-            }
             b.writeVarUInt32(localsWithCounts.size)
             localsWithCounts.forEach { (localType, count) ->
                 b.writeVarUInt32(count)

@@ -46,4 +46,8 @@ sealed class IoErr(message: String, cause: Throwable? = null) : RuntimeException
     class InvalidAlign(val align: Int, val allowed: Int) : IoErr("Alignment $align larger than $allowed") {
         override val asmErrString get() = "alignment must not be larger than natural"
     }
+
+    class InvalidResultArity : IoErr("Only single results supported") {
+        override val asmErrString get() = "invalid result arity"
+    }
 }

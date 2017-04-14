@@ -149,10 +149,16 @@ open class AstToSExpr {
     fun fromModule(v: Node.Module, name: String? = null): SExpr.Multi {
         var ret = newMulti("module", name)
 
-        // We only want types that are not referenced in import
-        val ignoreTypeIndices = v.imports.mapNotNull { (it.kind as? Node.Import.Kind.Func)?.typeIndex }.toSet()
+        // If there is a call_indirect, then we need to output all types in exact order.
+        // Otherwise we can skip ones that are referenced elsewhere.
+        // Ref: https://github.com/WebAssembly/design/issues/1041
+        val hasCallIndirect = v.funcs.any { it.instructions.any { it is Node.Instr.CallIndirect } }
+        val types = if (hasCallIndirect) v.types else {
+            val importIndices = v.imports.mapNotNull { (it.kind as? Node.Import.Kind.Func)?.typeIndex }.toSet()
+            v.types.filterIndexed { i, _ -> importIndices.contains(i) } - v.funcs.map { it.type }
+        }
 
-        ret += v.types.filterIndexed { i, _ -> ignoreTypeIndices.contains(i) }.map { fromTypeDef(it) }
+        ret += types.map { fromTypeDef(it) }
         ret += v.imports.map { fromImport(it, v.types) }
         ret += v.exports.map(this::fromExport)
         ret += v.tables.map { fromTable(it) }

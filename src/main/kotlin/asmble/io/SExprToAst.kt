@@ -234,7 +234,6 @@ open class SExprToAst {
         origNameMap: NameMap,
         types: List<Node.Type.Func>
     ): Triple<NameMap, Int, Node.Type.Func> {
-        // TODO: support type version
         if ((exp.vals.getOrNull(offset) as? SExpr.Multi)?.vals?.firstOrNull()?.symbolStr() == "type") {
             val typeRef = toVar((exp.vals[offset] as SExpr.Multi).vals[1].symbol()!!, origNameMap, "type")
             return Triple(origNameMap, 1, types[typeRef])
@@ -245,7 +244,7 @@ open class SExprToAst {
             vals
         }
         val results = exp.repeated("result", offset + params.size, this::toResult)
-        require(results.size <= 1)
+        if (results.size > 1) throw IoErr.InvalidResultArity()
         return Triple(nameMap, params.size + results.size, Node.Type.Func(params.flatten(), results.firstOrNull()))
     }
 
@@ -468,8 +467,15 @@ open class SExprToAst {
             isImport
         }
 
-        // Eagerly build the names (for forward decls)
-        val nameMap = toModuleNameMap(importExps, nonImportExps)
+        // Eagerly build the names (for forward decls), but we do NOT build the type names
+        // because they get de-duped.
+        var nameMap = toModuleForwardNameMap(importExps, nonImportExps)
+
+        fun Node.Module.withFuncType(type: Node.Type.Func, typeName: String? = null): Pair<Node.Module, Int> {
+            val index = this.types.indexOf(type)
+            if (index != -1) return this to index
+            return this.copy(types = this.types + type) to this.types.size
+        }
 
         // Imports first. We keep track of the counts for exports later
         var funcCount = 0
@@ -497,7 +503,11 @@ open class SExprToAst {
             }
             import.also { (module, field, kind) ->
                 val importKind = when(kind) {
-                    is Node.Type.Func -> { mod = mod.copy(types = mod.types + kind); Node.Import.Kind.Func(funcCount++) }
+                    is Node.Type.Func -> mod.withFuncType(kind).let { (m, idx) ->
+                        funcCount++
+                        mod = m
+                        Node.Import.Kind.Func(idx)
+                    }
                     is Node.Type.Global -> { globalCount++; Node.Import.Kind.Global(kind) }
                     is Node.Type.Table -> { tableCount++; Node.Import.Kind.Table(kind) }
                     is Node.Type.Memory -> { memoryCount++; Node.Import.Kind.Memory(kind) }
@@ -513,10 +523,15 @@ open class SExprToAst {
         }
         nonImportExps.forEach {
             when(it.vals.firstOrNull()?.symbolStr()) {
-                "type" -> mod = mod.copy(types = mod.types + toTypeDef(it, nameMap).second)
+                "type" -> mod = toTypeDef(it, nameMap).let { (name, type) ->
+                    mod.withFuncType(type, name).let { (mod, idx) ->
+                        if (name != null) nameMap += "type:$name" to idx
+                        mod
+                    }
+                }
                 "func" -> toFunc(it, nameMap, mod.types).also { (_, fn, impExp) ->
                     addMaybeExport(impExp, Node.ExternalKind.FUNCTION, funcCount++)
-                    mod = mod.copy(funcs = mod.funcs + fn)
+                    mod = mod.copy(funcs = mod.funcs + fn).withFuncType(fn.type).first
                 }
                 "export" -> mod = mod.copy(exports = mod.exports + toExport(it, nameMap))
                 "global" -> toGlobal(it, nameMap).also { (_, glb, impExp) ->
@@ -565,8 +580,8 @@ open class SExprToAst {
 
     fun toModuleFromBytes(bytes: ByteArray) = BinaryToAst.toModule(ByteReader.InputStream(ByteArrayInputStream(bytes)))
 
-    fun toModuleNameMap(importExps: List<SExpr.Multi>, nonImportExps: List<SExpr.Multi>): NameMap {
-        var typeCount = 0
+    // Does not do type names, that's handled after actual parse for de-dupe reasons
+    fun toModuleForwardNameMap(importExps: List<SExpr.Multi>, nonImportExps: List<SExpr.Multi>): NameMap {
         var funcCount = 0
         var globalCount = 0
         var tableCount = 0
@@ -575,7 +590,8 @@ open class SExprToAst {
         var namesToIndices = emptyMap<String, Int>()
 
         fun maybeAddName(name: String?, index: Int, type: String) {
-            name?.let { namesToIndices += "$type:$it" to index } }
+            name?.let { namesToIndices += "$type:$it" to index }
+        }
 
         // First, go over everything in the module and get names as indices
         // All imports first
@@ -593,11 +609,10 @@ open class SExprToAst {
                 else -> throw Exception("Unknown import exp: $it")
             }
         }
-        // Now the rest
+        // Now the rest sans type
         nonImportExps.forEach {
             val kindName = it.maybeName(1)
             when (it.vals.firstOrNull()?.symbolStr()) {
-                "type" -> maybeAddName(kindName, typeCount++, "type")
                 "func" -> maybeAddName(kindName, funcCount++, "func")
                 "global" -> maybeAddName(kindName, globalCount++, "global")
                 "table" -> maybeAddName(kindName, tableCount++, "table")
@@ -702,6 +717,7 @@ open class SExprToAst {
 
     fun toResult(exp: SExpr.Multi): Node.Type.Value {
         exp.requireFirstSymbol("result")
+        if (exp.vals.size > 2) throw IoErr.InvalidResultArity()
         return toType(exp.vals[1].symbol()!!)
     }
 
