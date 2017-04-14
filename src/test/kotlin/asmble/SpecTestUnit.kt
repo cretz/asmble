@@ -42,7 +42,6 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
         /*
         TODO: We are going down in order. One's we have not yet handled:
         - br_table.wast - Table issues on jumps
-        - func_ptrs.wast - Not handling tables yet
         - imports.wast - No memory exports yet
         - left-to-right.wast - Not handling tables yet
         - linking.wast - Not handling tables yet
@@ -88,6 +87,7 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             "float_misc.wast",
             "forward.wast",
             "func.wast",
+            "func_ptrs.wast",
             "func-local-after-body.fail.wast",
             "func-local-before-param.fail.wast",
             "func-local-before-result.fail.wast",

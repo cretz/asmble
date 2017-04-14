@@ -270,7 +270,10 @@ open class AstToAsm {
 
     fun initializeConstructorTables(ctx: ClsContext, func: Func, paramsBeforeImports: Int) =
         ctx.mod.tables.singleOrNull().let { table ->
-            if (table == null) func else {
+            if (table == null) {
+                if (ctx.mod.elems.isNotEmpty()) throw CompileErr.UnknownTable(0)
+                func
+            } else {
                 // Create the array of the "initial" size and ignore max for now...
                 func.addInsns(
                     VarInsnNode(Opcodes.ALOAD, 0),
@@ -280,6 +283,12 @@ open class AstToAsm {
                     // Go over each elem and add all of the indices to the table
                     ctx.mod.elems.fold(func) { func, elem ->
                         require(elem.index == 0)
+                        // Due to requirements by the spec, if there are no function indices
+                        // we still have to ensure the offset is an int
+                        if (elem.funcIndices.isEmpty()) {
+                            // Just do the apply, but discard the result
+                            applyOffsetExpr(ctx, elem.offset, func).popExpecting(Int::class.ref)
+                        }
                         // Lots of possible perf improvements including:
                         // * Resolve the initial offset before running each func index
                         // * Don't add to offset if it's just + 0

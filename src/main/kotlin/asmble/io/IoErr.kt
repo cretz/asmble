@@ -50,4 +50,8 @@ sealed class IoErr(message: String, cause: Throwable? = null) : RuntimeException
     class InvalidResultArity : IoErr("Only single results supported") {
         override val asmErrString get() = "invalid result arity"
     }
+
+    class UnknownType(val index: Int) : IoErr("No type present for index $index") {
+        override val asmErrString get() = "unknown type"
+    }
 }

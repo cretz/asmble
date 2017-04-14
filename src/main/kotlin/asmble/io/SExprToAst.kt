@@ -234,10 +234,12 @@ open class SExprToAst {
         origNameMap: NameMap,
         types: List<Node.Type.Func>
     ): Triple<NameMap, Int, Node.Type.Func> {
-        if ((exp.vals.getOrNull(offset) as? SExpr.Multi)?.vals?.firstOrNull()?.symbolStr() == "type") {
-            val typeRef = toVar((exp.vals[offset] as SExpr.Multi).vals[1].symbol()!!, origNameMap, "type")
-            return Triple(origNameMap, 1, types[typeRef])
-        }
+        val (typeRef, offset) =
+            if ((exp.vals.getOrNull(offset) as? SExpr.Multi)?.vals?.firstOrNull()?.symbolStr() == "type") {
+                val typeIdx = toVar((exp.vals[offset] as SExpr.Multi).vals[1].symbol()!!, origNameMap, "type")
+                if (typeIdx >= types.size) throw IoErr.UnknownType(typeIdx)
+                types[typeIdx] to offset + 1
+            } else null to offset
         var nameMap = origNameMap
         val params = exp.repeated("param", offset, { toParams(it) }).mapIndexed { index, (nameMaybe, vals) ->
             nameMaybe?.also { require(vals.size == 1); nameMap += "local:$it" to index }
@@ -245,7 +247,17 @@ open class SExprToAst {
         }
         val results = exp.repeated("result", offset + params.size, this::toResult)
         if (results.size > 1) throw IoErr.InvalidResultArity()
-        return Triple(nameMap, params.size + results.size, Node.Type.Func(params.flatten(), results.firstOrNull()))
+        val usedExps = params.size + results.size + if (typeRef == null) 0 else 1
+        // Check against type ref
+        if (typeRef != null) {
+            // No params or results means just use it
+            if (params.isEmpty() && results.isEmpty()) return Triple(nameMap, usedExps, typeRef)
+            // Otherwise, just make sure it matches
+            require(typeRef.params == params.flatten() && typeRef.ret == results.firstOrNull()) {
+                "Params for type ref do not match explicit ones"
+            }
+        }
+        return Triple(nameMap, usedExps, Node.Type.Func(params.flatten(), results.firstOrNull()))
     }
 
     fun toGlobal(exp: SExpr.Multi, nameMap: NameMap): Triple<String?, Node.Global, ImportOrExport?> {
@@ -450,123 +462,110 @@ open class SExprToAst {
         }
 
         var mod = Node.Module()
-        // Go over each module element and apply to the module
-        // But we have to do all imports first before anything else, so we separate them
-        var foundNonImport = false
-        val (importExps, nonImportExps) = exp.vals.mapNotNull { it as? SExpr.Multi }.partition {
-            val isImport = when(it.vals.firstOrNull()?.symbolStr()) {
-                "import" -> true
-                "func", "global", "table", "memory" -> {
-                    val possibleImportIndex = if (it.maybeName(1) == null) 1 else 2
-                    (it.vals.getOrNull(possibleImportIndex) as? SExpr.Multi)?.vals?.firstOrNull()?.symbolStr() == "import"
-                }
-                else -> false
-            }
-            if (!isImport && !foundNonImport) foundNonImport = true
-            if (isImport && foundNonImport) error("Import after non-import")
-            isImport
-        }
+        val exps = exp.vals.mapNotNull { it as? SExpr.Multi }
 
-        // Eagerly build the names (for forward decls), but we do NOT build the type names
-        // because they get de-duped.
-        var nameMap = toModuleForwardNameMap(importExps, nonImportExps)
+        // Eagerly build the names (for forward decls)
+        var nameMap = toModuleForwardNameMap(exps)
 
-        fun Node.Module.withFuncType(type: Node.Type.Func, typeName: String? = null): Pair<Node.Module, Int> {
+        fun Node.Module.addTypeIfNotPresent(type: Node.Type.Func): Pair<Node.Module, Int> {
             val index = this.types.indexOf(type)
             if (index != -1) return this to index
             return this.copy(types = this.types + type) to this.types.size
         }
 
-        // Imports first. We keep track of the counts for exports later
+        // Keep counts for exports. We enforce/trust that there are no imports after non-imports
         var funcCount = 0
         var globalCount = 0
         var tableCount = 0
         var memoryCount = 0
-        importExps.forEach {
-            val import = when(it.vals.firstOrNull()?.symbolStr()) {
-                "import" -> toImport(it)
-                "func" -> toFunc(it, nameMap, emptyList()).let { (_, fn, impExp) ->
-                    Triple(impExp!!.importModule!!, impExp.field, fn.type)
+        fun handleImport(module: String, field: String, kind: Node.Type) {
+            // We make sure that an import doesn't happen after a non-import
+            require(mod.funcs.isEmpty() && mod.globals.isEmpty() &&
+                mod.tables.isEmpty() && mod.memories.isEmpty()) { "Import happened after non-import" }
+            val importKind = when(kind) {
+                is Node.Type.Func -> mod.addTypeIfNotPresent(kind).let { (m, idx) ->
+                    funcCount++
+                    mod = m
+                    Node.Import.Kind.Func(idx)
                 }
-                "global" -> toGlobal(it, nameMap).let { (_, glb, impExp) ->
-                    Triple(impExp!!.importModule!!, impExp.field, glb.type)
-                }
-                "table" -> toTable(it, nameMap).let { (_, tbl, impExp) ->
-                    if (tbl !is Either.Left) error("Elem segment on import table")
-                    Triple(impExp!!.importModule!!, impExp.field, tbl.v)
-                }
-                "memory" -> toMemory(it).let { (_, mem, impExp) ->
-                    if (mem !is Either.Left) error("Data segment on import mem")
-                    Triple(impExp!!.importModule!!, impExp.field, mem.v)
-                }
-                else -> throw Exception("Unknown import exp: $it")
+                is Node.Type.Global -> { globalCount++; Node.Import.Kind.Global(kind) }
+                is Node.Type.Table -> { tableCount++; Node.Import.Kind.Table(kind) }
+                is Node.Type.Memory -> { memoryCount++; Node.Import.Kind.Memory(kind) }
+                else -> throw Exception("Unrecognized import kind: $kind")
             }
-            import.also { (module, field, kind) ->
-                val importKind = when(kind) {
-                    is Node.Type.Func -> mod.withFuncType(kind).let { (m, idx) ->
-                        funcCount++
-                        mod = m
-                        Node.Import.Kind.Func(idx)
-                    }
-                    is Node.Type.Global -> { globalCount++; Node.Import.Kind.Global(kind) }
-                    is Node.Type.Table -> { tableCount++; Node.Import.Kind.Table(kind) }
-                    is Node.Type.Memory -> { memoryCount++; Node.Import.Kind.Memory(kind) }
-                    else -> throw Exception("Unrecognized import kind: $kind")
-                }
-                mod = mod.copy(imports = mod.imports + Node.Import(module, field, importKind))
-            }
+            mod = mod.copy(imports = mod.imports + Node.Import(module, field, importKind))
         }
 
-        // Now everything else
         fun addMaybeExport(impExp: ImportOrExport?, extKind: Node.ExternalKind, index: Int) {
             impExp?.also { mod = mod.copy(exports = mod.exports + Node.Export(it.field, extKind, index)) }
         }
-        nonImportExps.forEach {
-            when(it.vals.firstOrNull()?.symbolStr()) {
-                "type" -> mod = toTypeDef(it, nameMap).let { (name, type) ->
-                    mod.withFuncType(type, name).let { (mod, idx) ->
-                        if (name != null) nameMap += "type:$name" to idx
-                        mod
+
+        // Now just handle all expressions in order
+        exps.forEach { exp ->
+            when(exp.vals.firstOrNull()?.symbolStr()) {
+                "import" -> toImport(exp).let { (module, field, type) -> handleImport(module, field, type) }
+                "type" -> toTypeDef(exp, nameMap).let { (name, type) ->
+                    // We always add the type, even if it's a duplicate.
+                    // Ref: https://github.com/WebAssembly/design/issues/1041
+                    if (name != null) nameMap += "type:$name" to mod.types.size
+                    mod = mod.copy(types = mod.types + type)
+                }
+                "export" -> mod = mod.copy(exports = mod.exports + toExport(exp, nameMap))
+                "elem" -> mod = mod.copy(elems = mod.elems + toElem(exp, nameMap))
+                "data" -> mod = mod.copy(data = mod.data + toData(exp, nameMap))
+                "start" -> mod = mod.copy(startFuncIndex = toStart(exp, nameMap))
+                "func" -> toFunc(exp, nameMap, mod.types).also { (_, fn, impExp) ->
+                    if (impExp != null && impExp.importModule != null) {
+                        handleImport(impExp.importModule, impExp.field, fn.type)
+                    } else {
+                        addMaybeExport(impExp, Node.ExternalKind.FUNCTION, funcCount++)
+                        mod = mod.copy(funcs = mod.funcs + fn).addTypeIfNotPresent(fn.type).first
                     }
                 }
-                "func" -> toFunc(it, nameMap, mod.types).also { (_, fn, impExp) ->
-                    addMaybeExport(impExp, Node.ExternalKind.FUNCTION, funcCount++)
-                    mod = mod.copy(funcs = mod.funcs + fn).withFuncType(fn.type).first
-                }
-                "export" -> mod = mod.copy(exports = mod.exports + toExport(it, nameMap))
-                "global" -> toGlobal(it, nameMap).also { (_, glb, impExp) ->
-                    addMaybeExport(impExp, Node.ExternalKind.GLOBAL, globalCount++)
-                    mod = mod.copy(globals = mod.globals + glb)
-                }
-                "table" -> toTable(it, nameMap).also { (_, tbl, impExp) ->
-                    addMaybeExport(impExp, Node.ExternalKind.TABLE, tableCount++)
-                    when (tbl) {
-                        is Either.Left -> mod = mod.copy(tables = mod.tables + tbl.v)
-                        is Either.Right -> mod = mod.copy(
-                            tables = mod.tables + Node.Type.Table(
-                                Node.ElemType.ANYFUNC,
-                                Node.ResizableLimits(tbl.v.funcIndices.size, tbl.v.funcIndices.size)
-                            ),
-                            elems = mod.elems + tbl.v
-                        )
+                "global" -> toGlobal(exp, nameMap).let { (_, glb, impExp) ->
+                    if (impExp != null && impExp.importModule != null) {
+                        handleImport(impExp.importModule, impExp.field, glb.type)
+                    } else {
+                        addMaybeExport(impExp, Node.ExternalKind.GLOBAL, globalCount++)
+                        mod = mod.copy(globals = mod.globals + glb)
                     }
                 }
-                "memory" -> toMemory(it).also { (_, mem, impExp) ->
-                    addMaybeExport(impExp, Node.ExternalKind.MEMORY, memoryCount++)
-                    when (mem) {
-                        is Either.Left -> mod = mod.copy(memories = mod.memories + mem.v)
-                        is Either.Right -> mod = mod.copy(
-                            memories = mod.memories + Node.Type.Memory(
-                                Node.ResizableLimits(mem.v.data.size, mem.v.data.size)
-                            ),
-                            data = mod.data + mem.v
-                        )
+                "table" -> toTable(exp, nameMap).let { (_, tbl, impExp) ->
+                    if (impExp != null && impExp.importModule != null) {
+                        if (tbl !is Either.Left) error("Elem segment on import table")
+                        handleImport(impExp.importModule, impExp.field, tbl.v)
+                    } else {
+                        addMaybeExport(impExp, Node.ExternalKind.TABLE, tableCount++)
+                        when (tbl) {
+                            is Either.Left -> mod = mod.copy(tables = mod.tables + tbl.v)
+                            is Either.Right -> mod = mod.copy(
+                                tables = mod.tables + Node.Type.Table(
+                                    Node.ElemType.ANYFUNC,
+                                    Node.ResizableLimits(tbl.v.funcIndices.size, tbl.v.funcIndices.size)
+                                ),
+                                elems = mod.elems + tbl.v
+                            )
+                        }
                     }
                 }
-                "elem" -> mod = mod.copy(elems = mod.elems + toElem(it, nameMap))
-                "data" -> mod = mod.copy(data = mod.data + toData(it, nameMap))
-                "start" -> mod = mod.copy(startFuncIndex = toStart(it, nameMap))
-                else -> throw Exception("Unknown non-import exp $exp")
+                "memory" -> toMemory(exp).let { (_, mem, impExp) ->
+                    if (impExp != null && impExp.importModule != null) {
+                        if (mem !is Either.Left) error("Data segment on import mem")
+                        handleImport(impExp.importModule, impExp.field, mem.v)
+                    } else {
+                        addMaybeExport(impExp, Node.ExternalKind.MEMORY, memoryCount++)
+                        when (mem) {
+                            is Either.Left -> mod = mod.copy(memories = mod.memories + mem.v)
+                            is Either.Right -> mod = mod.copy(
+                                memories = mod.memories + Node.Type.Memory(
+                                    Node.ResizableLimits(mem.v.data.size, mem.v.data.size)
+                                ),
+                                data = mod.data + mem.v
+                            )
+                        }
+                    }
+                }
+                else -> error("Unknown module exp: $exp")
             }
         }
 
@@ -580,20 +579,29 @@ open class SExprToAst {
 
     fun toModuleFromBytes(bytes: ByteArray) = BinaryToAst.toModule(ByteReader.InputStream(ByteArrayInputStream(bytes)))
 
-    // Does not do type names, that's handled after actual parse for de-dupe reasons
-    fun toModuleForwardNameMap(importExps: List<SExpr.Multi>, nonImportExps: List<SExpr.Multi>): NameMap {
+    fun toModuleForwardNameMap(exps: List<SExpr.Multi>): NameMap {
+        // We break into import and non-import because the index
+        // tables do imports first
+        val (importExps, nonImportExps) = exps.partition {
+            when(it.vals.firstOrNull()?.symbolStr()) {
+                "import" -> true
+                "func", "global", "table", "memory" -> {
+                    (it.vals.getOrNull(if (it.maybeName(1) == null) 1 else 2) as? SExpr.Multi)?.
+                        vals?.firstOrNull()?.symbolStr() == "import"
+                }
+                else -> false
+            }
+        }
+
         var funcCount = 0
         var globalCount = 0
         var tableCount = 0
         var memoryCount = 0
-
         var namesToIndices = emptyMap<String, Int>()
-
         fun maybeAddName(name: String?, index: Int, type: String) {
             name?.let { namesToIndices += "$type:$it" to index }
         }
 
-        // First, go over everything in the module and get names as indices
         // All imports first
         importExps.forEach {
             val kindExp = when (it.vals.firstOrNull()?.symbolStr()) {
