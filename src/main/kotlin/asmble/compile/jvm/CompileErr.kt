@@ -131,18 +131,4 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
     class DuplicateExport(val name: String) : CompileErr("Duplicate export '$name'") {
         override val asmErrString get() = "duplicate export name"
     }
-
-    class ImportMemoryLimitTooSmall(
-        val expected: Int,
-        val actual: Int
-    ) : CompileErr("Import memory limit $actual but expecting at least $expected") {
-        override val asmErrString get() = "actual size smaller than declared"
-    }
-
-    class ImportMemoryCapacityTooLarge(
-        val expected: Int,
-        val actual: Int
-    ) : CompileErr("Import table capacity $actual but expecting no more than $expected") {
-        override val asmErrString get() = "maximum size larger than declared"
-    }
 }

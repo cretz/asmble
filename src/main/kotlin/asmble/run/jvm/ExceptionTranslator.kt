@@ -12,8 +12,6 @@ open class ExceptionTranslator {
         }
         is ArrayIndexOutOfBoundsException -> listOf("undefined element", "elements segment does not fit")
         is AsmErr -> ex.asmErrStrings
-        is BufferOverflowException -> listOf("data segment does not fit")
-        is IllegalArgumentException -> listOf("data segment does not fit")
         is IndexOutOfBoundsException -> listOf("out of bounds memory access")
         is NoSuchMethodException -> listOf("unknown import", "type mismatch")
         is NullPointerException -> listOf("undefined element", "uninitialized element")

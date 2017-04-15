@@ -13,15 +13,9 @@ import kotlin.reflect.KFunction
 open class ByteBufferMem(val direct: Boolean = true) : Mem {
     override val memType = ByteBuffer::class.ref
 
-    override fun assertValidImport(instance: Any, expected: Node.Type.Memory) {
+    override fun limitAndCapacity(instance: Any) =
         if (instance !is ByteBuffer) error("Unrecognized memory instance: $instance")
-        if (instance.limit() < expected.limits.initial * Mem.PAGE_SIZE)
-            throw CompileErr.ImportMemoryLimitTooSmall(expected.limits.initial * Mem.PAGE_SIZE, instance.limit())
-        expected.limits.maximum?.let {
-            if (instance.capacity() > it * Mem.PAGE_SIZE)
-                throw CompileErr.ImportMemoryCapacityTooLarge(it * Mem.PAGE_SIZE, instance.capacity())
-        }
-    }
+        else instance.limit() to instance.capacity()
 
     override fun create(func: Func) = func.popExpecting(Int::class.ref).addInsns(
         (if (direct) ByteBuffer::allocateDirect else ByteBuffer::allocate).invokeStatic()

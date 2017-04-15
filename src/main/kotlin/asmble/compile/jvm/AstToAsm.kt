@@ -276,6 +276,7 @@ open class AstToAsm {
             if (ctx.mod.elems.isNotEmpty()) throw CompileErr.UnknownTable(0)
             return func
         }
+
         // If it was in the module, we need to create the array and set it in the field
         if (ctx.mod.tables.isNotEmpty()) {
             // Create the array of the "initial" size and ignore max for now...

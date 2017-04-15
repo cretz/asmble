@@ -282,7 +282,7 @@ data class ScriptContext(
 
     fun resolveImportMemory(import: Node.Import, memoryType: Node.Type.Memory, mem: Mem) =
         bindImport(import, true, MethodType.methodType(Class.forName(mem.memType.asm.className))).
-            invokeWithArguments()!!.also { mem.assertValidImport(it, memoryType) }
+            invokeWithArguments()!!
 
     fun resolveImportTable(import: Node.Import, tableType: Node.Type.Table) =
         bindImport(import, true, MethodType.methodType(Array<MethodHandle>::class.java)).
@@ -305,12 +305,22 @@ data class ScriptContext(
             // Find the constructor
             var constructorParams = emptyList<Any>()
             var constructor: Constructor<*>?
+
             // If there is a memory import, we have to get the one with the mem class as the first
             val memImport = mod.imports.find { it.kind is Node.Import.Kind.Memory }
-            if (memImport != null) {
+            val memLimit = if (memImport != null) {
                 constructor = cls.declaredConstructors.find { it.parameterTypes.firstOrNull()?.ref == mem.memType }
-                constructorParams += resolveImportMemory(memImport,
-                    (memImport.kind as Node.Import.Kind.Memory).type, mem)
+                val memImportKind = memImport.kind as Node.Import.Kind.Memory
+                val memInst = resolveImportMemory(memImport, memImportKind.type, mem)
+                constructorParams += memInst
+                val (memLimit, memCap) = mem.limitAndCapacity(memInst)
+                if (memLimit < memImportKind.type.limits.initial * Mem.PAGE_SIZE)
+                    throw RunErr.ImportMemoryLimitTooSmall(memImportKind.type.limits.initial * Mem.PAGE_SIZE, memLimit)
+                memImportKind.type.limits.maximum?.let {
+                    if (memCap > it * Mem.PAGE_SIZE)
+                        throw RunErr.ImportMemoryCapacityTooLarge(it * Mem.PAGE_SIZE, memCap)
+                }
+                memLimit
             } else {
                 // Find the constructor with no max mem amount (i.e. not int and not memory)
                 constructor = cls.declaredConstructors.find {
@@ -321,11 +331,13 @@ data class ScriptContext(
                     }
                 }
                 // If it is not there, find the one w/ the max mem amount
+                val maybeMem = mod.memories.firstOrNull()
                 if (constructor == null) {
-                    val maxMem = Math.max(mod.memories.firstOrNull()?.limits?.initial ?: 0, defaultMaxMemPages)
+                    val maxMem = Math.max(maybeMem?.limits?.initial ?: 0, defaultMaxMemPages)
                     constructor = cls.declaredConstructors.find { it.parameterTypes.firstOrNull() == Int::class.java }
                     constructorParams += maxMem * Mem.PAGE_SIZE
                 }
+                maybeMem?.limits?.initial?.let { it * Mem.PAGE_SIZE }
             }
             if (constructor == null) error("Unable to find suitable module constructor")
 
@@ -336,20 +348,50 @@ data class ScriptContext(
             }
 
             // Global imports
-            constructorParams += mod.imports.mapNotNull {
+            val globalImports = mod.imports.mapNotNull {
                 if (it.kind is Node.Import.Kind.Global) resolveImportGlobal(it, it.kind.type)
                 else null
             }
+            constructorParams += globalImports
 
             // Table imports
-            constructorParams += mod.imports.mapNotNull { imp ->
-                if (imp.kind is Node.Import.Kind.Table) resolveImportTable(imp, imp.kind.type).also { table ->
-                    if (table.size < imp.kind.type.limits.initial)
-                        throw RunErr.ImportTableTooSmall(imp.kind.type.limits.initial, table.size)
-                    imp.kind.type.limits.maximum?.let {
-                        if (table.size > it) throw RunErr.ImportTableTooLarge(it, table.size)
-                    }
-                } else null
+            val tableImport = mod.imports.find { it.kind is Node.Import.Kind.Table }
+            val tableSize = if (tableImport != null) {
+                val tableImportKind = tableImport.kind as Node.Import.Kind.Table
+                val table = resolveImportTable(tableImport, tableImportKind.type)
+                if (table.size < tableImportKind.type.limits.initial)
+                    throw RunErr.ImportTableTooSmall(tableImportKind.type.limits.initial, table.size)
+                tableImportKind.type.limits.maximum?.let {
+                    if (table.size > it) throw RunErr.ImportTableTooLarge(it, table.size)
+                }
+                constructorParams = constructorParams.plusElement(table)
+                table.size
+            } else mod.tables.firstOrNull()?.limits?.initial
+
+            // We need to validate that elems can fit in table and data can fit in mem
+            fun constIntExpr(insns: List<Node.Instr>): Int? = insns.singleOrNull()?.let {
+                when (it) {
+                    is Node.Instr.I32Const -> it.value
+                    is Node.Instr.GetGlobal ->
+                        if (it.index < globalImports.size) {
+                            // Imports we already have
+                            if (globalImports[it.index].type().returnType() == Int::class.java) {
+                                globalImports[it.index].invokeWithArguments() as Int
+                            } else null
+                        } else constIntExpr(mod.globals[it.index - globalImports.size].init)
+                    else -> null
+                }
+            }
+            if (tableSize != null) mod.elems.forEach { elem ->
+                constIntExpr(elem.offset)?.let { offset ->
+                    if (offset >= tableSize) throw RunErr.InvalidElemIndex(offset, tableSize)
+                }
+            }
+            if (memLimit != null) mod.data.forEach { data ->
+                constIntExpr(data.offset)?.let { offset ->
+                    if (offset < 0 || offset + data.data.size > memLimit)
+                        throw RunErr.InvalidDataIndex(offset, data.data.size, memLimit)
+                }
             }
 
             // Construct

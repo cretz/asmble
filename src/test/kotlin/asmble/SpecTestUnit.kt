@@ -44,8 +44,6 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
         /*
         TODO: We are going down in order. One's we have not yet handled:
         - br_table.wast - Table issues on jumps
-        - imports.wast - No memory exports yet
-        - left-to-right.wast - Not handling tables yet
         - linking.wast - Not handling tables yet
         - return.wast - Not handling tables yet
         - switch.wast - Table issues on jumps (ref "argument switch")
@@ -124,6 +122,8 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             "int_exprs.wast",
             "int_literals.wast",
             "labels.wast",
+            "left-to-right.wast",
+            "linking.wast",
             "load-align-0.fail.wast",
             "load-align-odd.fail.wast",
             "loop.wast",
