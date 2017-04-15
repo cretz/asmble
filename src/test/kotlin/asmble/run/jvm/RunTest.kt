@@ -4,6 +4,7 @@ import asmble.SpecTestUnit
 import asmble.io.AstToSExpr
 import asmble.io.SExprToStr
 import asmble.util.Logger
+import org.junit.Assume
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
@@ -17,6 +18,8 @@ class RunTest(val unit: SpecTestUnit) : Logger by Logger.Print(Logger.Level.INFO
 
     @Test
     fun testRun() {
+        unit.skipRunReason?.let { Assume.assumeTrue("Skipping ${unit.name}, reason: $it", false) }
+
         val ex = try { run(); null } catch (e: Throwable) { e }
         if (unit.shouldFail) {
             assertNotNull(ex, "Expected failure, but succeeded")

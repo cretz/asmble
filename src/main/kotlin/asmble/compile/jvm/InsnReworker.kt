@@ -114,11 +114,17 @@ open class InsnReworker {
             }
             if (count == 0) return inject(stackManips.size)
             var countSoFar = 0
+            var foundUnconditionalJump = false
             for ((amountChanged, insnIndex) in stackManips.asReversed()) {
                 countSoFar += amountChanged
+                if (!foundUnconditionalJump) foundUnconditionalJump = insns[insnIndex].let { insn ->
+                    insn is Node.Instr.Br || insn is Node.Instr.BrTable ||
+                        insn is Node.Instr.Unreachable || insn is Node.Instr.Return
+                }
                 if (countSoFar == count) return inject(insnIndex)
             }
-            throw CompileErr.StackInjectionMismatch(count, insn)
+            // Only consider it a failure if we didn't hit any unconditional jumps
+            if (!foundUnconditionalJump) throw CompileErr.StackInjectionMismatch(count, insn)
         }
 
         // Go over each insn, determining where to inject
