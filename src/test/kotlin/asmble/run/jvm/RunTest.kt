@@ -46,8 +46,8 @@ class RunTest(val unit: SpecTestUnit) : Logger by Logger.Print(Logger.Level.INFO
             try {
                 scriptContext.runCommand(cmd)
             } catch (t: Throwable) {
-                if (!unit.isWarningInsteadOfError(t)) throw t
-                warn { "Unexpected error on ${unit.name}, but is a warning: $t" }
+                val warningReason = unit.warningInsteadOfErrReason(t) ?: throw t
+                warn { "Unexpected error on ${unit.name}, but is a warning. Reason: $warningReason. Orig err: $t" }
                 scriptContext
             }
         }

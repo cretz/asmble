@@ -17,11 +17,7 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
 
     val shouldFail get() = name.endsWith(".fail")
 
-    val skipRunReason get() = when (name) {
-        "br_table" -> "Table issues on jump"
-        "switch" -> "Table issues on jumps (ref 'argument switch')"
-        else -> null
-    }
+    val skipRunReason: String? get() = null
 
     val defaultMaxMemPages get() = when (name) {
         "nop"-> 20
@@ -30,10 +26,10 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
         else -> 1
     }
 
-    fun isWarningInsteadOfError(t: Throwable) = when (name) {
+    fun warningInsteadOfErrReason(t: Throwable) = when (name) {
         // NaN bit patterns can be off
-        "float_literals" -> isNanMismatch(t)
-        "float_exprs" -> isNanMismatch(t)
+        "float_literals", "float_exprs" ->
+            if (isNanMismatch(t)) "NaN JVM bit patterns can be off" else null
         // We don't hold table capacity right now
         // TODO: Figure out how we want to store/retrieve table capacity. Right now
         // a table is an array, so there is only size not capacity. Since we want to
@@ -41,19 +37,29 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
         // as a separate int value and query it or pass it around via import as
         // necessary. I guess I could use a vector, but it's not worth it just for
         // capacity since you lose speed.
-        "imports" -> t is ScriptAssertionError && (t.assertion as? Script.Cmd.Assertion.Unlinkable).let {
-            it != null && it.failure == "maximum size larger than declared" &&
-                it.module.imports.singleOrNull()?.kind is Node.Import.Kind.Table
+        "imports" -> {
+            val isTableMaxErr = t is ScriptAssertionError && (t.assertion as? Script.Cmd.Assertion.Unlinkable).let {
+                it != null && it.failure == "maximum size larger than declared" &&
+                    it.module.imports.singleOrNull()?.kind is Node.Import.Kind.Table
+            }
+            if (isTableMaxErr) "Table max capacities are not validated" else null
         }
-        else -> false
+        else -> null
     }
 
     private fun isNanMismatch(t: Throwable) = t is ScriptAssertionError && (
         t.assertion is Script.Cmd.Assertion.ReturnNan ||
             (t.assertion is Script.Cmd.Assertion.Return && (t.assertion as Script.Cmd.Assertion.Return).let {
-                (it.action as? Script.Cmd.Action.Invoke)?.string?.contains("nan") ?: false
+                it.exprs.any { it.any(this::insnIsNanConst) } ||
+                    ((it.action as? Script.Cmd.Action.Invoke)?.string?.contains("nan") ?: false)
             })
         )
+
+    private fun insnIsNanConst(i: Node.Instr) = when (i) {
+        is Node.Instr.F32Const -> i.value.isNaN()
+        is Node.Instr.F64Const -> i.value.isNaN()
+        else -> false
+    }
 
     val parseResult: StrToSExpr.ParseResult.Success by lazy {
         StrToSExpr.parse(wast).let {
@@ -80,8 +86,7 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             val fs = if (uri.scheme == "jar") FileSystems.newFileSystem(uri, emptyMap<String, Any>()) else null
             fs.use { fs ->
                 val path = fs?.getPath(basePath) ?: Paths.get(uri)
-                val testWastFiles = Files.walk(path, 1).
-                    filter { it.toString().endsWith(".wast") }
+                val testWastFiles = Files.walk(path, 1).filter { it.toString().endsWith(".wast") }
                 return testWastFiles.map {
                     val name = it.fileName.toString().substringBeforeLast(".wast")
                     SpecTestUnit(
