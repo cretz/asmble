@@ -5,6 +5,7 @@ import asmble.ast.Script
 import asmble.compile.jvm.*
 import asmble.io.AstToSExpr
 import asmble.io.SExprToStr
+import asmble.run.jvm.annotation.WasmName
 import asmble.util.Logger
 import asmble.util.toRawIntBits
 import asmble.util.toRawLongBits
@@ -169,7 +170,10 @@ data class ScriptContext(
 
     private fun assertFailure(a: Script.Cmd.Assertion, e: Throwable, expectedString: String) {
         val innerEx = exceptionFromCatch(e)
+        if (innerEx is ScriptAssertionError) throw innerEx
         val msgs = exceptionTranslator.translate(innerEx)
+        if (msgs.isEmpty())
+            throw ScriptAssertionError(a, "Expected failure '$expectedString' but got unknown err", cause = innerEx)
         if (!msgs.any { it.contains(expectedString) })
             throw ScriptAssertionError(a, "Expected failure '$expectedString' in $msgs", cause = innerEx)
     }
@@ -212,7 +216,7 @@ data class ScriptContext(
         MethodHandleUtil.invokeVoid(compileExpr(insns, null))
     }
 
-    fun runExpr(insns: List<Node.Instr>, retType: Node.Type.Value) = compileExpr(insns, retType).let { handle ->
+    fun runExpr(insns: List<Node.Instr>, retType: Node.Type.Value): Any = compileExpr(insns, retType).let { handle ->
         when (retType) {
             is Node.Type.Value.I32 -> MethodHandleUtil.invokeInt(handle)
             is Node.Type.Value.I64 -> MethodHandleUtil.invokeLong(handle)
@@ -248,42 +252,41 @@ data class ScriptContext(
         return CompiledModule(mod, classLoader.fromBuiltContext(ctx), name, ctx.mem)
     }
 
-    fun resolveImportFunc(import: Node.Import, funcType: Node.Type.Func): MethodHandle {
+    fun bindImport(import: Node.Import, getter: Boolean, methodType: MethodType): MethodHandle {
         // Find a method that matches our expectations
         val module = registrations[import.module] ?: error("Unable to find module ${import.module}")
-        return MethodHandles.lookup().bind(
-            module.instance,
-            import.field.javaIdent,
-            MethodType.methodType(funcType.ret?.jclass ?: Void.TYPE, funcType.params.map { it.jclass })
-        )
+        // TODO: do I want to introduce a complicated set of code that will find
+        // a method that can accept the given params including varargs, boxing, etc?
+        // I doubt it since it's only the JVM layer, WASM doesn't have parametric polymorphism
+        try {
+            val javaName = if (getter) "get" + import.field.javaIdent.capitalize() else import.field.javaIdent
+            return MethodHandles.lookup().bind(module.instance, javaName, methodType)
+        } catch (e: NoSuchMethodException) {
+            // Try any method w/ the proper annotation
+            module.cls.methods.forEach { method ->
+                if (method.getAnnotation(WasmName::class.java)?.name == import.field) {
+                    val handle = MethodHandles.lookup().unreflect(method).bindTo(module.instance)
+                    if (handle.type() == methodType) return handle
+                }
+            }
+            throw e
+        }
     }
 
-    fun resolveImportGlobal(import: Node.Import, globalType: Node.Type.Global): MethodHandle {
-        // Find a getter that matches the name
-        val module = registrations[import.module] ?: error("Unable to find module ${import.module}")
-        return MethodHandles.lookup().bind(
-            module.instance,
-            "get" + import.field.javaIdent.capitalize(),
-            MethodType.methodType(globalType.contentType.jclass)
-        )
-    }
+    fun resolveImportFunc(import: Node.Import, funcType: Node.Type.Func) =
+        bindImport(import, false,
+            MethodType.methodType(funcType.ret?.jclass ?: Void.TYPE, funcType.params.map { it.jclass }))
 
-    fun resolveImportMemory(import: Node.Import, memoryType: Node.Type.Memory, mem: Mem): Any {
-        // Find a getter that matches the name
-        val module = registrations[import.module] ?: error("Unable to find module ${import.module}")
-        val getter = module.instance.javaClass.getDeclaredMethod("get" + import.field.javaIdent.capitalize())
-        val memInst = getter.invoke(module.instance)
-        mem.assertValidImport(memInst, memoryType)
-        return memInst
-    }
+    fun resolveImportGlobal(import: Node.Import, globalType: Node.Type.Global) =
+        bindImport(import, true, MethodType.methodType(globalType.contentType.jclass))
 
-    fun resolveImportTable(import: Node.Import, tableType: Node.Type.Table): Any {
-        // Find a getter that matches the name
-        val module = registrations[import.module] ?: error("Unable to find module ${import.module}")
-        val getter = module.instance.javaClass.getDeclaredMethod("get" + import.field.javaIdent.capitalize())
-        require(getter.returnType == Array<MethodHandle>::class.java)
-        return getter.invoke(module.instance)
-    }
+    fun resolveImportMemory(import: Node.Import, memoryType: Node.Type.Memory, mem: Mem) =
+        bindImport(import, true, MethodType.methodType(Class.forName(mem.memType.asm.className))).
+            invokeWithArguments()!!.also { mem.assertValidImport(it, memoryType) }
+
+    fun resolveImportTable(import: Node.Import, tableType: Node.Type.Table) =
+        bindImport(import, true, MethodType.methodType(Array<MethodHandle>::class.java)).
+            invokeWithArguments()!! as Array<MethodHandle>
 
     interface Module {
         val cls: Class<*>
@@ -306,13 +309,15 @@ data class ScriptContext(
             val memImport = mod.imports.find { it.kind is Node.Import.Kind.Memory }
             if (memImport != null) {
                 constructor = cls.declaredConstructors.find { it.parameterTypes.firstOrNull()?.ref == mem.memType }
-                constructorParams += resolveImportMemory(memImport, memImport.kind as Node.Type.Memory, mem)
+                constructorParams += resolveImportMemory(memImport,
+                    (memImport.kind as Node.Import.Kind.Memory).type, mem)
             } else {
-                // Find the constructor with no max mem amount (i.e. methodhandle or nothing as first param)
+                // Find the constructor with no max mem amount (i.e. not int and not memory)
                 constructor = cls.declaredConstructors.find {
+                    val memClass = Class.forName(mem.memType.asm.className)
                     when (it.parameterTypes.firstOrNull()) {
-                        null, MethodHandle::class.java -> true
-                        else -> false
+                        Int::class.java, memClass -> false
+                        else -> true
                     }
                 }
                 // If it is not there, find the one w/ the max mem amount
@@ -337,9 +342,14 @@ data class ScriptContext(
             }
 
             // Table imports
-            constructorParams += mod.imports.mapNotNull {
-                if (it.kind is Node.Import.Kind.Table) resolveImportTable(it, it.kind.type)
-                else null
+            constructorParams += mod.imports.mapNotNull { imp ->
+                if (imp.kind is Node.Import.Kind.Table) resolveImportTable(imp, imp.kind.type).also { table ->
+                    if (table.size < imp.kind.type.limits.initial)
+                        throw RunErr.ImportTableTooSmall(imp.kind.type.limits.initial, table.size)
+                    imp.kind.type.limits.maximum?.let {
+                        if (table.size > it) throw RunErr.ImportTableTooLarge(it, table.size)
+                    }
+                } else null
             }
 
             // Construct

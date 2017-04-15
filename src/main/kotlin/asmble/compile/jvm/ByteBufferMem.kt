@@ -15,8 +15,12 @@ open class ByteBufferMem(val direct: Boolean = true) : Mem {
 
     override fun assertValidImport(instance: Any, expected: Node.Type.Memory) {
         if (instance !is ByteBuffer) error("Unrecognized memory instance: $instance")
-        require(instance.limit() >= expected.limits.initial)
-        expected.limits.maximum?.let { require(instance.capacity() <= it) }
+        if (instance.limit() < expected.limits.initial * Mem.PAGE_SIZE)
+            throw CompileErr.ImportMemoryLimitTooSmall(expected.limits.initial * Mem.PAGE_SIZE, instance.limit())
+        expected.limits.maximum?.let {
+            if (instance.capacity() > it * Mem.PAGE_SIZE)
+                throw CompileErr.ImportMemoryCapacityTooLarge(it * Mem.PAGE_SIZE, instance.capacity())
+        }
     }
 
     override fun create(func: Func) = func.popExpecting(Int::class.ref).addInsns(

@@ -15,6 +15,8 @@ open class ExceptionTranslator {
         is BufferOverflowException -> listOf("data segment does not fit")
         is IllegalArgumentException -> listOf("data segment does not fit")
         is IndexOutOfBoundsException -> listOf("out of bounds memory access")
+        is NoSuchMethodException -> listOf("unknown import", "type mismatch")
+        is NullPointerException -> listOf("undefined element", "uninitialized element")
         is StackOverflowError -> listOf("call stack exhausted")
         is UnsupportedOperationException -> listOf("unreachable executed")
         is WrongMethodTypeException -> listOf("indirect call signature mismatch")

@@ -1,5 +1,6 @@
 package asmble
 
+import asmble.ast.Node
 import asmble.ast.SExpr
 import asmble.ast.Script
 import asmble.io.SExprToAst
@@ -19,6 +20,7 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
     val defaultMaxMemPages get() = when (name) {
         "nop"-> 20
         "resizing" -> 830
+        "imports" -> 5
         else -> 1
     }
 
@@ -86,7 +88,6 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             "float_memory.wast",
             "float_misc.wast",
             "forward.wast",
-            "func.wast",
             "func_ptrs.wast",
             "func-local-after-body.fail.wast",
             "func-local-before-param.fail.wast",
@@ -94,6 +95,7 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             "func-param-after-body.fail.wast",
             "func-result-after-body.fail.wast",
             "func-result-before-param.fail.wast",
+            "func.wast",
             "get_local.wast",
             "globals.wast",
             "i32.load32_s.fail.wast",
@@ -118,6 +120,7 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             "import-after-global.fail.wast",
             "import-after-memory.fail.wast",
             "import-after-table.fail.wast",
+            "imports.wast",
             "int_exprs.wast",
             "int_literals.wast",
             "labels.wast",
@@ -155,7 +158,20 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
         val testsWithErrorToWarningPredicates: Map<String, (Throwable) -> Boolean> = mapOf(
             // NaN bit patterns can be off
             "float_literals" to this::isNanMismatch,
-            "float_exprs" to this::isNanMismatch
+            "float_exprs" to this::isNanMismatch,
+            // We don't hold table capacity right now
+            // TODO: Figure out how we want to store/retrieve table capacity. Right now
+            // a table is an array, so there is only size not capacity. Since we want to
+            // stay w/ the stdlib of the JVM, the best option may be to store the capacity
+            // as a separate int value and query it or pass it around via import as
+            // necessary. I guess I could use a vector, but it's not worth it just for
+            // capacity since you lose speed.
+            "imports" to { t: Throwable ->
+                t is ScriptAssertionError && (t.assertion as? Script.Cmd.Assertion.Unlinkable).let {
+                    it != null && it.failure == "maximum size larger than declared" &&
+                        it.module.imports.singleOrNull()?.kind is Node.Import.Kind.Table
+                }
+            }
         )
 
         fun isNanMismatch(t: Throwable) = t is ScriptAssertionError && (

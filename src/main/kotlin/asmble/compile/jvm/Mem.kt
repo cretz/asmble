@@ -15,7 +15,8 @@ interface Mem {
 
     // Caller can trust the mem instance is on the stack and must handle it. If
     // it's already there after call anyways, this can leave the mem inst on the
-    // stack and it will be reused or popped.
+    // stack and it will be reused or popped. Note, this is not called for
+    // imported memory.
     fun init(func: Func, initial: Int): Func
 
     // Caller can trust the mem instance is on the stack, buildOffset puts an i32

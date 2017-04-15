@@ -67,7 +67,8 @@ open class AstToAsm {
         } else {
             addMaxMemConstructor(ctx)
             addMemClassConstructor(ctx)
-            addMemDefaultConstructor(ctx)
+            // The default constructor is only allowed if the memory is not an import
+            if (ctx.mod.memories.isNotEmpty()) addMemDefaultConstructor(ctx)
         }
     }
 
@@ -131,8 +132,8 @@ open class AstToAsm {
             VarInsnNode(Opcodes.ALOAD, 1)
         ).push(ctx.mem.memType)
 
-        // Do mem init
-        func = ctx.mem.init(func, ctx.mod.memories.firstOrNull()?.limits?.initial ?: 0)
+        // Do mem init only on non-import
+        ctx.mod.memories.firstOrNull()?.let { func = ctx.mem.init(func, it.limits.initial) }
 
         // Add all data loads
         func = ctx.mod.data.fold(func) { origFunc, data ->
@@ -268,77 +269,89 @@ open class AstToAsm {
             )
         }
 
-    fun initializeConstructorTables(ctx: ClsContext, func: Func, paramsBeforeImports: Int) =
-        ctx.mod.tables.singleOrNull().let { table ->
-            if (table == null) {
-                if (ctx.mod.elems.isNotEmpty()) throw CompileErr.UnknownTable(0)
-                func
-            } else {
-                // Create the array of the "initial" size and ignore max for now...
-                func.addInsns(
-                    VarInsnNode(Opcodes.ALOAD, 0),
-                    table.limits.initial.const,
-                    TypeInsnNode(Opcodes.ANEWARRAY, MethodHandle::class.ref.asmName)
-                ).let { func ->
-                    // Go over each elem and add all of the indices to the table
-                    ctx.mod.elems.fold(func) { func, elem ->
-                        require(elem.index == 0)
-                        // Due to requirements by the spec, if there are no function indices
-                        // we still have to ensure the offset is an int
-                        if (elem.funcIndices.isEmpty()) {
-                            // Just do the apply, but discard the result
-                            applyOffsetExpr(ctx, elem.offset, func).popExpecting(Int::class.ref)
-                        }
-                        // Lots of possible perf improvements including:
-                        // * Resolve the initial offset before running each func index
-                        // * Don't add to offset if it's just + 0
-                        // Could be a perf improvement here by resolving the offset before running each thing here
-                        elem.funcIndices.foldIndexed(func) { offsetIndex, func, funcIndex ->
-                            // Dup the array
-                            func.addInsns(InsnNode(Opcodes.DUP)).
-                                // Load the initial offset
-                                let { func -> applyOffsetExpr(ctx, elem.offset, func) }.
-                                popExpecting(Int::class.ref).
-                                // Add to the offset
-                                addInsns(
-                                    offsetIndex.const,
-                                    InsnNode(Opcodes.IADD)
-                                ).addInsns(
-                                    // Load the proper method handle based on whether it's an import or not
-                                    ctx.funcAtIndex(funcIndex).let { funcRef ->
-                                        // TODO: validate func type
-                                        val funcType = ctx.funcTypeAtIndex(funcIndex)
-                                        when (funcRef) {
-                                            is Either.Left ->
-                                                // Imports we can just get from the param
-                                                listOf(VarInsnNode(
-                                                    Opcodes.ALOAD,
-                                                    funcIndex + paramsBeforeImports + 1
-                                                ))
-                                            is Either.Right -> {
-                                                listOf(
-                                                    MethodHandles::lookup.invokeStatic(),
-                                                    VarInsnNode(Opcodes.ALOAD, 0),
-                                                    ctx.funcName(funcIndex).const,
-                                                    // Method type const, yay
-                                                    LdcInsnNode(Type.getMethodType(funcType.asmDesc)),
-                                                    MethodHandles.Lookup::bind.invokeVirtual()
-                                                )
-                                            }
-                                        }
-                                    }
-                                ).addInsns(
-                                    InsnNode(Opcodes.AASTORE)
+    fun initializeConstructorTables(ctx: ClsContext, func: Func, paramsBeforeImports: Int): Func {
+        val table = ctx.mod.tables.singleOrNull() ?:
+            ctx.mod.imports.mapNotNull { it.kind as? Node.Import.Kind.Table }.firstOrNull()?.type
+        if (table == null) {
+            if (ctx.mod.elems.isNotEmpty()) throw CompileErr.UnknownTable(0)
+            return func
+        }
+        // If it was in the module, we need to create the array and set it in the field
+        if (ctx.mod.tables.isNotEmpty()) {
+            // Create the array of the "initial" size and ignore max for now...
+            return func.addInsns(
+                VarInsnNode(Opcodes.ALOAD, 0),
+                table.limits.initial.const,
+                TypeInsnNode(Opcodes.ANEWARRAY, MethodHandle::class.ref.asmName)
+            ).let { func -> addElemsToTable(ctx, func, paramsBeforeImports) }.
+                // Put it on the field (we know that we have this + arr on the stack)
+                addInsns(
+                    FieldInsnNode(Opcodes.PUTFIELD, ctx.thisRef.asmName, "table",
+                        Array<MethodHandle>::class.ref.asmDesc)
+                )
+        }
+        // Otherwise, it was imported and we can set the elems on the imported one
+        // from the parameter
+        // TODO: I think this is a security concern and bad practice, may revisit
+        val importIndex = ctx.importFuncs.size + ctx.importGlobals.size + paramsBeforeImports + 1
+        return func.addInsns(VarInsnNode(Opcodes.ALOAD, importIndex)).
+            let { func -> addElemsToTable(ctx, func, paramsBeforeImports) }.
+            // Remove the array that's still there
+            addInsns(InsnNode(Opcodes.POP))
+    }
+
+    // Can trust the array is on the stack and should leave it back on the stack
+    fun addElemsToTable(ctx: ClsContext, func: Func, paramsBeforeImports: Int) =
+        // Go over each elem and add all of the indices to the table
+        ctx.mod.elems.fold(func) { func, elem ->
+            require(elem.index == 0)
+            // Due to requirements by the spec, if there are no function indices
+            // we still have to ensure the offset is an int
+            if (elem.funcIndices.isEmpty()) {
+                // Just do the apply, but discard the result
+                applyOffsetExpr(ctx, elem.offset, func).popExpecting(Int::class.ref)
+            }
+            // Lots of possible perf improvements including:
+            // * Resolve the initial offset before running each func index
+            // * Don't add to offset if it's just + 0
+            // Could be a perf improvement here by resolving the offset before running each thing here
+            elem.funcIndices.foldIndexed(func) { offsetIndex, func, funcIndex ->
+                // Dup the array
+                func.addInsns(InsnNode(Opcodes.DUP)).
+                    // Load the initial offset
+                    let { func -> applyOffsetExpr(ctx, elem.offset, func) }.
+                    popExpecting(Int::class.ref).
+                    // Add to the offset
+                    addInsns(
+                        offsetIndex.const,
+                        InsnNode(Opcodes.IADD)
+                    ).addInsns(
+                    // Load the proper method handle based on whether it's an import or not
+                    ctx.funcAtIndex(funcIndex).let { funcRef ->
+                        // TODO: validate func type
+                        val funcType = ctx.funcTypeAtIndex(funcIndex)
+                        when (funcRef) {
+                            is Either.Left ->
+                                // Imports we can just get from the param
+                                listOf(VarInsnNode(
+                                    Opcodes.ALOAD,
+                                    funcIndex + paramsBeforeImports + 1
+                                ))
+                            is Either.Right -> {
+                                listOf(
+                                    MethodHandles::lookup.invokeStatic(),
+                                    VarInsnNode(Opcodes.ALOAD, 0),
+                                    ctx.funcName(funcIndex).const,
+                                    // Method type const, yay
+                                    LdcInsnNode(Type.getMethodType(funcType.asmDesc)),
+                                    MethodHandles.Lookup::bind.invokeVirtual()
                                 )
+                            }
                         }
                     }
-                }.let { func ->
-                    // Put it on the field (we know that we have this + arr on the stack)
-                    func.addInsns(
-                        FieldInsnNode(Opcodes.PUTFIELD, ctx.thisRef.asmName, "table",
-                            Array<MethodHandle>::class.ref.asmDesc)
-                    )
-                }
+                ).addInsns(
+                    InsnNode(Opcodes.AASTORE)
+                )
             }
         }
 
