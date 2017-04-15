@@ -515,15 +515,54 @@ open class FuncBuilder {
                     throw CompileErr.TableTargetMismatch(defaultBlock.labelTypes, targetBlock.labelTypes)
                 fn to (blocks + targetBlock)
             }.let { (fn, targetBlocks) ->
-                // In some cases, the target labels is empty. We need to make 0 goto
-                // the default as well.
-                val targetLabelsArr =
-                    if (targetBlocks.isNotEmpty()) targetBlocks.map(Func.Block::requiredLabel).toTypedArray()
-                    else arrayOf(defaultBlock.requiredLabel)
-                fn.popExpecting(Int::class.ref).addInsns(TableSwitchInsnNode(0, targetLabelsArr.size - 1,
-                    defaultBlock.requiredLabel, *targetLabelsArr))
-            }.popExpectingMulti(defaultBlock.labelTypes).markUnreachable()
+                // If it's large, we need to handle it differently
+                if (insn.targetTable.size > ctx.cls.jumpTableChunkSize) {
+                    applyLargeBrTable(ctx, fn, insn, defaultBlock, targetBlocks)
+                } else {
+                    // In some cases, the target labels is empty. We need to make 0 goto
+                    // the default as well.
+                    val targetLabelsArr =
+                        if (targetBlocks.isNotEmpty()) targetBlocks.map(Func.Block::requiredLabel).toTypedArray()
+                        else arrayOf(defaultBlock.requiredLabel)
+                    fn.popExpecting(Int::class.ref).
+                        addInsns(TableSwitchInsnNode(0, targetLabelsArr.size - 1,
+                            defaultBlock.requiredLabel, *targetLabelsArr)).
+                        popExpectingMulti(defaultBlock.labelTypes).
+                        markUnreachable()
+                }
+            }
         }
+
+    fun applyLargeBrTable(
+        ctx: FuncContext,
+        fn: Func,
+        insn: Node.Instr.BrTable,
+        defaultBlock: Func.Block,
+        targetBlocks: List<Func.Block>
+    ): Func {
+        // We build a method call to get our set of depths, then we do a table switch
+        // on the depths. There may be holes in the depths, which we'll fill in w/ the
+        // default label. And we'll make the default label unreachable.
+        val depthToBlock = mutableListOf<LabelNode?>()
+        fun addBlock(depth: Int, block: Func.Block) {
+            if (depthToBlock.getOrNull(depth) == null) {
+                for (i in depthToBlock.size..depth) depthToBlock.add(null)
+                depthToBlock[depth] = block.requiredLabel
+            }
+        }
+        insn.targetTable.forEachIndexed { index, targetDepth -> addBlock(targetDepth, targetBlocks[index]) }
+        addBlock(insn.default, defaultBlock)
+
+        val unreachableLabel = LabelNode()
+        return fn.popExpecting(Int::class.ref).
+            addInsns(
+                ctx.cls.largeTableJumpCall(insn),
+                TableSwitchInsnNode(0, depthToBlock.size - 1, unreachableLabel,
+                    *depthToBlock.map { it ?: unreachableLabel }.toTypedArray()),
+                unreachableLabel
+            ).addInsns(UnsupportedOperationException::class.athrow("Unreachable")).
+            markUnreachable()
+    }
 
     fun needsToPopBeforeJumping(ctx: FuncContext, fn: Func, block: Func.Block): Boolean {
         val requiredStackCount = if (block.endTypes.isEmpty()) block.origStack.size else block.origStack.size + 1

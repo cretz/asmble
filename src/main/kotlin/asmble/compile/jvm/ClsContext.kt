@@ -8,6 +8,7 @@ import org.objectweb.asm.Type
 import org.objectweb.asm.tree.ClassNode
 import org.objectweb.asm.tree.MethodInsnNode
 import org.objectweb.asm.tree.MethodNode
+import java.util.*
 
 data class ClsContext(
     val packageName: String,
@@ -24,7 +25,8 @@ data class ClsContext(
     val eagerFailLargeMemOffset: Boolean = true,
     val preventMemIndexOverflow: Boolean = false,
     val accurateNanBits: Boolean = true,
-    val checkSignedDivIntegerOverflow: Boolean = true
+    val checkSignedDivIntegerOverflow: Boolean = true,
+    val jumpTableChunkSize: Int = 5000
 ) : Logger by logger {
     val importFuncs: List<Node.Import> by lazy { mod.imports.filter { it.kind is Node.Import.Kind.Func } }
     val importGlobals: List<Node.Import> by lazy { mod.imports.filter { it.kind is Node.Import.Kind.Global } }
@@ -92,4 +94,14 @@ data class ClsContext(
     val divAssertL get() = syntheticFunc("assertLDiv", SyntheticFuncBuilder::buildLDivAssertion)
 
     val indirectBootstrap get() = syntheticFunc("indirectBootstrap", SyntheticFuncBuilder::buildIndirectBootstrap)
+
+    // Builds a method that takes an int and returns a depth int
+    fun largeTableJumpCall(table: Node.Instr.BrTable): MethodInsnNode {
+        val namePrefix = "largeTable" + UUID.randomUUID().toString().replace("-", "")
+        val methods = syntheticFuncBuilder.buildLargeTableJumps(this, namePrefix, table)
+        cls.methods.addAll(methods)
+        return methods.first().let { method ->
+            MethodInsnNode(Opcodes.INVOKESTATIC, thisRef.asmName, method.name, method.desc, false)
+        }
+    }
 }

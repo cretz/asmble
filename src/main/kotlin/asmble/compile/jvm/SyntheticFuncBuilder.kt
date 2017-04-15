@@ -1,5 +1,6 @@
 package asmble.compile.jvm
 
+import asmble.ast.Node
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.tree.*
@@ -21,6 +22,63 @@ open class SyntheticFuncBuilder {
             Opcodes.ACC_PRIVATE + Opcodes.ACC_STATIC + Opcodes.ACC_SYNTHETIC, name,
             helperMeth.desc, null, null
         ).addInsns(*helperMeth.instructions.toArray())
+    }
+
+    // Guaranteed that the first method result can be called to get the proper index.
+    // Caller needs to make sure namePrefix is unique.
+    fun buildLargeTableJumps(ctx: ClsContext, namePrefix: String, table: Node.Instr.BrTable): List<MethodNode> {
+        // Sadly really large table jumps need to be broken up into multiple methods
+        // because Java has method size limits. What we are going to do here is make
+        // a method that takes an int, then a table switch node that returns the depth.
+        // The default will chain to another method if there are more to handle.
+
+        // Build a bunch of chunk views...first of each is start, second is sub list
+        val chunks = (0 until Math.ceil(table.targetTable.size / ctx.jumpTableChunkSize.toDouble()).toInt()).
+            fold(emptyList<Pair<Int, List<Int>>>()) { chunks, chunkNum ->
+                val start = chunkNum * ctx.jumpTableChunkSize
+                chunks.plusElement(start to table.targetTable.subList(start,
+                    Math.min(table.targetTable.size, (chunkNum + 1) * ctx.jumpTableChunkSize)))
+            }
+        // Go over the chunks, backwards, building the jump methods, then flip em back
+        return chunks.asReversed().fold(emptyList<MethodNode>()) { methods, (start, chunk) ->
+            val defaultLabel = LabelNode()
+            val method = largeTableJumpMethod(ctx, namePrefix, start, chunk, defaultLabel)
+            // If we are the last chunk, default is what table default is
+            methods + if (methods.isEmpty()) method.addInsns(
+                defaultLabel, table.default.const, InsnNode(Opcodes.IRETURN)
+            ) else method.addInsns(
+                // Otherwise, the default label just calls the prev
+                defaultLabel,
+                VarInsnNode(Opcodes.ILOAD, 0),
+                methods.last().let { other ->
+                    MethodInsnNode(Opcodes.INVOKESTATIC, ctx.thisRef.asmName, other.name, other.desc, false)
+                },
+                InsnNode(Opcodes.IRETURN)
+            )
+        }.reversed()
+    }
+
+    private fun largeTableJumpMethod(
+        ctx: ClsContext,
+        namePrefix: String,
+        startIndex: Int,
+        targets: List<Int>,
+        defaultLabel: LabelNode
+    ): MethodNode {
+        val labelsByTargets = mutableMapOf<Int, LabelNode>()
+        return MethodNode(
+            Opcodes.ACC_PRIVATE + Opcodes.ACC_STATIC + Opcodes.ACC_SYNTHETIC,
+            "${namePrefix}_${startIndex}_until_${startIndex + targets.size}", "(I)I", null, null
+        ).addInsns(
+            VarInsnNode(Opcodes.ILOAD, 0),
+            TableSwitchInsnNode(startIndex, (startIndex + targets.size) - 1, defaultLabel,
+                *targets.map { labelsByTargets.getOrPut(it) { LabelNode() } }.toTypedArray()
+            )
+        ).also { method ->
+            labelsByTargets.forEach { (target, label) ->
+                method.addInsns(label, target.const, InsnNode(Opcodes.IRETURN))
+            }
+        }
     }
 
     fun buildIDivAssertion(ctx: ClsContext, name: String) =

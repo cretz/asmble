@@ -264,7 +264,7 @@ data class ScriptContext(
         } catch (e: NoSuchMethodException) {
             // Try any method w/ the proper annotation
             module.cls.methods.forEach { method ->
-                if (method.getAnnotation(WasmName::class.java)?.name == import.field) {
+                if (method.getAnnotation(WasmName::class.java)?.value == import.field) {
                     val handle = MethodHandles.lookup().unreflect(method).bindTo(module.instance)
                     if (handle.type() == methodType) return handle
                 }

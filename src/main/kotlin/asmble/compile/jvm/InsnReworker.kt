@@ -181,7 +181,8 @@ open class InsnReworker {
         is Node.Instr.Unreachable, is Node.Instr.Nop, is Node.Instr.Block,
         is Node.Instr.Loop, is Node.Instr.If, is Node.Instr.Else,
         is Node.Instr.End, is Node.Instr.Br, is Node.Instr.BrIf,
-        is Node.Instr.BrTable, is Node.Instr.Return -> NOP
+        is Node.Instr.Return -> NOP
+        is Node.Instr.BrTable -> POP_PARAM
         is Node.Instr.Call -> ctx.funcTypeAtIndex(insn.index).let {
             // All calls pop params and any return is a push
             (POP_PARAM * it.params.size) + (if (it.ret == null) NOP else PUSH_RESULT)
