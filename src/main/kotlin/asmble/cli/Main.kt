@@ -3,7 +3,7 @@ package asmble.cli
 import asmble.util.Logger
 import kotlin.system.exitProcess
 
-val commands = listOf(Compile, Invoke, Help, Run, Translate)
+val commands = listOf(Compile, Help, Invoke, Run, Translate)
 
 fun main(args: Array<String>) {
     if (args.isEmpty()) return println(

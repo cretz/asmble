@@ -23,6 +23,9 @@ repositories {
     mavenCentral()
 }
 
+distTar.archiveName = 'asmble.tar'
+distZip.archiveName = 'asmble.zip'
+
 dependencies {
     compile "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
     compile "org.jetbrains.kotlin:kotlin-reflect:$kotlin_version"
