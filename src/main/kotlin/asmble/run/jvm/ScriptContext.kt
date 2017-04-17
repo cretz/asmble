@@ -9,6 +9,9 @@ import asmble.run.jvm.annotation.WasmName
 import asmble.util.Logger
 import asmble.util.toRawIntBits
 import asmble.util.toRawLongBits
+import org.objectweb.asm.ClassReader
+import org.objectweb.asm.ClassVisitor
+import org.objectweb.asm.Opcodes
 import java.io.PrintWriter
 import java.lang.invoke.MethodHandle
 import java.lang.invoke.MethodHandles
@@ -30,13 +33,13 @@ data class ScriptContext(
 ) : Logger by logger {
     fun withHarnessRegistered(out: PrintWriter = PrintWriter(System.out, true)) =
         copy(registrations = registrations + (
-            "spectest" to NativeModule(Harness::class.java, Harness(out))
+            "spectest" to NativeModule(TestHarness::class.java, TestHarness(out))
         ))
 
     fun runCommand(cmd: Script.Cmd) = when (cmd) {
         is Script.Cmd.Module ->
             // We ask for the module instance because some things are built on <init> expectation
-            compileModule(cmd.module, "Module${modules.size}", cmd.name).also { it.instance }.let {
+            compileModule(cmd.module, "Module${modules.size}", cmd.name).also { it.instance(this) }.let {
                 copy(modules = modules + it)
             }
         is Script.Cmd.Register ->
@@ -147,7 +150,7 @@ data class ScriptContext(
     fun assertUnlinkable(unlink: Script.Cmd.Assertion.Unlinkable) {
         try {
             val className = "unlinkable" + UUID.randomUUID().toString().replace("-", "")
-            compileModule(unlink.module, className, null).instance
+            compileModule(unlink.module, className, null).instance(this)
             throw ScriptAssertionError(unlink, "Expected module link error with '${unlink.failure}', was valid")
         } catch (e: Throwable) { assertFailure(unlink, e, unlink.failure) }
     }
@@ -155,7 +158,7 @@ data class ScriptContext(
     fun assertTrapModule(trap: Script.Cmd.Assertion.TrapModule) {
         try {
             val className = "trapmod" + UUID.randomUUID().toString().replace("-", "")
-            compileModule(trap.module, className, null).instance
+            compileModule(trap.module, className, null).instance(this)
             throw ScriptAssertionError(trap, "Expected module init error with '${trap.failure}', was valid")
         } catch (e: Throwable) { assertFailure(trap, e, trap.failure) }
     }
@@ -188,7 +191,7 @@ data class ScriptContext(
         val module = if (cmd.name == null) modules.last() else modules.first { it.name == cmd.name }
         // Just call the getter
         val getter = module.cls.getDeclaredMethod("get" + cmd.string.javaIdent.capitalize())
-        return getter.returnType.valueType!! to getter.invoke(module.instance)
+        return getter.returnType.valueType!! to getter.invoke(module.instance(this))
     }
 
     fun doInvoke(cmd: Script.Cmd.Action.Invoke): Pair<Node.Type.Value?, Any?> {
@@ -209,7 +212,7 @@ data class ScriptContext(
         }
 
         // Run returning the result
-        return method.returnType.valueType to method.invoke(compMod.instance, *params.toTypedArray())
+        return method.returnType.valueType to method.invoke(compMod.instance(this), *params.toTypedArray())
     }
 
     fun runExpr(insns: List<Node.Instr>) {
@@ -237,9 +240,12 @@ data class ScriptContext(
         )
         val className = "expr" + UUID.randomUUID().toString().replace("-", "")
         val compiled = compileModule(mod, className, null)
-        return MethodHandles.lookup().bind(compiled.instance, "expr",
+        return MethodHandles.lookup().bind(compiled.instance(this), "expr",
             MethodType.methodType(retType?.jclass ?: Void.TYPE))
     }
+
+    fun withCompiledModule(mod: Node.Module, className: String, name: String?) =
+        copy(modules = modules + compileModule(mod, className, name))
 
     fun compileModule(mod: Node.Module, className: String, name: String?): CompiledModule {
         val ctx = ClsContext(
@@ -260,12 +266,12 @@ data class ScriptContext(
         // I doubt it since it's only the JVM layer, WASM doesn't have parametric polymorphism
         try {
             val javaName = if (getter) "get" + import.field.javaIdent.capitalize() else import.field.javaIdent
-            return MethodHandles.lookup().bind(module.instance, javaName, methodType)
+            return MethodHandles.lookup().bind(module.instance(this), javaName, methodType)
         } catch (e: NoSuchMethodException) {
             // Try any method w/ the proper annotation
             module.cls.methods.forEach { method ->
                 if (method.getAnnotation(WasmName::class.java)?.value == import.field) {
-                    val handle = MethodHandles.lookup().unreflect(method).bindTo(module.instance)
+                    val handle = MethodHandles.lookup().unreflect(method).bindTo(module.instance(this))
                     if (handle.type() == methodType) return handle
                 }
             }
@@ -290,18 +296,25 @@ data class ScriptContext(
 
     interface Module {
         val cls: Class<*>
-        val instance: Any
+        // Guaranteed to be the same instance when there is no error
+        fun instance(ctx: ScriptContext): Any
     }
 
-    class NativeModule(override val cls: Class<*>, override val instance: Any) : Module
+    class NativeModule(override val cls: Class<*>, val inst: Any) : Module {
+        override fun instance(ctx: ScriptContext) = inst
+    }
 
-    inner class CompiledModule(
+    class CompiledModule(
         val mod: Node.Module,
         override val cls: Class<*>,
         val name: String?,
         val mem: Mem
     ) : Module {
-        override val instance by lazy {
+        private var inst: Any? = null
+        override fun instance(ctx: ScriptContext) =
+            synchronized(this) { inst ?: createInstance(ctx).also { inst = it } }
+
+        private fun createInstance(ctx: ScriptContext): Any {
             // Find the constructor
             var constructorParams = emptyList<Any>()
             var constructor: Constructor<*>?
@@ -311,7 +324,7 @@ data class ScriptContext(
             val memLimit = if (memImport != null) {
                 constructor = cls.declaredConstructors.find { it.parameterTypes.firstOrNull()?.ref == mem.memType }
                 val memImportKind = memImport.kind as Node.Import.Kind.Memory
-                val memInst = resolveImportMemory(memImport, memImportKind.type, mem)
+                val memInst = ctx.resolveImportMemory(memImport, memImportKind.type, mem)
                 constructorParams += memInst
                 val (memLimit, memCap) = mem.limitAndCapacity(memInst)
                 if (memLimit < memImportKind.type.limits.initial * Mem.PAGE_SIZE)
@@ -333,7 +346,7 @@ data class ScriptContext(
                 // If it is not there, find the one w/ the max mem amount
                 val maybeMem = mod.memories.firstOrNull()
                 if (constructor == null) {
-                    val maxMem = Math.max(maybeMem?.limits?.initial ?: 0, defaultMaxMemPages)
+                    val maxMem = Math.max(maybeMem?.limits?.initial ?: 0, ctx.defaultMaxMemPages)
                     constructor = cls.declaredConstructors.find { it.parameterTypes.firstOrNull() == Int::class.java }
                     constructorParams += maxMem * Mem.PAGE_SIZE
                 }
@@ -343,13 +356,13 @@ data class ScriptContext(
 
             // Function imports
             constructorParams += mod.imports.mapNotNull {
-                if (it.kind is Node.Import.Kind.Func) resolveImportFunc(it, mod.types[it.kind.typeIndex])
+                if (it.kind is Node.Import.Kind.Func) ctx.resolveImportFunc(it, mod.types[it.kind.typeIndex])
                 else null
             }
 
             // Global imports
             val globalImports = mod.imports.mapNotNull {
-                if (it.kind is Node.Import.Kind.Global) resolveImportGlobal(it, it.kind.type)
+                if (it.kind is Node.Import.Kind.Global) ctx.resolveImportGlobal(it, it.kind.type)
                 else null
             }
             constructorParams += globalImports
@@ -358,7 +371,7 @@ data class ScriptContext(
             val tableImport = mod.imports.find { it.kind is Node.Import.Kind.Table }
             val tableSize = if (tableImport != null) {
                 val tableImportKind = tableImport.kind as Node.Import.Kind.Table
-                val table = resolveImportTable(tableImport, tableImportKind.type)
+                val table = ctx.resolveImportTable(tableImport, tableImportKind.type)
                 if (table.size < tableImportKind.type.limits.initial)
                     throw RunErr.ImportTableTooSmall(tableImportKind.type.limits.initial, table.size)
                 tableImportKind.type.limits.maximum?.let {
@@ -395,8 +408,8 @@ data class ScriptContext(
             }
 
             // Construct
-            debug { "Instantiating $cls using $constructor with params $constructorParams" }
-            constructor!!.newInstance(*constructorParams.toTypedArray())
+            ctx.debug { "Instantiating $cls using $constructor with params $constructorParams" }
+            return constructor.newInstance(*constructorParams.toTypedArray())
         }
     }
 
@@ -407,6 +420,17 @@ data class ScriptContext(
                 debug { "ASM class:\n" + bytes.asClassNode().toAsmString() }
                 defineClass("${ctx.packageName}.${ctx.className}",  bytes, 0, bytes.size)
             }
+        }
+
+        fun addClass(bytes: ByteArray) {
+            // Just get the name
+            var className = ""
+            ClassReader(bytes).accept(object : ClassVisitor(Opcodes.ASM5) {
+                override fun visit(a: Int, b: Int, name: String, c: String?, d: String?, e: Array<out String>?) {
+                    className = name.replace('/', '.')
+                }
+            }, ClassReader.SKIP_CODE)
+            defineClass(className, bytes, 0, bytes.size)
         }
     }
 }

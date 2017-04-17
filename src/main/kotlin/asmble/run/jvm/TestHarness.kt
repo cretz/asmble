@@ -7,7 +7,7 @@ import java.lang.invoke.MethodHandle
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-open class Harness(val out: PrintWriter) {
+open class TestHarness(val out: PrintWriter) {
 
     // WASM is evil, not me:
     //  https://github.com/WebAssembly/spec/blob/6a01dab6d29b7c2b5dfd3bb3879bbd6ab76fd5dc/interpreter/host/import/spectest.ml#L12
@@ -33,5 +33,5 @@ open class Harness(val out: PrintWriter) {
     fun print(arg0: Int, arg1: Float) { print(arg0); print(arg1) }
     fun print(arg0: Double, arg1: Double) { print(arg0); print(arg1) }
 
-    companion object : Harness(PrintWriter(System.out, true))
+    companion object : TestHarness(PrintWriter(System.out, true))
 }

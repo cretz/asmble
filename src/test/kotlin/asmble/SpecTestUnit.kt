@@ -84,10 +84,10 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
             val jcls = SpecTestUnit::class.java
             val uri = jcls.getResource(basePath).toURI()
             val fs = if (uri.scheme == "jar") FileSystems.newFileSystem(uri, emptyMap<String, Any>()) else null
-            fs.use { fs ->
+            return fs.use { fs ->
                 val path = fs?.getPath(basePath) ?: Paths.get(uri)
                 val testWastFiles = Files.walk(path, 1).filter { it.toString().endsWith(".wast") }
-                return testWastFiles.map {
+                testWastFiles.map {
                     val name = it.fileName.toString().substringBeforeLast(".wast")
                     SpecTestUnit(
                         name = name,

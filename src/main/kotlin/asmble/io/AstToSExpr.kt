@@ -7,8 +7,8 @@ import asmble.ast.Script
 open class AstToSExpr {
 
     fun fromAction(v: Script.Cmd.Action) = when(v) {
-        is Script.Cmd.Action.Invoke -> newMulti("invoke", v.name) + v.string + v.exprs.flatMap(this::fromInstrs)
-        is Script.Cmd.Action.Get -> newMulti("get", v.name) + v.string
+        is Script.Cmd.Action.Invoke -> newMulti("invoke", v.name) + v.string.quoted + v.exprs.flatMap(this::fromInstrs)
+        is Script.Cmd.Action.Get -> newMulti("get", v.name) + v.string.quoted
     }
 
     fun fromAssertion(v: Script.Cmd.Assertion) = when(v) {
@@ -46,7 +46,8 @@ open class AstToSExpr {
     }
 
     fun fromData(v: Node.Data) =
-        (newMulti("data") + v.index) + (newMulti("offset") + fromInstrs(v.offset)) + v.data.toString(Charsets.UTF_8)
+        (newMulti("data") + v.index) + (newMulti("offset") +
+            fromInstrs(v.offset)) + v.data.toString(Charsets.UTF_8).quoted
 
     fun fromElem(v: Node.Elem) =
         (newMulti("elem") + v.index) + (newMulti("offset") + fromInstrs(v.offset)) + v.funcIndices.map(this::fromNum)
@@ -55,7 +56,7 @@ open class AstToSExpr {
         Node.ElemType.ANYFUNC -> fromString("anyfunc")
     }
 
-    fun fromExport(v: Node.Export) = newMulti("export") + v.field + when(v.kind) {
+    fun fromExport(v: Node.Export) = newMulti("export") + v.field.quoted + when(v.kind) {
         Node.ExternalKind.FUNCTION -> newMulti("func") + v.index
         Node.ExternalKind.TABLE -> newMulti("table") + v.index
         Node.ExternalKind.MEMORY -> newMulti("memory") + v.index
@@ -80,7 +81,7 @@ open class AstToSExpr {
         if (v.mutable) newMulti("mut") + fromType(v.contentType) else fromType(v.contentType)
 
     fun fromImport(v: Node.Import, types: List<Node.Type.Func>) =
-        (newMulti("import") + v.module) + v.field + fromImportKind(v.kind, types)
+        (newMulti("import") + v.module.quoted) + v.field.quoted + fromImportKind(v.kind, types)
 
     fun fromImportFunc(v: Node.Import.Kind.Func, types: List<Node.Type.Func>, name: String? = null) =
         fromImportFunc(types.getOrElse(v.typeIndex) { throw Exception("No type at ${v.typeIndex}") }, name)
@@ -210,6 +211,7 @@ open class AstToSExpr {
         initName?.also { require(it.startsWith("$")) }
         return SExpr.Multi() + initSymb + initName
     }
+    private val String.quoted get() = fromString(this, true)
 
     companion object : AstToSExpr()
 }
