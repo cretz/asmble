@@ -184,7 +184,8 @@ JVM languages.
 ### Getting
 
 The latest tag can be added to your build script via [JitPack](https://jitpack.io). For example,
-[here](https://jitpack.io/#cretz/asmble/master-SNAPSHOT) are instructions for using the latest master.
+[here](https://jitpack.io/#cretz/asmble/0.1.0) are instructions for using the 0.1.0 release and
+[here](https://jitpack.io/#cretz/asmble/master-SNAPSHOT) are instructions for the latest master.
 
 ### Building and Testing
 
@@ -329,6 +330,9 @@ simply do normal field access.
 Memory operations are done via `ByteBuffer` methods on a little-endian buffer. All operations including unsigned
 operations are tailored to use specific existing Java stdlib functions.
 
+As a special optimization, we put the memory instance as a local var if it is accessed a lot in a function. This is
+cheaper than constantly fetching the field.
+
 #### Number Operations
 
 Constants are simply `ldc` bytecode ops on the JVM. Comparisons are done via specific bytecodes sometimes combined with
@@ -430,3 +434,4 @@ Not yet, once source maps get standardized I may revisit.
 * Add "link" command that will build an entire JAR out of several WebAssembly files and glue code between them
 * Annotations to make it clear what imports are expected
 * Compile to JS and native with Kotlin
+* Add javax.script (which can give things like a free repl w/ jrunscript)
