@@ -93,7 +93,7 @@ open class FuncBuilder {
         is Insn.ThisNeededOnStack ->
             fn.addInsns(VarInsnNode(Opcodes.ALOAD, 0)).push(ctx.cls.thisRef)
         is Insn.MemNeededOnStack ->
-            putMemoryOnStackIfNecessary(ctx, fn)
+            putMemoryOnStack(ctx, fn)
     }
 
     fun applyNodeInsn(ctx: FuncContext, fn: Func, i: Node.Instr, index: Int) = when (i) {
@@ -1069,7 +1069,7 @@ open class FuncBuilder {
         // Curr mem is not specially injected, so we have to put the memory on the
         // stack since we need it
         ctx.cls.assertHasMemory().let {
-            putMemoryOnStackIfNecessary(ctx, fn).let { fn -> ctx.cls.mem.currentMemory(ctx, fn) }
+            putMemoryOnStack(ctx, fn).let { fn -> ctx.cls.mem.currentMemory(ctx, fn) }
         }
 
     fun applyStoreOp(ctx: FuncContext, fn: Func, insn: Node.Instr.Args.AlignOffset, insnIndex: Int) =
@@ -1078,7 +1078,15 @@ open class FuncBuilder {
         // so we pop it if we need to
         ctx.cls.assertHasMemory().let {
             ctx.cls.mem.storeOp(ctx, fn, insn).let { fn ->
-                popMemoryIfNecessary(ctx, fn, ctx.insns.getOrNull(insnIndex + 1))
+                // As a special case, if this leaves the mem on the stack
+                // and we need it in the future, we mark it as leftover and
+                // reuse
+                if (!ctx.cls.mem.storeLeavesMemOnStack) fn else ctx.insns.getOrNull(insnIndex + 1).let { nextInsn ->
+                    if (nextInsn is Insn.MemNeededOnStack) {
+                        fn.peekExpecting(ctx.cls.mem.memType)
+                        fn.copy(lastStackIsMemLeftover = true)
+                    } else fn.popExpecting(ctx.cls.mem.memType).addInsns(InsnNode(Opcodes.POP))
+                }
             }
         }
 
@@ -1089,29 +1097,17 @@ open class FuncBuilder {
             ctx.cls.mem.loadOp(ctx, fn, insn)
         }
 
-    fun putMemoryOnStackIfNecessary(ctx: FuncContext, fn: Func) =
-        if (fn.stack.lastOrNull() == ctx.cls.mem.memType) fn
+    fun putMemoryOnStack(ctx: FuncContext, fn: Func) =
+        // Only put it if it's not already leftover
+        if (fn.lastStackIsMemLeftover) fn.copy(lastStackIsMemLeftover = false)
         else if (ctx.memIsLocalVar)
-        // Assume it's just past the locals
+            // Assume it's just past the locals
             fn.addInsns(VarInsnNode(Opcodes.ALOAD, ctx.actualLocalIndex(ctx.node.localsSize))).
                 push(ctx.cls.mem.memType)
         else fn.addInsns(
             VarInsnNode(Opcodes.ALOAD, 0),
             FieldInsnNode(Opcodes.GETFIELD, ctx.cls.thisRef.asmName, "memory", ctx.cls.mem.memType.asmDesc)
         ).push(ctx.cls.mem.memType)
-
-    fun popMemoryIfNecessary(ctx: FuncContext, fn: Func, nextInsn: Insn?) =
-        // We pop the mem if it's there and not a mem op next
-        if (fn.stack.lastOrNull() != ctx.cls.mem.memType) fn else {
-            val nextInstrRequiresMemOnStack = when (nextInsn) {
-                is Insn.Node -> nextInsn.insn is Node.Instr.Args.AlignOffset ||
-                    nextInsn.insn is Node.Instr.CurrentMemory || nextInsn.insn is Node.Instr.GrowMemory
-                is Insn.MemNeededOnStack -> true
-                else -> false
-            }
-            if (nextInstrRequiresMemOnStack) fn
-            else fn.popExpecting(ctx.cls.mem.memType).addInsns(InsnNode(Opcodes.POP))
-        }
 
     fun applySetGlobal(ctx: FuncContext, fn: Func, index: Int) = ctx.cls.globalAtIndex(index).let {
         when (it) {

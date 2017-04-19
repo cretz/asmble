@@ -230,14 +230,14 @@ open class InsnReworker {
         is Node.Instr.F32Add, is Node.Instr.F32Sub, is Node.Instr.F32Mul, is Node.Instr.F32Div,
         is Node.Instr.F32Eq, is Node.Instr.F32Ne, is Node.Instr.F32Lt, is Node.Instr.F32Le,
         is Node.Instr.F32Gt, is Node.Instr.F32Ge, is Node.Instr.F32Sqrt, is Node.Instr.F32Min,
-        is Node.Instr.F32Max -> POP_PARAM + POP_PARAM + PUSH_RESULT
-        is Node.Instr.F32Abs, is Node.Instr.F32Neg, is Node.Instr.F32CopySign, is Node.Instr.F32Ceil,
+        is Node.Instr.F32Max, is Node.Instr.F32CopySign -> POP_PARAM + POP_PARAM + PUSH_RESULT
+        is Node.Instr.F32Abs, is Node.Instr.F32Neg, is Node.Instr.F32Ceil,
         is Node.Instr.F32Floor, is Node.Instr.F32Trunc, is Node.Instr.F32Nearest -> POP_PARAM + PUSH_RESULT
         is Node.Instr.F64Add, is Node.Instr.F64Sub, is Node.Instr.F64Mul, is Node.Instr.F64Div,
         is Node.Instr.F64Eq, is Node.Instr.F64Ne, is Node.Instr.F64Lt, is Node.Instr.F64Le,
         is Node.Instr.F64Gt, is Node.Instr.F64Ge, is Node.Instr.F64Sqrt, is Node.Instr.F64Min,
-        is Node.Instr.F64Max -> POP_PARAM + POP_PARAM + PUSH_RESULT
-        is Node.Instr.F64Abs, is Node.Instr.F64Neg, is Node.Instr.F64CopySign, is Node.Instr.F64Ceil,
+        is Node.Instr.F64Max, is Node.Instr.F64CopySign -> POP_PARAM + POP_PARAM + PUSH_RESULT
+        is Node.Instr.F64Abs, is Node.Instr.F64Neg, is Node.Instr.F64Ceil,
         is Node.Instr.F64Floor, is Node.Instr.F64Trunc, is Node.Instr.F64Nearest -> POP_PARAM + PUSH_RESULT
         is Node.Instr.I32WrapI64, is Node.Instr.I32TruncSF32, is Node.Instr.I32TruncUF32,
         is Node.Instr.I32TruncSF64, is Node.Instr.I32TruncUF64, is Node.Instr.I64ExtendSI32,

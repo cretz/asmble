@@ -35,9 +35,11 @@ interface Mem {
     fun loadOp(ctx: FuncContext, func: Func, insn: Node.Instr.Args.AlignOffset): Func
 
     // Caller can trust the mem instance is on the stack followed
-    // by the value. If it's already there after call anyways, this can
-    // leave the mem inst on the stack and it will be reused or popped.
+    // by the value. If storeLeavesMemOnStack is true, this should leave the mem
+    // on the stack after every call.
     fun storeOp(ctx: FuncContext, func: Func, insn: Node.Instr.Args.AlignOffset): Func
+
+    val storeLeavesMemOnStack: Boolean
 
     companion object {
         const val PAGE_SIZE = 65536

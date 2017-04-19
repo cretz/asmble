@@ -13,7 +13,8 @@ data class Func(
     val stack: List<TypeRef> = emptyList(),
     val blockStack: List<Block> = emptyList(),
     // Contains index of JumpInsnNode that has a null label initially
-    val ifStack: List<Int> = emptyList()
+    val ifStack: List<Int> = emptyList(),
+    val lastStackIsMemLeftover: Boolean = false
 ) {
 
     val desc: String get() = ret.asMethodRetDesc(*params.toTypedArray())

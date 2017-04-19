@@ -47,15 +47,12 @@ open class ByteBufferMem(val direct: Boolean = true) : Mem {
             addInsns(
                 forceFnType<ByteBuffer.(Int) -> Buffer>(ByteBuffer::position).invokeVirtual(),
                 TypeInsnNode(Opcodes.CHECKCAST, memType.asmName),
-                // TODO: Is there a cheaper bulk approach instead of manually building
-                // a byte array? What's the harm of using a String in the constant pool instead?
-                bytes.size.const,
-                IntInsnNode(Opcodes.NEWARRAY, Opcodes.T_BYTE)
-            ).
-            addInsns(bytes.withIndex().flatMap { (index, byte) ->
-                listOf(InsnNode(Opcodes.DUP), index.const, byte.toInt().const, InsnNode(Opcodes.BASTORE))
-            }).
-            addInsns(
+                // We're going to do this as an LDC string in ISO-8859 and read it back at runtime
+                LdcInsnNode(bytes.toString(Charsets.ISO_8859_1)),
+                LdcInsnNode("ISO-8859-1"),
+                // Ug, can't do func refs on native types here...
+                MethodInsnNode(Opcodes.INVOKEVIRTUAL, String::class.ref.asmName,
+                    "getBytes", "(Ljava/lang/String;)[B", false),
                 0.const,
                 bytes.size.const,
                 forceFnType<ByteBuffer.(ByteArray, Int, Int) -> ByteBuffer>(ByteBuffer::put).invokeVirtual(),
@@ -251,6 +248,8 @@ open class ByteBufferMem(val direct: Boolean = true) : Mem {
                 else -> throw IllegalArgumentException("Unknown store op $insn")
             }
         }
+
+    override val storeLeavesMemOnStack get() = true
 
     companion object : ByteBufferMem()
 }
