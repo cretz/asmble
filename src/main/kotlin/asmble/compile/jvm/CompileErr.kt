@@ -48,7 +48,7 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
         override val asmErrString get() = "type mismatch"
     }
 
-    class IfThenValueWithoutElse() : CompileErr("If has value but no else clause") {
+    class IfThenValueWithoutElse : CompileErr("If has value but no else clause") {
         override val asmErrString get() = "type mismatch"
     }
 

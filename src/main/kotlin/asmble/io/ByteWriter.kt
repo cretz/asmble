@@ -4,8 +4,6 @@ import asmble.util.unsignedToSignedInt
 import asmble.util.unsignedToSignedLong
 import java.io.ByteArrayOutputStream
 import java.math.BigInteger
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
 abstract class ByteWriter {
     abstract val written: Int

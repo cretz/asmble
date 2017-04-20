@@ -15,8 +15,6 @@ import java.lang.invoke.MethodHandle
 
 open class FuncBuilder {
     fun fromFunc(ctx: ClsContext, f: Node.Func, index: Int): Func {
-        // TODO: validate local size?
-        // TODO: initialize non-param locals?
         ctx.debug { "Building function ${ctx.funcName(index)}" }
         ctx.trace { "Function ast:\n${SExprToStr.fromSExpr(AstToSExpr.fromFunc(f))}" }
         var func = Func(
@@ -145,7 +143,6 @@ open class FuncBuilder {
         is Node.Instr.I32Load8S, is Node.Instr.I32Load8U, is Node.Instr.I32Load16U, is Node.Instr.I32Load16S,
         is Node.Instr.I64Load8S, is Node.Instr.I64Load8U, is Node.Instr.I64Load16U, is Node.Instr.I64Load16S,
         is Node.Instr.I64Load32S, is Node.Instr.I64Load32U ->
-            // TODO: why do I have to cast?
             applyLoadOp(ctx, fn, i as Node.Instr.Args.AlignOffset)
         is Node.Instr.I32Store, is Node.Instr.I64Store, is Node.Instr.F32Store, is Node.Instr.F64Store,
         is Node.Instr.I32Store8, is Node.Instr.I32Store16, is Node.Instr.I64Store8, is Node.Instr.I64Store16,

@@ -4,16 +4,15 @@ import asmble.ast.SExpr
 
 open class SExprToStr(val depthBeforeNewline: Int, val countBeforeNewlineAll: Int, val indent: String) {
 
-    @Suppress("UNCHECKED_CAST") // TODO: why?
     fun fromSExpr(vararg exp: SExpr): String = appendAll(exp.asList(), StringBuilder()).trim().toString()
 
-    @Suppress("UNCHECKED_CAST") // TODO: why?
+    @Suppress("UNCHECKED_CAST")
     fun <T : Appendable> append(exp: SExpr, sb: T = StringBuilder() as T, indentLevel: Int = 0) = when(exp) {
         is SExpr.Symbol -> appendSymbol(exp, sb)
         is SExpr.Multi -> appendMulti(exp, sb, indentLevel)
     }
 
-    @Suppress("UNCHECKED_CAST") // TODO: why?
+    @Suppress("UNCHECKED_CAST")
     fun <T : Appendable> appendSymbol(exp: SExpr.Symbol, sb: T = StringBuilder() as T): T {
         val quoted = exp.quoted || exp.contents.requiresQuote
         if (!quoted) sb.append(exp.contents) else {
@@ -33,7 +32,7 @@ open class SExprToStr(val depthBeforeNewline: Int, val countBeforeNewlineAll: In
         return sb
     }
 
-    @Suppress("UNCHECKED_CAST") // TODO: why?
+    @Suppress("UNCHECKED_CAST")
     fun <T : Appendable> appendMulti(exp: SExpr.Multi, sb: T = StringBuilder() as T, indentLevel: Int = 0): T {
         sb.append('(')
         appendAll(exp.vals, sb, indentLevel)
@@ -41,7 +40,7 @@ open class SExprToStr(val depthBeforeNewline: Int, val countBeforeNewlineAll: In
         return sb
     }
 
-    @Suppress("UNCHECKED_CAST") // TODO: why?
+    @Suppress("UNCHECKED_CAST")
     fun <T : Appendable> appendAll(exps: List<SExpr>, sb: T = StringBuilder() as T, indentLevel: Int = 0): T {
         val newlineAll = exps.sumBy { it.count() } >= countBeforeNewlineAll
         var wasLastNewline = false

@@ -179,8 +179,9 @@ val Node.Type.Func.asmDesc: String get() =
     (this.ret?.typeRef ?: Void::class.ref).asMethodRetDesc(*this.params.map { it.typeRef }.toTypedArray())
 
 fun ClassNode.withComputedFramesAndMaxs(): ByteArray {
-    // TODO: compute maxs adds a bunch of NOPs for unreachable code
-    // See $func12 of block.wast. Is removing these worth the extra visit cycle?
+    // Note, compute maxs adds a bunch of NOPs for unreachable code.
+    // See $func12 of block.wast. I don't believe the extra time over the
+    // instructions to remove the NOPs is worth it.
     val cw = ClassWriter(ClassWriter.COMPUTE_FRAMES + ClassWriter.COMPUTE_MAXS)
     this.accept(cw)
     return cw.toByteArray()

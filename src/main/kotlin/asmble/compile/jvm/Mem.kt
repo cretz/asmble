@@ -39,6 +39,7 @@ interface Mem {
     // on the stack after every call.
     fun storeOp(ctx: FuncContext, func: Func, insn: Node.Instr.Args.AlignOffset): Func
 
+    // Whether or not storeOp leaves a mem instance on the stack
     val storeLeavesMemOnStack: Boolean
 
     companion object {

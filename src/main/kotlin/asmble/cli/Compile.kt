@@ -4,7 +4,6 @@ import asmble.ast.Script
 import asmble.compile.jvm.AstToAsm
 import asmble.compile.jvm.ClsContext
 import asmble.compile.jvm.withComputedFramesAndMaxs
-import org.objectweb.asm.ClassWriter
 import java.io.FileOutputStream
 
 open class Compile : Command<Compile.Args>() {

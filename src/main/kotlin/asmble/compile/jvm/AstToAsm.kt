@@ -33,7 +33,6 @@ open class AstToAsm {
             ctx.cls.fields.add(FieldNode(Opcodes.ACC_PRIVATE + Opcodes.ACC_FINAL, "table",
                 Array<MethodHandle>::class.ref.asmDesc, null, null))
         // Now all method imports as method handles
-        // TODO: why does this fail with asm-debug-all but not with just regular asm?
         ctx.cls.fields.addAll(ctx.importFuncs.indices.map {
             FieldNode(Opcodes.ACC_PRIVATE + Opcodes.ACC_FINAL, ctx.funcName(it),
                 MethodHandle::class.ref.asmDesc, null, null)

@@ -433,14 +433,20 @@ sealed class Node {
 
         companion object {
             // TODO: why can't I set a val in init?
-            var strToOpMap = emptyMap<String, InstrOp<*>>(); private set
-            var classToOpMap = emptyMap<KClass<out Instr>, InstrOp<*>>(); private set
-            var strToOpcodeMap = emptyMap<String, Short>(); private set
-            var opcodeToStrMap = emptyMap<Short, String>(); private set
+            val strToOpMap: Map<String, InstrOp<*>>
+            val classToOpMap: Map<KClass<out Instr>, InstrOp<*>>
+            val strToOpcodeMap: Map<String, Short>
+            val opcodeToStrMap: Map<Short, String>
 
             fun op(opcode: Short) = opcodeToStrMap[opcode]?.let(strToOpMap::get) ?: error("No opcode found: $opcode")
 
             init {
+                // Local vars, set to vals later
+                var strToOpMap = emptyMap<String, InstrOp<*>>()
+                var classToOpMap = emptyMap<KClass<out Instr>, InstrOp<*>>()
+                var strToOpcodeMap = emptyMap<String, Short>()
+                var opcodeToStrMap = emptyMap<Short, String>()
+
                 // Can't use reification here because inline funcs not allowed in nested context :-(
                 fun <T> opMapEntry(
                     name: String,
@@ -639,6 +645,11 @@ sealed class Node {
                 opMapEntry("i64.reinterpret/f64", 0xbd, ReinterpretOp::NoArg, Instr.I64ReinterpretF64, Instr.I64ReinterpretF64::class)
                 opMapEntry("f32.reinterpret/i32", 0xbe, ReinterpretOp::NoArg, Instr.F32ReinterpretI32, Instr.F32ReinterpretI32::class)
                 opMapEntry("f64.reinterpret/i64", 0xbf, ReinterpretOp::NoArg, Instr.F64ReinterpretI64, Instr.F64ReinterpretI64::class)
+
+                this.strToOpMap = strToOpMap
+                this.classToOpMap = classToOpMap
+                this.strToOpcodeMap = strToOpcodeMap
+                this.opcodeToStrMap = opcodeToStrMap
             }
         }
     }
