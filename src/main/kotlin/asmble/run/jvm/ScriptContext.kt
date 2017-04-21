@@ -6,12 +6,14 @@ import asmble.compile.jvm.*
 import asmble.io.AstToSExpr
 import asmble.io.SExprToStr
 import asmble.run.jvm.annotation.WasmName
+import asmble.run.jvm.emscripten.Env
 import asmble.util.Logger
 import asmble.util.toRawIntBits
 import asmble.util.toRawLongBits
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.ClassVisitor
 import org.objectweb.asm.Opcodes
+import java.io.OutputStream
 import java.io.PrintWriter
 import java.lang.invoke.MethodHandle
 import java.lang.invoke.MethodHandles
@@ -35,6 +37,9 @@ data class ScriptContext(
         copy(registrations = registrations + (
             "spectest" to NativeModule(TestHarness::class.java, TestHarness(out))
         ))
+
+    fun withEmscriptenEnvRegistered(out: OutputStream = System.out) =
+        copy(registrations = registrations + ("env" to NativeModule(Env::class.java, Env(logger, out))))
 
     fun runCommand(cmd: Script.Cmd) = when (cmd) {
         is Script.Cmd.Module ->

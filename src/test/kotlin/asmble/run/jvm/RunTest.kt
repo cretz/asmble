@@ -8,8 +8,9 @@ import org.junit.Assume
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
+import java.io.ByteArrayOutputStream
+import java.io.OutputStreamWriter
 import java.io.PrintWriter
-import java.io.StringWriter
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 
@@ -33,16 +34,17 @@ class RunTest(val unit: SpecTestUnit) : Logger by Logger.Print(Logger.Level.INFO
         debug { "AST: " + unit.script }
         debug { "AST Str: " + SExprToStr.fromSExpr(*AstToSExpr.fromScript(unit.script).toTypedArray()) }
 
-        val out = StringWriter()
-        val scriptContext = ScriptContext(
+        val out = ByteArrayOutputStream()
+        var scriptContext = ScriptContext(
             packageName = "asmble.temp.${unit.name}",
             logger = this,
             adjustContext = { it.copy(eagerFailLargeMemOffset = false) },
             defaultMaxMemPages = unit.defaultMaxMemPages
-        ).withHarnessRegistered(PrintWriter(out))
+        ).withHarnessRegistered(PrintWriter(OutputStreamWriter(out, Charsets.UTF_8), true)).
+            withEmscriptenEnvRegistered(out)
 
         // This will fail assertions as necessary
-        unit.script.commands.fold(scriptContext) { scriptContext, cmd ->
+        scriptContext = unit.script.commands.fold(scriptContext) { scriptContext, cmd ->
             try {
                 scriptContext.runCommand(cmd)
             } catch (t: Throwable) {
@@ -52,7 +54,16 @@ class RunTest(val unit: SpecTestUnit) : Logger by Logger.Print(Logger.Level.INFO
             }
         }
 
-        unit.expectedOutput?.let { assertEquals(it, out.toString()) }
+        // If there is a main, we run it w/ no args because emscripten doesn't set it as the start func
+        scriptContext.modules.lastOrNull()?.also { lastMod ->
+            lastMod.cls.methods.find {
+                it.name == "main" &&
+                it.returnType == Int::class.java &&
+                it.parameterTypes.asList() == listOf(Int::class.java, Int::class.java)
+            }?.invoke(lastMod.instance(scriptContext), 0, 0)
+        }
+
+        unit.expectedOutput?.let { assertEquals(it, out.toByteArray().toString(Charsets.UTF_8)) }
     }
 
     companion object {
