@@ -26,6 +26,19 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
         else -> 1
     }
 
+    val emscriptenStaticBump by lazy {
+        // I am not about to pull in a JSON parser just for this
+        wast.lastIndexOf(";; METADATA:").takeIf { it != -1 }?.let { metaIndex ->
+            wast.indexOfAny(listOf("\n", "\"staticBump\": "), metaIndex).
+                takeIf { it != -1 && wast[it] != '\n' }?.
+                let { bumpIndex ->
+                    wast.indexOfAny(charArrayOf('\n', ','), bumpIndex).takeIf { it != -1 }?.let { commaIndex ->
+                        wast.substring(bumpIndex + 14, commaIndex).trim().toIntOrNull()
+                    }
+                }
+        }
+    }
+
     fun warningInsteadOfErrReason(t: Throwable) = when (name) {
         // NaN bit patterns can be off
         "float_literals", "float_exprs" ->

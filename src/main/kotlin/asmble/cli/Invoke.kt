@@ -1,6 +1,7 @@
 package asmble.cli
 
 import asmble.compile.jvm.javaIdent
+import asmble.run.jvm.Module
 
 open class Invoke : ScriptCommand<Invoke.Args>() {
 
@@ -37,7 +38,8 @@ open class Invoke : ScriptCommand<Invoke.Args>() {
         // Instantiate the module
         val module =
             if (args.module == "<last-in-entry>") ctx.modules.lastOrNull() ?: error("No modules available")
-            else ctx.registrations[args.module] ?: error("Unable to find module registered as ${args.module}")
+            else ctx.registrations[args.module] as? Module.Instance ?:
+                error("Unable to find module registered as ${args.module}")
         // Just make sure the module is instantiated here...
         module.instance(ctx)
         // If an export is provided, call it

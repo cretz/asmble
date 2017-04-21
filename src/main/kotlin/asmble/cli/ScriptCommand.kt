@@ -2,6 +2,7 @@ package asmble.cli
 
 import asmble.ast.Script
 import asmble.compile.jvm.javaIdent
+import asmble.run.jvm.Module
 import asmble.run.jvm.ScriptContext
 import java.io.File
 import java.util.*
@@ -70,9 +71,8 @@ abstract class ScriptCommand<T> : Command<T>() {
         }
         // Do registrations
         ctx = args.registrations.fold(ctx) { ctx, (moduleName, className) ->
-            val cls = Class.forName(className, true, ctx.classLoader)
-            ctx.copy(registrations = ctx.registrations +
-                (moduleName to ScriptContext.NativeModule(cls, cls.newInstance())))
+            ctx.withModuleRegistered(moduleName,
+                Module.Native(Class.forName(className, true, ctx.classLoader).newInstance()))
         }
         if (args.specTestRegister) ctx = ctx.withHarnessRegistered()
         return ctx

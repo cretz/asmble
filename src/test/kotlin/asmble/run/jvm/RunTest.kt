@@ -3,6 +3,7 @@ package asmble.run.jvm
 import asmble.SpecTestUnit
 import asmble.io.AstToSExpr
 import asmble.io.SExprToStr
+import asmble.run.jvm.emscripten.Env
 import asmble.util.Logger
 import org.junit.Assume
 import org.junit.Test
@@ -40,8 +41,12 @@ class RunTest(val unit: SpecTestUnit) : Logger by Logger.Print(Logger.Level.INFO
             logger = this,
             adjustContext = { it.copy(eagerFailLargeMemOffset = false) },
             defaultMaxMemPages = unit.defaultMaxMemPages
-        ).withHarnessRegistered(PrintWriter(OutputStreamWriter(out, Charsets.UTF_8), true)).
-            withEmscriptenEnvRegistered(out)
+        ).withHarnessRegistered(PrintWriter(OutputStreamWriter(out, Charsets.UTF_8), true))
+
+        // If there's a staticBump, we are an emscripten mod and we need to include the env
+        unit.emscriptenStaticBump?.also { staticBump ->
+            scriptContext = scriptContext.withModuleRegistered("env", Env.module(this, staticBump, out))
+        }
 
         // This will fail assertions as necessary
         scriptContext = unit.script.commands.fold(scriptContext) { scriptContext, cmd ->
