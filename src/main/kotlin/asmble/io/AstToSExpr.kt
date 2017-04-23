@@ -4,7 +4,7 @@ import asmble.ast.Node
 import asmble.ast.SExpr
 import asmble.ast.Script
 
-open class AstToSExpr {
+open class AstToSExpr(val parensInstrs: Boolean = true) {
 
     fun fromAction(v: Script.Cmd.Action) = when(v) {
         is Script.Cmd.Action.Invoke -> newMulti("invoke", v.name) + v.string.quoted + v.exprs.flatMap(this::fromInstrs)
@@ -47,10 +47,11 @@ open class AstToSExpr {
 
     fun fromData(v: Node.Data) =
         (newMulti("data") + v.index) + (newMulti("offset") +
-            fromInstrs(v.offset)) + v.data.toString(Charsets.UTF_8).quoted
+            fromInstrs(v.offset).unwrapInstrs()) + v.data.toString(Charsets.UTF_8).quoted
 
     fun fromElem(v: Node.Elem) =
-        (newMulti("elem") + v.index) + (newMulti("offset") + fromInstrs(v.offset)) + v.funcIndices.map(this::fromNum)
+        (newMulti("elem") + v.index) + (newMulti("offset") + fromInstrs(v.offset).unwrapInstrs()) +
+            v.funcIndices.map(this::fromNum)
 
     fun fromElemType(v: Node.ElemType) = when(v) {
         Node.ElemType.ANYFUNC -> fromString("anyfunc")
@@ -65,7 +66,7 @@ open class AstToSExpr {
 
     fun fromFunc(v: Node.Func, name: String? = null, impExp: ImportOrExport? = null) =
         newMulti("func", name) + impExp?.let(this::fromImportOrExport) + fromFuncSig(v.type) +
-            fromLocals(v.locals) + fromInstrs(v.instructions)
+            fromLocals(v.locals) + fromInstrs(v.instructions).unwrapInstrs()
 
     fun fromFuncSig(v: Node.Type.Func): List<SExpr> {
         var ret = emptyList<SExpr>()
@@ -75,7 +76,8 @@ open class AstToSExpr {
     }
 
     fun fromGlobal(v: Node.Global, name: String? = null, impExp: ImportOrExport? = null) =
-        newMulti("global", name) + impExp?.let(this::fromImportOrExport) + fromGlobalSig(v.type) + fromInstrs(v.init)
+        newMulti("global", name) + impExp?.let(this::fromImportOrExport) +
+            fromGlobalSig(v.type) + fromInstrs(v.init).unwrapInstrs()
 
     fun fromGlobalSig(v: Node.Type.Global) =
         if (v.mutable) newMulti("mut") + fromType(v.contentType) else fromType(v.contentType)
@@ -131,7 +133,34 @@ open class AstToSExpr {
         }
     }
 
-    fun fromInstrs(v: List<Node.Instr>) = v.map(this::fromInstr)
+    fun fromInstrs(v: List<Node.Instr>): List<SExpr.Multi> {
+        var index = 0
+        fun untilNext(vararg insns: Node.Instr): Pair<List<SExpr>, Node.Instr?> {
+            var ret = emptyList<SExpr>()
+            while (index < v.size) {
+                val insn = v[index]
+                index++
+                if (insns.contains(insn)) return ret to insn
+                var expr = fromInstr(insn)
+                if (insn is Node.Instr.Block || insn is Node.Instr.Loop) {
+                    expr += untilNext(Node.Instr.End).first
+                    if (!parensInstrs) expr += "end"
+                } else if (insn is Node.Instr.If) untilNext(Node.Instr.Else, Node.Instr.End).let { (subList, insn) ->
+                    var elseList = subList
+                    if (insn is Node.Instr.Else) {
+                        if (parensInstrs) expr += newMulti("then") + subList else expr = expr + subList + "end"
+                        elseList = untilNext(Node.Instr.End).first
+                    }
+                    if (parensInstrs) expr += newMulti("else") + elseList else expr = expr + elseList + "end"
+                }
+                if (parensInstrs) ret += expr else ret += expr.vals
+            }
+            require(insns.isEmpty()) { "Expected one of ${insns.map { it.op().name }}, got none" }
+            return ret to null
+        }
+        if (parensInstrs) return untilNext().first.map { it as SExpr.Multi }
+        return listOf(SExpr.Multi(untilNext().first))
+    }
 
     fun fromLocals(v: List<Node.Type.Value>) =
         if (v.isEmpty()) null else newMulti("local") + v.map(this::fromType)
@@ -211,6 +240,8 @@ open class AstToSExpr {
         initName?.also { require(it.startsWith("$")) }
         return SExpr.Multi() + initSymb + initName
     }
+    private fun List<SExpr.Multi>.unwrapInstrs() =
+        if (parensInstrs) this else this.single().vals
     private val String.quoted get() = fromString(this, true)
 
     companion object : AstToSExpr()
