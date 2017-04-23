@@ -120,8 +120,7 @@ open class InsnReworker {
             var insideOfBlocks = 0
             for ((amountChanged, insnIndex) in stackManips.asReversed()) {
                 // We have to skip inner blocks because we don't want to inject inside of there
-                val isEnd = insns[insnIndex] == Node.Instr.End
-                if (isEnd) {
+                if (insns[insnIndex] == Node.Instr.End) {
                     insideOfBlocks++
                     ctx.trace { "Found end, not injecting until before $insideOfBlocks more block start(s)" }
                     continue
@@ -130,15 +129,16 @@ open class InsnReworker {
                 // When we reach the top of a block, we need to decrement out inside count and
                 // if we are at 0, add the result of said block if necessary to the count.
                 if (insideOfBlocks > 0) {
-                    val (isBlock, blockStackDiff) = insns[insnIndex].let {
+                    // If it's not a block, just ignore it
+                    val blockStackDiff = insns[insnIndex].let {
                         when (it) {
-                            is Node.Instr.Block -> true to if (it.type == null) 0 else 1
-                            is Node.Instr.Loop -> true to 0
-                            is Node.Instr.If -> true to if (it.type == null) -1 else 0
-                            else -> false to 0
+                            is Node.Instr.Block -> if (it.type == null) 0 else 1
+                            is Node.Instr.Loop -> 0
+                            is Node.Instr.If -> if (it.type == null) -1 else 0
+                            else -> null
                         }
                     }
-                    if (isBlock) {
+                    if (blockStackDiff != null) {
                         insideOfBlocks--
                         ctx.trace { "Found block begin, number of blocks we're still inside: $insideOfBlocks" }
                         // We're back on our block, change the count
