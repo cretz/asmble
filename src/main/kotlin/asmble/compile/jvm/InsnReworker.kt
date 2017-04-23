@@ -196,8 +196,8 @@ open class InsnReworker {
         is Node.Instr.GetLocal -> PUSH_RESULT
         is Node.Instr.SetLocal -> POP_PARAM
         is Node.Instr.TeeLocal -> POP_PARAM + PUSH_RESULT
-        is Node.Instr.GetGlobal -> POP_THIS + PUSH_RESULT
-        is Node.Instr.SetGlobal -> POP_THIS + POP_PARAM
+        is Node.Instr.GetGlobal -> PUSH_RESULT
+        is Node.Instr.SetGlobal -> POP_PARAM
         is Node.Instr.I32Load, is Node.Instr.I64Load, is Node.Instr.F32Load, is Node.Instr.F64Load,
         is Node.Instr.I32Load8S, is Node.Instr.I32Load8U, is Node.Instr.I32Load16U, is Node.Instr.I32Load16S,
         is Node.Instr.I64Load8S, is Node.Instr.I64Load8U, is Node.Instr.I64Load16U, is Node.Instr.I64Load16S,
@@ -266,7 +266,6 @@ open class InsnReworker {
     }.let { (count, _) -> count }
 
     companion object : InsnReworker() {
-        const val POP_THIS = -1
         const val POP_PARAM = -1
         const val PUSH_RESULT = 1
         const val NOP = 0
