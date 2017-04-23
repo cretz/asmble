@@ -87,6 +87,7 @@ open class InsnReworker {
     }
 
     fun injectNeededStackVars(ctx: ClsContext, insns: List<Node.Instr>): List<Insn> {
+        ctx.trace { "Calculating places to inject needed stack variables" }
         // How we do this:
         // We run over each insn, and keep a running list of stack
         // manips. If there is an insn that needs something so far back,
@@ -95,7 +96,8 @@ open class InsnReworker {
         //
         // Note, we don't do any injections for things like "this" if
         // they aren't needed up the stack (e.g. a simple getfield can
-        // just aload 0 itself)
+        // just aload 0 itself). Also we take special care not to inject
+        // inside of an inner block.
 
         // Each pair is first the amount of stack that is changed (0 is
         // ignored, push is positive, pull is negative) then the index
@@ -115,13 +117,45 @@ open class InsnReworker {
             if (count == 0) return inject(stackManips.size)
             var countSoFar = 0
             var foundUnconditionalJump = false
+            var insideOfBlocks = 0
             for ((amountChanged, insnIndex) in stackManips.asReversed()) {
+                // We have to skip inner blocks because we don't want to inject inside of there
+                val isEnd = insns[insnIndex] == Node.Instr.End
+                if (isEnd) {
+                    insideOfBlocks++
+                    ctx.trace { "Found end, not injecting until before $insideOfBlocks more block start(s)" }
+                    continue
+                }
+
+                // When we reach the top of a block, we need to decrement out inside count and
+                // if we are at 0, add the result of said block if necessary to the count.
+                if (insideOfBlocks > 0) {
+                    val (isBlock, blockStackDiff) = insns[insnIndex].let {
+                        when (it) {
+                            is Node.Instr.Block -> true to if (it.type == null) 0 else 1
+                            is Node.Instr.Loop -> true to 0
+                            is Node.Instr.If -> true to if (it.type == null) -1 else 0
+                            else -> false to 0
+                        }
+                    }
+                    if (isBlock) {
+                        insideOfBlocks--
+                        ctx.trace { "Found block begin, number of blocks we're still inside: $insideOfBlocks" }
+                        // We're back on our block, change the count
+                        if (insideOfBlocks == 0) countSoFar += blockStackDiff
+                    }
+                    if (insideOfBlocks > 0) continue
+                }
+
                 countSoFar += amountChanged
                 if (!foundUnconditionalJump) foundUnconditionalJump = insns[insnIndex].let { insn ->
                     insn is Node.Instr.Br || insn is Node.Instr.BrTable ||
                         insn is Node.Instr.Unreachable || insn is Node.Instr.Return
                 }
-                if (countSoFar == count) return inject(insnIndex)
+                if (countSoFar == count) {
+                    ctx.trace { "Found injection point as before insn #$insnIndex" }
+                    return inject(insnIndex)
+                }
             }
             // Only consider it a failure if we didn't hit any unconditional jumps
             if (!foundUnconditionalJump) throw CompileErr.StackInjectionMismatch(count, insn)
@@ -166,7 +200,7 @@ open class InsnReworker {
             }
 
             // Add the current diff
-            ctx.trace { "Stack diff is ${insnStackDiff(ctx, insn)} for $insn" }
+            ctx.trace { "Stack diff is ${insnStackDiff(ctx, insn)} for insn #$index $insn" }
             stackManips += insnStackDiff(ctx, insn) to index
         }
 

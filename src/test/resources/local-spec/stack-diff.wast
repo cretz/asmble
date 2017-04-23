@@ -1,4 +1,6 @@
 (module
+  (memory 1)
+
   (global $foo (mut i32) (i32.const 20))
   (global $bar (mut f32))
 
@@ -24,6 +26,22 @@
   (func (export "testSqrt") (param $p f32) (result f32)
     (set_global $bar (f32.sqrt (get_local $p)))
     (get_global $bar)
+  )
+
+  ;; Conditionals w/ different load counts had bad stack diff
+  (func (export "testConditional") (param $p i32) (result i32)
+    (get_local $p)
+    (if i32 (get_local $p)
+      (then (i32.load (get_local $p)))
+      (else
+        (i32.add
+          (i32.load (get_local $p))
+          (i32.load (get_local $p))
+        )
+      )
+    )
+    (i32.store)
+    (i32.load (get_local $p))
   )
 )
 
