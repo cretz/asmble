@@ -198,6 +198,7 @@ The reason we use recursive is to clone the spec submodule we have embedded at `
 `gradle wrapper`. Now the `gradlew` command is available.
 
 To build, run `./gradlew build`. This will run all tests which includes the test suite from the WebAssembly spec.
+Running `./gradlew assembleDist` builds the same zip and tar files uploaded to the releases area.
 
 ### Library Notes
 
