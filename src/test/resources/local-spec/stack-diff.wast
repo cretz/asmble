@@ -2,7 +2,7 @@
   (memory 1)
 
   (global $foo (mut i32) (i32.const 20))
-  (global $bar (mut f32))
+  (global $bar (mut f32) (f32.const 0))
 
   ;; This was breaking because stack diff was wrong for get_global and set_global
   (func (export "testGlobals") (param $p i32) (result i32)

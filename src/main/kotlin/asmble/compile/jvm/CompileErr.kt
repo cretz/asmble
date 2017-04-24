@@ -114,8 +114,9 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
 
     class GlobalInitNotConstant(
         val index: Int
-    ) : CompileErr("Expected init for global $index to be constant") {
+    ) : CompileErr("Expected init for global $index to be single constant value") {
         override val asmErrString get() = "constant expression required"
+        override val asmErrStrings get() = listOf(asmErrString, "type mismatch")
     }
 
     class OffsetNotConstant : CompileErr("Expected offset to be constant") {

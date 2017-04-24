@@ -210,7 +210,7 @@ open class AstToAsm {
     fun initializeConstructorGlobals(ctx: ClsContext, func: Func, paramsBeforeImports: Int) =
         ctx.mod.globals.foldIndexed(func) { index, func, global ->
             // In the MVP, we can trust the init is constant stuff and a single instr
-            if (global.init.size > 1) throw CompileErr.GlobalInitNotConstant(index)
+            if (global.init.size != 1) throw CompileErr.GlobalInitNotConstant(index)
             func.addInsns(VarInsnNode(Opcodes.ALOAD, 0)).
                 addInsns(
                     global.init.firstOrNull().let {

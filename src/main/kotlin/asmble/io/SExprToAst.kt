@@ -269,10 +269,9 @@ open class SExprToAst {
         if (maybeImpExp != null) currIndex++
         val sig = toGlobalSig(exp.vals[currIndex])
         currIndex++
-        var (instrs, _) = toInstrs(exp, currIndex, ExprContext(nameMap))
+        val (instrs, _) = toInstrs(exp, currIndex, ExprContext(nameMap))
         // Imports can't have instructions
         if (maybeImpExp?.importModule != null) require(instrs.isEmpty())
-        else if (instrs.isEmpty()) instrs = listOf(sig.contentType.zeroConst)
         return Triple(name, Node.Global(sig, instrs), maybeImpExp)
     }
 
@@ -874,13 +873,6 @@ open class SExprToAst {
     private fun SExpr.Multi.requireFirstSymbol(contents: String, quotedCheck: Boolean? = null) {
         if (this.vals.isEmpty()) throw Exception("Expected symbol of $contents, got empty")
         return this.vals.first().requireSymbol(contents, quotedCheck)
-    }
-
-    private val Node.Type.Value.zeroConst: Node.Instr get() = when (this) {
-        Node.Type.Value.I32 -> Node.Instr.I32Const(0)
-        Node.Type.Value.I64 -> Node.Instr.I64Const(0)
-        Node.Type.Value.F32 -> Node.Instr.F32Const(0f)
-        Node.Type.Value.F64 -> Node.Instr.F64Const(0.0)
     }
 
     companion object : SExprToAst()
