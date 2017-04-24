@@ -13,25 +13,31 @@ buildscript {
     }
 }
 
-apply plugin: 'java'
-apply plugin: 'kotlin'
-apply plugin: 'application'
+allprojects {
+    apply plugin: 'java'
 
-mainClassName = "asmble.cli.MainKt"
-
-repositories {
-    mavenCentral()
+    repositories {
+        mavenCentral()
+    }
 }
 
-distTar.archiveName = 'asmble.tar'
-distZip.archiveName = 'asmble.zip'
+project(':compiler') {
+    apply plugin: 'kotlin'
+    apply plugin: 'application'
 
-dependencies {
-    compile "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
-    compile "org.jetbrains.kotlin:kotlin-reflect:$kotlin_version"
-    compile "org.ow2.asm:asm-tree:$asm_version"
-    compile "org.ow2.asm:asm-util:$asm_version"
-    testCompile 'junit:junit:4.12'
-    testCompile "org.jetbrains.kotlin:kotlin-test-junit:$kotlin_version"
-    testCompile "org.ow2.asm:asm-debug-all:$asm_version"
+    applicationName = "asmble"
+    mainClassName = "asmble.cli.MainKt"
+
+    distTar.archiveName = 'asmble.tar'
+    distZip.archiveName = 'asmble.zip'
+
+    dependencies {
+        compile "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+        compile "org.jetbrains.kotlin:kotlin-reflect:$kotlin_version"
+        compile "org.ow2.asm:asm-tree:$asm_version"
+        compile "org.ow2.asm:asm-util:$asm_version"
+        testCompile 'junit:junit:4.12'
+        testCompile "org.jetbrains.kotlin:kotlin-test-junit:$kotlin_version"
+        testCompile "org.ow2.asm:asm-debug-all:$asm_version"
+    }
 }
