@@ -1,45 +1,25 @@
 package asmble
 
 import asmble.ast.Node
-import asmble.ast.SExpr
 import asmble.ast.Script
-import asmble.io.SExprToAst
-import asmble.io.StrToSExpr
 import asmble.run.jvm.ScriptAssertionError
 import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.nio.file.Paths
 import java.util.stream.Collectors
 
-class SpecTestUnit(val name: String, val wast: String, val expectedOutput: String?) {
+class SpecTestUnit(name: String, wast: String, expectedOutput: String?) : BaseTestUnit(name, wast, expectedOutput) {
 
-    override fun toString() = "Spec unit: $name"
+    override val shouldFail get() = name.endsWith(".fail")
 
-    val shouldFail get() = name.endsWith(".fail")
-
-    val skipRunReason: String? get() = null
-
-    val defaultMaxMemPages get() = when (name) {
+    override val defaultMaxMemPages get() = when (name) {
         "nop"-> 20
         "resizing" -> 830
         "imports" -> 5
         else -> 1
     }
 
-    val emscriptenStaticBump by lazy {
-        // I am not about to pull in a JSON parser just for this
-        wast.lastIndexOf(";; METADATA:").takeIf { it != -1 }?.let { metaIndex ->
-            wast.indexOfAny(listOf("\n", "\"staticBump\": "), metaIndex).
-                takeIf { it != -1 && wast[it] != '\n' }?.
-                let { bumpIndex ->
-                    wast.indexOfAny(charArrayOf('\n', ','), bumpIndex).takeIf { it != -1 }?.let { commaIndex ->
-                        wast.substring(bumpIndex + 14, commaIndex).trim().toIntOrNull()
-                    }
-                }
-        }
-    }
-
-    fun warningInsteadOfErrReason(t: Throwable) = when (name) {
+    override fun warningInsteadOfErrReason(t: Throwable) = when (name) {
         // NaN bit patterns can be off
         "float_literals", "float_exprs" ->
             if (isNanMismatch(t)) "NaN JVM bit patterns can be off" else null
@@ -73,19 +53,6 @@ class SpecTestUnit(val name: String, val wast: String, val expectedOutput: Strin
         is Node.Instr.F64Const -> i.value.isNaN()
         else -> false
     }
-
-    val parseResult: StrToSExpr.ParseResult.Success by lazy {
-        StrToSExpr.parse(wast).let {
-            when (it) {
-                is StrToSExpr.ParseResult.Error -> throw Exception("$name[${it.pos}] Parse fail: ${it.msg}")
-                is StrToSExpr.ParseResult.Success -> it
-            }
-        }
-    }
-
-    val ast: List<SExpr> get() = parseResult.vals
-
-    val script: Script by lazy { SExprToAst.toScript(SExpr.Multi(ast)) }
 
     companion object {
         val unitsPath = "/spec/test/core"

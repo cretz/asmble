@@ -1,6 +1,6 @@
-package asmble.run.jvm.emscripten
+package run.jvm.emscripten;
 
-enum class Errno(val number: Int) {
+public enum Errno {
     EPERM(1),
     ENOENT(2),
     ESRCH(3),
@@ -136,7 +136,30 @@ enum class Errno(val number: Int) {
     ERFKILL(132),
     EHWPOISON(133);
 
-    fun raise(cause: Throwable? = null): Nothing = throw Err(this, cause)
+    final int number;
 
-    class Err(errno: Errno, cause: Throwable? = null) : asmble.run.jvm.emscripten.Err("Errno: $errno", cause)
+    Errno(int number) {
+        this.number = number;
+    }
+
+    public void raise() {
+        raise(null);
+    }
+
+    public void raise(Throwable cause) {
+        throw new ErrnoException(this, cause);
+    }
+
+    public static class ErrnoException extends EmscriptenException {
+        public final Errno errno;
+
+        public ErrnoException(Errno errno) {
+            this(errno, null);
+        }
+
+        public ErrnoException(Errno errno, Throwable cause) {
+            super("Errno: " + errno, cause);
+            this.errno = errno;
+        }
+    }
 }

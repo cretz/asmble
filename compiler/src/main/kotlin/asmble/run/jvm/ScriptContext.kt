@@ -4,6 +4,7 @@ import asmble.ast.Node
 import asmble.ast.Script
 import asmble.compile.jvm.*
 import asmble.io.AstToSExpr
+import asmble.io.Emscripten
 import asmble.io.SExprToStr
 import asmble.util.Logger
 import asmble.util.toRawIntBits
@@ -11,6 +12,8 @@ import asmble.util.toRawLongBits
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.ClassVisitor
 import org.objectweb.asm.Opcodes
+import run.jvm.emscripten.Env
+import java.io.OutputStream
 import java.io.PrintWriter
 import java.lang.invoke.MethodHandle
 import java.lang.invoke.MethodHandles
@@ -31,6 +34,14 @@ data class ScriptContext(
 ) : Logger by logger {
     fun withHarnessRegistered(out: PrintWriter = PrintWriter(System.out, true)) =
         withModuleRegistered("spectest", Module.Native(TestHarness(out)))
+
+    fun withEmscriptenRegistered(metadata: Emscripten.Metadata, out: OutputStream) =
+        Env(metadata.staticBump, out).let { env ->
+            val mods = Env.subModules.fold(listOf(Module.Native(env))) { mods, subMod ->
+                mods + Module.Native(subMod.apply(env))
+            }
+            withModuleRegistered("env", Module.Composite(mods))
+        }
 
     fun withModuleRegistered(name: String, mod: Module) = copy(registrations = registrations + (name to mod))
 

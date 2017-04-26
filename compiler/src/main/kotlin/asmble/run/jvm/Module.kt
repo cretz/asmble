@@ -1,9 +1,9 @@
 package asmble.run.jvm
 
+import asmble.annotation.WasmName
 import asmble.ast.Node
 import asmble.compile.jvm.Mem
 import asmble.compile.jvm.ref
-import asmble.run.jvm.annotation.WasmName
 import java.lang.invoke.MethodHandle
 import java.lang.invoke.MethodHandles
 import java.lang.invoke.MethodType

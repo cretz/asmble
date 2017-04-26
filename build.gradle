@@ -21,6 +21,12 @@ allprojects {
     }
 }
 
+project(':emscripten-runtime') {
+    dependencies {
+        compile project(':annotations')
+    }
+}
+
 project(':compiler') {
     apply plugin: 'kotlin'
     apply plugin: 'application'
@@ -32,6 +38,8 @@ project(':compiler') {
     distZip.archiveName = 'asmble.zip'
 
     dependencies {
+        compile project(':emscripten-runtime')
+
         compile "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
         compile "org.jetbrains.kotlin:kotlin-reflect:$kotlin_version"
         compile "org.ow2.asm:asm-tree:$asm_version"
