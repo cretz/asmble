@@ -7,7 +7,6 @@ import org.junit.runners.Parameterized
 
 @RunWith(Parameterized::class)
 class EmscriptenTest(unit: EmscriptenTestUnit) : TestRunner<EmscriptenTestUnit>(unit) {
-
     companion object {
         var failureReason: Throwable? = null
 

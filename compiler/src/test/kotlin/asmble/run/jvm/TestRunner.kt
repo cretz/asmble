@@ -6,6 +6,7 @@ import asmble.io.AstToSExpr
 import asmble.io.SExprToStr
 import org.junit.Assume
 import org.junit.Test
+import run.jvm.emscripten.Env
 import java.io.ByteArrayOutputStream
 import java.io.OutputStreamWriter
 import java.io.PrintWriter
@@ -39,7 +40,14 @@ abstract class TestRunner<out T : BaseTestUnit>(val unit: T) : TestBase() {
         ).withHarnessRegistered(PrintWriter(OutputStreamWriter(out, Charsets.UTF_8), true))
 
         // If there's a staticBump, we are an emscripten mod and we need to include the env
-        unit.emscriptenMetadata?.also { scriptContext = scriptContext.withEmscriptenRegistered(it, out) }
+        var emEnv: Env? = null
+        unit.emscriptenMetadata?.also {
+            emEnv = Env(it.staticBump, out, "unknown-program")
+            val mods = Env.subModules.fold(listOf(Module.Native(emEnv!!))) { mods, subMod ->
+                mods + Module.Native(subMod.apply(emEnv))
+            }
+            scriptContext = scriptContext.withModuleRegistered("env", Module.Composite(mods))
+        }
 
         // This will fail assertions as necessary
         scriptContext = unit.script.commands.fold(scriptContext) { scriptContext, cmd ->
@@ -58,12 +66,16 @@ abstract class TestRunner<out T : BaseTestUnit>(val unit: T) : TestBase() {
                 if (mainMethod.parameterTypes.isEmpty())
                     mainMethod.invoke(lastMod.instance(scriptContext))
                 else if (mainMethod.parameterTypes.asList() == listOf(Int::class.java, Int::class.java))
-                    mainMethod.invoke(lastMod.instance(scriptContext), 0, 0)
+                    mainMethod.invoke(lastMod.instance(scriptContext), emEnv?.argc ?: 0, emEnv?.argv ?: 0)
                 else
                     error("Unrecognized main method params for $mainMethod")
             }
         }
 
+        // If there was an emscripten env, we have to run the exit callbacks
+        emEnv?.also { it.runAtExitCallbacks(scriptContext.modules.last().instance(scriptContext)) }
+
+        // Check the output
         unit.expectedOutput?.let {
             // Sadly, sometimes the expected output is trimmed in Emscripten tests
             assertEquals(it.trimEnd(), out.toByteArray().toString(Charsets.UTF_8).trimEnd())

@@ -18,7 +18,28 @@ class EmscriptenTestUnit(
 ) : BaseTestUnit(name, wast, expectedOutput) {
     companion object {
         val knownGoodNames = listOf(
-            "core/test_addr_of_stacked"
+            "core/test_addr_of_stacked",
+            // TODO: this fails for me even in the browser on windows
+            // "core/test_alloca",
+            "core/test_alloca_stack",
+            "core/test_array2",
+            "core/test_array2b",
+            // TODO: use of undeclared identifier 'true'
+            // "core/test_assert",
+            // TODO: I'm running the callbacks, but nothing happening
+            // "core/test_atexit",
+            "core/test_atomic",
+            // TODO: lots of special calls, wait for emscripten-wasm to finish out
+            // "core/test_atomic_cxx",
+            "core/test_atoX",
+            // TODO: must use 'struct' tag to refer to type 'Struct'
+            // "core/test_bigarray",
+            // TODO: must use 'struct' tag to refer to type 'bitty'
+            // "core/test_bitfields"
+            "core/test_bsearch"
+            // TODO: unknown type name '_LIBCPP_BEGIN_NAMESPACE_STD'
+            // "core/test_bswap64"
+            // TODO: the rest...maybe if emscripten is cleaned up
         )
 
         val allUnits by lazy { loadUnits() }
@@ -45,7 +66,8 @@ class EmscriptenTestUnit(
                     try {
                         // Run emcc on the cFile
                         val nameSansExt = cFile.fileName.toString().substringBeforeLast(".c")
-                        val cmdArgs = emccCommand + cFile.toString() + "-s" + "WASM=1" + "-o" + "$nameSansExt.html"
+                        val cmdArgs = emccCommand + cFile.toString() +
+                            arrayOf("-s", "WASM=1", "-o", "$nameSansExt.html")
                         TestBase.logger.debug { "Running ${cmdArgs.joinToString(" ")}" }
                         val proc = ProcessBuilder(*cmdArgs).
                             directory(tempDir).
@@ -55,10 +77,15 @@ class EmscriptenTestUnit(
                         proc.inputStream.bufferedReader().forEachLine { TestBase.logger.debug { "[OUT] $it" } }
                         Assert.assertTrue("Timeout", proc.waitFor(10, TimeUnit.SECONDS))
                         Assert.assertEquals(0, proc.exitValue())
+                        var outFile = cFile.resolveSibling("$nameSansExt.out")
+                        if (Files.notExists(outFile)) {
+                            outFile = cFile.resolveSibling("$nameSansExt.txt")
+                            require(Files.exists(outFile)) { "Cannot find out file for $cFile" }
+                        }
                         EmscriptenTestUnit(
                             name = cFile.unitNameFromCFile(),
                             wast = File(tempDir, "$nameSansExt.wast").readText(),
-                            expectedOutput = cFile.resolveSibling("$nameSansExt.out").toFile().readText()
+                            expectedOutput = outFile.toFile().readText()
                         )
                     } catch (e: Exception) { throw Exception("Unable to compile $cFile", e) }
                 }

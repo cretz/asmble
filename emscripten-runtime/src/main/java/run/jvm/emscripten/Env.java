@@ -1,72 +1,94 @@
 package run.jvm.emscripten;
 
-import asmble.annotation.WasmName;
-
 import java.io.OutputStream;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
+import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.function.Function;
 
 public class Env {
-    public static final int TOTAL_STACK = 5242880;
-    public static final int TOTAL_MEMORY = 16777216;
 
     public static final List<Function<Env, Object>> subModules = Arrays.asList(
+        Common::new,
         Syscall::new
     );
 
-    private static int alignTo16(int num) {
-        return ((int) Math.ceil(num / 16.0)) * 16;
-    }
-
-    private final ByteBuffer memory;
-    private final int staticBump;
+    final Mem mem;
     final OutputStream out;
+    final int argc;
+    final int argv;
+    private final List<AtExitCallback> atExitCallbacks = new ArrayList<>();
 
-    public Env(int staticBump, OutputStream out) {
-        this(ByteBuffer.allocateDirect(TOTAL_MEMORY), staticBump, out);
+    public Env(int staticBump, OutputStream out, String programName, String... args) {
+        this(new Mem(staticBump), out, programName, args);
     }
 
-    public Env(ByteBuffer memory, int staticBump, OutputStream out) {
-        this.memory = memory.order(ByteOrder.LITTLE_ENDIAN);
-        this.staticBump = staticBump;
+    public Env(Mem mem, OutputStream out, String programName, String... args) {
+        this.mem = mem;
         this.out = out;
-        // Emscripten sets where "stack top" can start in mem at position 1024.
-        // See https://github.com/WebAssembly/binaryen/issues/979
-        int stackBase = alignTo16(staticBump + 1024 + 16);
-        int stackTop = stackBase + TOTAL_STACK;
-        memory.putInt(1024, stackTop);
+        // We need to add the args which is an int array
+        argc = args.length + 1;
+        int[] argv = new int[argc];
+        argv[0] = mem.putCString(programName);
+        for (int i = 0; i < args.length; i++) {
+            argv[i + 1] = mem.putCString(args[i]);
+        }
+        this.argv = mem.putIntArray(argv);
     }
 
     public ByteBuffer getMemory() {
-        return memory;
+        return mem.buf;
     }
 
-    public byte[] getMemoryBulk(int index, int len) {
-        byte[] ret = new byte[len];
-        ByteBuffer dup = memory.duplicate();
-        dup.position(index);
-        dup.get(ret);
-        return ret;
+    public int getArgc() {
+        return argc;
     }
 
-    public void abort() {
-        throw new UnsupportedOperationException();
+    public int getArgv() {
+        return argv;
     }
 
-    @WasmName("__lock")
-    public void lock(int arg) {
-        throw new UnsupportedOperationException();
+    public void addCallback(int funcPtr, Integer arg) {
+        atExitCallbacks.add(new AtExitCallback(funcPtr, arg));
     }
 
-    public int sbrk(int increment) {
-        throw new UnsupportedOperationException();
+    public void runAtExitCallbacks(Object moduleInst) throws Throwable {
+        MethodHandle noArg = null;
+        MethodHandle withArg = null;
+        for (int i = atExitCallbacks.size() - 1; i >= 0; i--) {
+            AtExitCallback cb = atExitCallbacks.get(i);
+            if (cb.arg == null) {
+                Field table = moduleInst.getClass().getDeclaredField("table");
+                table.setAccessible(true);
+                MethodHandle[] h = (MethodHandle[]) MethodHandles.lookup().unreflectGetter(table).invoke(moduleInst);
+                h[cb.funcPtr].invoke();
+                if (noArg == null) {
+                    noArg = MethodHandles.lookup().bind(moduleInst,
+                        "dynCall_v", MethodType.methodType(Void.TYPE, Integer.TYPE));
+                }
+                noArg.invokeExact(cb.funcPtr);
+            } else {
+                if (withArg == null) {
+                    withArg = MethodHandles.lookup().bind(moduleInst,
+                        "dynCall_vi", MethodType.methodType(Void.TYPE, Integer.TYPE, Integer.TYPE));
+                }
+                withArg.invokeExact(cb.funcPtr, cb.arg.intValue());
+            }
+        }
     }
 
-    @WasmName("__unlock")
-    public void unlock(int arg) {
-        throw new UnsupportedOperationException();
+    public static class AtExitCallback {
+        public final int funcPtr;
+        public final Integer arg;
+
+        public AtExitCallback(int funcPtr, Integer arg) {
+            this.funcPtr = funcPtr;
+            this.arg = arg;
+        }
     }
 }

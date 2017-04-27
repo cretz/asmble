@@ -2,6 +2,8 @@ package run.jvm.emscripten;
 
 import asmble.annotation.WasmName;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -54,17 +56,17 @@ public class Syscall {
     public int llseek(int arg0, int arg1) {
         throw new UnsupportedOperationException();
     }
-//
+
     @WasmName("__syscall146")
     public int writev(int which, int varargs) {
         FStream fd = fd(env.getMemory().getInt(varargs));
         int iov = env.getMemory().getInt(varargs + 4);
         int iovcnt = env.getMemory().getInt(varargs + 8);
         return IntStream.range(0, iovcnt).reduce(0, (total, i) -> {
-           int ptr = env.getMemory().getInt(iov + (i * 8));
-           int len = env.getMemory().getInt(iov + (i * 8) + 4);
-           if (len > 0) fd.write(env.getMemoryBulk(ptr, len));
-           return total + len;
+            int ptr = env.getMemory().getInt(iov + (i * 8));
+            int len = env.getMemory().getInt(iov + (i * 8) + 4);
+            if (len > 0) fd.write(env.mem.getBulk(ptr, len));
+            return total + len;
         });
     }
 
