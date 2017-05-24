@@ -2,6 +2,7 @@ package asmble.io
 
 import asmble.ast.Node
 import asmble.util.*
+import java.nio.ByteBuffer
 
 open class BinaryToAst(
     val version: Long = 1L,
@@ -215,7 +216,10 @@ open class BinaryToAst(
         else -> error("Unknown value type: $type")
     }
 
-    fun ByteReader.readString() = this.readVarUInt32AsInt().let { String(this.readBytes(it)) }
+    fun ByteReader.readString() = this.readVarUInt32AsInt().let {
+        // We have to use the decoder directly to get malformed-input errors
+        Charsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(this.readBytes(it))).toString()
+    }
     fun <T> ByteReader.readList(fn: (ByteReader) -> T) = this.readVarUInt32().let { listSize ->
         (0 until listSize).map { fn(this) }
     }

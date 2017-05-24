@@ -5,6 +5,7 @@ import asmble.AsmErr
 sealed class IoErr(message: String, cause: Throwable? = null) : RuntimeException(message, cause), AsmErr {
     class UnexpectedEnd : IoErr("Unexpected EOF") {
         override val asmErrString get() = "unexpected end"
+        override val asmErrStrings get() = listOf(asmErrString, "length out of bounds")
     }
 
     class InvalidMagicNumber : IoErr("Invalid magic number") {

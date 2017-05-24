@@ -3,6 +3,7 @@ package asmble.run.jvm
 import asmble.AsmErr
 import java.lang.invoke.WrongMethodTypeException
 import java.nio.BufferOverflowException
+import java.nio.charset.MalformedInputException
 
 open class ExceptionTranslator {
     fun translate(ex: Throwable): List<String> = when (ex) {
@@ -13,6 +14,7 @@ open class ExceptionTranslator {
         is ArrayIndexOutOfBoundsException -> listOf("undefined element", "elements segment does not fit")
         is AsmErr -> ex.asmErrStrings
         is IndexOutOfBoundsException -> listOf("out of bounds memory access")
+        is MalformedInputException -> listOf("invalid UTF-8 encoding")
         is NoSuchMethodException -> listOf("unknown import", "type mismatch")
         is NullPointerException -> listOf("undefined element", "uninitialized element")
         is StackOverflowError -> listOf("call stack exhausted")
