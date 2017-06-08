@@ -21,7 +21,7 @@ class SpecTestUnit(name: String, wast: String, expectedOutput: String?) : BaseTe
 
     override fun warningInsteadOfErrReason(t: Throwable) = when (name) {
         // NaN bit patterns can be off
-        "float_literals", "float_exprs" ->
+        "float_literals", "float_exprs", "float_misc" ->
             if (isNanMismatch(t)) "NaN JVM bit patterns can be off" else null
         // We don't hold table capacity right now
         // TODO: Figure out how we want to store/retrieve table capacity. Right now

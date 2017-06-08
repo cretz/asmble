@@ -1,6 +1,6 @@
 package run.jvm.emscripten;
 
-import asmble.annotation.WasmName;
+import asmble.annotation.WasmExport;
 
 public class Common {
     private final Env env;
@@ -13,7 +13,7 @@ public class Common {
         throw new UnsupportedOperationException();
     }
 
-    @WasmName("__assert_fail")
+    @WasmExport("__assert_fail")
     public void assertFail(int conditionPtr, int filenamePtr, int line, int funcPtr) {
         throw new AssertionError("Assertion failed: " + env.mem.getCString(conditionPtr) + ", at " +
             env.mem.getCString(filenamePtr) + ":" + line + ", func " + env.mem.getCString(funcPtr));
@@ -29,12 +29,12 @@ public class Common {
         return 0;
     }
 
-    @WasmName("__cxa_call_unexpected")
+    @WasmExport("__cxa_call_unexpected")
     public void callUnexpected(int ex) {
         throw new EmscriptenException("Unexpected: " + ex);
     }
 
-    @WasmName("__lock")
+    @WasmExport("__lock")
     public void lock(int arg) {
         throw new UnsupportedOperationException();
     }
@@ -43,7 +43,7 @@ public class Common {
         throw new UnsupportedOperationException();
     }
 
-    @WasmName("__unlock")
+    @WasmExport("__unlock")
     public void unlock(int arg) {
         throw new UnsupportedOperationException();
     }

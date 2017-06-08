@@ -1,10 +1,10 @@
 package asmble.run.jvm
 
+import asmble.annotation.WasmExternalKind
 import asmble.ast.Node
 import asmble.ast.Script
 import asmble.compile.jvm.*
 import asmble.io.AstToSExpr
-import asmble.io.Emscripten
 import asmble.io.SExprToStr
 import asmble.util.Logger
 import asmble.util.toRawIntBits
@@ -12,8 +12,6 @@ import asmble.util.toRawLongBits
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.ClassVisitor
 import org.objectweb.asm.Opcodes
-import run.jvm.emscripten.Env
-import java.io.OutputStream
 import java.io.PrintWriter
 import java.lang.invoke.MethodHandle
 import java.lang.invoke.MethodHandles
@@ -30,7 +28,8 @@ data class ScriptContext(
     val classLoader: SimpleClassLoader =
         ScriptContext.SimpleClassLoader(ScriptContext::class.java.classLoader, logger),
     val exceptionTranslator: ExceptionTranslator = ExceptionTranslator,
-    val defaultMaxMemPages: Int = 1
+    val defaultMaxMemPages: Int = 1,
+    val includeBinaryInCompiledClass: Boolean = false
 ) : Logger by logger {
     fun withHarnessRegistered(out: PrintWriter = PrintWriter(System.out, true)) =
         withModuleRegistered("spectest", Module.Native(TestHarness(out)))
@@ -252,7 +251,8 @@ data class ScriptContext(
             packageName = packageName,
             className = className,
             mod = mod,
-            logger = logger
+            logger = logger,
+            includeBinary = includeBinaryInCompiledClass
         ).let(adjustContext)
         AstToAsm.fromModule(ctx)
         return Module.Compiled(mod, classLoader.fromBuiltContext(ctx), name, ctx.mem)
@@ -262,7 +262,13 @@ data class ScriptContext(
         // Find a method that matches our expectations
         val module = registrations[import.module] ?: error("Unable to find module ${import.module}")
         val javaName = if (getter) "get" + import.field.javaIdent.capitalize() else import.field.javaIdent
-        return module.bindMethod(this, import.field, javaName, methodType) ?:
+        val kind = when (import.kind) {
+            is Node.Import.Kind.Func -> WasmExternalKind.FUNCTION
+            is Node.Import.Kind.Table -> WasmExternalKind.TABLE
+            is Node.Import.Kind.Memory -> WasmExternalKind.MEMORY
+            is Node.Import.Kind.Global -> WasmExternalKind.GLOBAL
+        }
+        return module.bindMethod(this, import.field, kind, javaName, methodType) ?:
             throw NoSuchMethodException("Cannot find import for ${import.module}::${import.field}")
     }
 

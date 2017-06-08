@@ -1,9 +1,7 @@
 package run.jvm.emscripten;
 
-import asmble.annotation.WasmName;
+import asmble.annotation.WasmExport;
 
-import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -23,12 +21,12 @@ public class Syscall {
         this.env = env;
     }
 
-    @WasmName("__syscall6")
+    @WasmExport("__syscall6")
     public int close(int arg0, int arg1) {
         throw new UnsupportedOperationException();
     }
 
-    @WasmName("__syscall54")
+    @WasmExport("__syscall54")
     public int ioctl(int which, int varargs) {
         FStream fd = fd(env.getMemory().getInt(varargs));
         IoctlOp op = IoctlOp.byNumber.get(env.getMemory().getInt(varargs + 4));
@@ -52,12 +50,12 @@ public class Syscall {
         }
     }
 
-    @WasmName("__syscall140")
+    @WasmExport("__syscall140")
     public int llseek(int arg0, int arg1) {
         throw new UnsupportedOperationException();
     }
 
-    @WasmName("__syscall146")
+    @WasmExport("__syscall146")
     public int writev(int which, int varargs) {
         FStream fd = fd(env.getMemory().getInt(varargs));
         int iov = env.getMemory().getInt(varargs + 4);

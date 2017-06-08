@@ -1,6 +1,7 @@
 package asmble.run.jvm
 
-import asmble.annotation.WasmName
+import asmble.annotation.WasmExport
+import asmble.annotation.WasmExternalKind
 import asmble.compile.jvm.Mem
 import java.io.PrintWriter
 import java.lang.invoke.MethodHandle
@@ -11,10 +12,10 @@ open class TestHarness(val out: PrintWriter) {
 
     // WASM is evil, not me:
     //  https://github.com/WebAssembly/spec/blob/6a01dab6d29b7c2b5dfd3bb3879bbd6ab76fd5dc/interpreter/host/import/spectest.ml#L12
-    @get:WasmName("global") val globalInt = 666
-    @get:WasmName("global") val globalLong = 666L
-    @get:WasmName("global") val globalFloat = 666.6f
-    @get:WasmName("global") val globalDouble = 666.6
+    @get:WasmExport("global", kind = WasmExternalKind.GLOBAL) val globalInt = 666
+    @get:WasmExport("global", kind = WasmExternalKind.GLOBAL) val globalLong = 666L
+    @get:WasmExport("global", kind = WasmExternalKind.GLOBAL) val globalFloat = 666.6f
+    @get:WasmExport("global", kind = WasmExternalKind.GLOBAL) val globalDouble = 666.6
     val table = arrayOfNulls<MethodHandle>(10)
     val memory = ByteBuffer.
         allocateDirect(2 * Mem.PAGE_SIZE).

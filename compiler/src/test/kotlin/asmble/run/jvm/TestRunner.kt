@@ -2,7 +2,10 @@ package asmble.run.jvm
 
 import asmble.BaseTestUnit
 import asmble.TestBase
+import asmble.annotation.WasmModule
+import asmble.io.AstToBinary
 import asmble.io.AstToSExpr
+import asmble.io.ByteWriter
 import asmble.io.SExprToStr
 import org.junit.Assume
 import org.junit.Test
@@ -36,7 +39,9 @@ abstract class TestRunner<out T : BaseTestUnit>(val unit: T) : TestBase() {
             packageName = unit.packageName,
             logger = this,
             adjustContext = { it.copy(eagerFailLargeMemOffset = false) },
-            defaultMaxMemPages = unit.defaultMaxMemPages
+            defaultMaxMemPages = unit.defaultMaxMemPages,
+            // Include the binary data so we can check it later
+            includeBinaryInCompiledClass = true
         ).withHarnessRegistered(PrintWriter(OutputStreamWriter(out, Charsets.UTF_8), true))
 
         // If there's a staticBump, we are an emscripten mod and we need to include the env
@@ -79,6 +84,16 @@ abstract class TestRunner<out T : BaseTestUnit>(val unit: T) : TestBase() {
         unit.expectedOutput?.let {
             // Sadly, sometimes the expected output is trimmed in Emscripten tests
             assertEquals(it.trimEnd(), out.toByteArray().toString(Charsets.UTF_8).trimEnd())
+        }
+
+        // Also check the annotations
+        scriptContext.modules.forEach { mod ->
+            val expectedBinaryString = ByteArrayOutputStream().also {
+                ByteWriter.OutputStream(it).also { AstToBinary.fromModule(it, mod.mod) }
+            }.toByteArray().toString(Charsets.ISO_8859_1)
+            val actualBinaryString =
+                mod.cls.getDeclaredAnnotation(WasmModule::class.java)?.binary ?: error("No annotation")
+            assertEquals(expectedBinaryString, actualBinaryString)
         }
     }
 }

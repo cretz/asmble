@@ -9,6 +9,9 @@ import org.objectweb.asm.tree.*
 import org.objectweb.asm.util.TraceClassVisitor
 import java.io.PrintWriter
 import java.io.StringWriter
+import java.lang.reflect.Constructor
+import java.lang.reflect.Executable
+import java.lang.reflect.Method
 import kotlin.reflect.KClass
 import kotlin.reflect.KFunction
 import kotlin.reflect.KProperty
@@ -59,6 +62,13 @@ val Class<*>.valueType: Node.Type.Value? get() = when (this) {
     Double::class.java -> Node.Type.Value.F64
     else -> error("Unrecognized value type class: $this")
 }
+
+val Executable.ref: TypeRef get() = when (this) {
+    is Method -> TypeRef(Type.getType(this))
+    is Constructor<*> -> TypeRef(Type.getType(this))
+    else -> error("Unknown executable $this")
+}
+
 
 val KProperty<*>.declarer: Class<*> get() = this.javaField!!.declaringClass
 val KProperty<*>.asmDesc: String get() = Type.getDescriptor(this.javaField!!.type)
@@ -178,11 +188,12 @@ fun MethodNode.toAsmString(): String {
 val Node.Type.Func.asmDesc: String get() =
     (this.ret?.typeRef ?: Void::class.ref).asMethodRetDesc(*this.params.map { it.typeRef }.toTypedArray())
 
-fun ClassNode.withComputedFramesAndMaxs(): ByteArray {
+fun ClassNode.withComputedFramesAndMaxs(
+    cw: ClassWriter = ClassWriter(ClassWriter.COMPUTE_FRAMES + ClassWriter.COMPUTE_MAXS)
+): ByteArray {
     // Note, compute maxs adds a bunch of NOPs for unreachable code.
     // See $func12 of block.wast. I don't believe the extra time over the
     // instructions to remove the NOPs is worth it.
-    val cw = ClassWriter(ClassWriter.COMPUTE_FRAMES + ClassWriter.COMPUTE_MAXS)
     this.accept(cw)
     return cw.toByteArray()
 }

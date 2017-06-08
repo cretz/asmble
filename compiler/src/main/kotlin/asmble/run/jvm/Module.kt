@@ -1,6 +1,7 @@
 package asmble.run.jvm
 
-import asmble.annotation.WasmName
+import asmble.annotation.WasmExport
+import asmble.annotation.WasmExternalKind
 import asmble.ast.Node
 import asmble.compile.jvm.Mem
 import asmble.compile.jvm.ref
@@ -8,13 +9,25 @@ import java.lang.invoke.MethodHandle
 import java.lang.invoke.MethodHandles
 import java.lang.invoke.MethodType
 import java.lang.reflect.Constructor
+import java.lang.reflect.Modifier
 
 interface Module {
-    fun bindMethod(ctx: ScriptContext, wasmName: String, javaName: String, type: MethodType): MethodHandle?
+    fun bindMethod(
+        ctx: ScriptContext,
+        wasmName: String,
+        wasmKind: WasmExternalKind,
+        javaName: String,
+        type: MethodType
+    ): MethodHandle?
 
     data class Composite(val modules: List<Module>) : Module {
-        override fun bindMethod(ctx: ScriptContext, wasmName: String, javaName: String, type: MethodType) =
-            modules.asSequence().mapNotNull { it.bindMethod(ctx, wasmName, javaName, type) }.singleOrNull()
+        override fun bindMethod(
+            ctx: ScriptContext,
+            wasmName: String,
+            wasmKind: WasmExternalKind,
+            javaName: String,
+            type: MethodType
+        ) = modules.asSequence().mapNotNull { it.bindMethod(ctx, wasmName, wasmKind, javaName, type) }.singleOrNull()
     }
 
     interface Instance : Module {
@@ -22,16 +35,22 @@ interface Module {
         // Guaranteed to be the same instance when there is no error
         fun instance(ctx: ScriptContext): Any
 
-        override fun bindMethod(ctx: ScriptContext, wasmName: String, javaName: String, type: MethodType) =
-            try {
-                MethodHandles.lookup().bind(instance(ctx), javaName, type)
-            } catch (_: NoSuchMethodException) {
-                // Try any method w/ the proper annotation
-                cls.methods.mapNotNull { method ->
-                    if (method.getAnnotation(WasmName::class.java)?.value != wasmName) null
-                    else MethodHandles.lookup().unreflect(method).bindTo(instance(ctx)).takeIf { it.type() == type }
-                }.singleOrNull()
-            }
+        override fun bindMethod(
+            ctx: ScriptContext,
+            wasmName: String,
+            wasmKind: WasmExternalKind,
+            javaName: String,
+            type: MethodType
+        ) = cls.methods.filter {
+            // @WasmExport match or just javaName match
+            Modifier.isPublic(it.modifiers) &&
+                !Modifier.isStatic(it.modifiers) &&
+                it.getDeclaredAnnotation(WasmExport::class.java).let { ann ->
+                    if (ann == null) it.name == javaName else ann.value == wasmName && ann.kind == wasmKind
+                }
+        }.mapNotNull {
+            MethodHandles.lookup().unreflect(it).bindTo(instance(ctx)).takeIf { it.type() == type }
+        }.singleOrNull()
     }
 
     data class Native(override val cls: Class<*>, val inst: Any) : Instance {

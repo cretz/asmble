@@ -1,10 +1,17 @@
 package asmble.compile.jvm
 
+import asmble.annotation.WasmExport
+import asmble.annotation.WasmExternalKind
+import asmble.annotation.WasmImport
+import asmble.annotation.WasmModule
 import asmble.ast.Node
+import asmble.io.AstToBinary
+import asmble.io.ByteWriter
 import asmble.util.Either
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
 import org.objectweb.asm.tree.*
+import java.io.ByteArrayOutputStream
 import java.lang.invoke.MethodHandle
 import java.lang.invoke.MethodHandles
 
@@ -13,12 +20,13 @@ open class AstToAsm {
     fun fromModule(ctx: ClsContext) {
         // Invoke dynamic among other things
         ctx.cls.superName = Object::class.ref.asmName
-        ctx.cls.version = Opcodes.V1_7
+        ctx.cls.version = Opcodes.V1_8
         ctx.cls.access += Opcodes.ACC_PUBLIC
         addFields(ctx)
         addConstructors(ctx)
         addFuncs(ctx)
         addExports(ctx)
+        addAnnotations(ctx)
     }
 
     fun addFields(ctx: ClsContext) {
@@ -85,7 +93,7 @@ open class AstToAsm {
         func = initializeConstructorTables(ctx, func, 0)
         func = executeConstructorStartFunction(ctx, func, 0)
         func = func.addInsns(InsnNode(Opcodes.RETURN))
-        ctx.cls.methods.add(func.toMethodNode())
+        ctx.cls.methods.add(toConstructorNode(ctx, func))
     }
 
     fun addMaxMemConstructor(ctx: ClsContext) {
@@ -107,7 +115,7 @@ open class AstToAsm {
             MethodInsnNode(Opcodes.INVOKESPECIAL, ctx.thisRef.asmName, "<init>", desc, false),
             InsnNode(Opcodes.RETURN)
         )
-        ctx.cls.methods.add(func.toMethodNode())
+        ctx.cls.methods.add(toConstructorNode(ctx, func))
     }
 
     fun addMemClassConstructor(ctx: ClsContext) {
@@ -148,7 +156,7 @@ open class AstToAsm {
 
         func = executeConstructorStartFunction(ctx, func, 1)
         func = func.addInsns(InsnNode(Opcodes.RETURN))
-        ctx.cls.methods.add(func.toMethodNode())
+        ctx.cls.methods.add(toConstructorNode(ctx, func))
     }
 
     fun addMemDefaultConstructor(ctx: ClsContext) {
@@ -167,7 +175,7 @@ open class AstToAsm {
                 MethodInsnNode(Opcodes.INVOKESPECIAL, ctx.thisRef.asmName, "<init>", desc, false),
                 InsnNode(Opcodes.RETURN)
             )
-        ctx.cls.methods.add(func.toMethodNode())
+        ctx.cls.methods.add(toConstructorNode(ctx, func))
     }
 
     fun constructorImportTypes(ctx: ClsContext) =
@@ -175,6 +183,61 @@ open class AstToAsm {
         // We know it's only getters
         ctx.importGlobals.map { MethodHandle::class.ref } +
         ctx.mod.imports.filter { it.kind is Node.Import.Kind.Table }.map { Array<MethodHandle>::class.ref }
+
+    fun toConstructorNode(ctx: ClsContext, func: Func) = mutableListOf<List<AnnotationNode>>().let { paramAnns ->
+        // If the first param is a mem class and imported, add annotation
+        // Otherwise if it is a mem class and not-imported or an int, no annotations
+        // Otherwise do nothing because the rest of the params are imports
+        func.params.firstOrNull()?.also { firstParam ->
+            if (firstParam == Int::class.ref) {
+                paramAnns.add(emptyList())
+            } else if (firstParam == ctx.mem.memType) {
+                val importMem = ctx.mod.imports.find { it.kind is Node.Import.Kind.Memory }
+                if (importMem == null) paramAnns.add(emptyList())
+                else paramAnns.add(listOf(importAnnotation(ctx, importMem)))
+            }
+        }
+        // All non-mem imports one after another
+        ctx.importFuncs.forEach { paramAnns.add(listOf(importAnnotation(ctx, it))) }
+        ctx.importGlobals.forEach { paramAnns.add(listOf(importAnnotation(ctx, it))) }
+        ctx.mod.imports.forEach {
+            if (it.kind is Node.Import.Kind.Table) paramAnns.add(listOf(importAnnotation(ctx, it)))
+        }
+        func.toMethodNode().also { it.visibleParameterAnnotations = paramAnns.toTypedArray() }
+    }
+
+    fun importAnnotation(ctx: ClsContext, import: Node.Import) = AnnotationNode(WasmImport::class.ref.asmDesc).also {
+        it.values = mutableListOf<Any>("module", import.module, "field", import.field)
+        fun addValues(desc: String, limits: Node.ResizableLimits? = null) {
+            it.values.add("desc")
+            it.values.add(desc)
+            if (limits != null) {
+                it.values.add("resizableLimitInitial")
+                it.values.add(limits.initial)
+                if (limits.maximum != null) {
+                    it.values.add("resizableLimitMaximum")
+                    it.values.add(limits.maximum)
+                }
+            }
+            it.values.add("kind")
+            it.values.add(arrayOf(WasmExternalKind::class.ref.asmDesc, when (import.kind) {
+                is Node.Import.Kind.Func -> WasmExternalKind.FUNCTION.name
+                is Node.Import.Kind.Table -> WasmExternalKind.TABLE.name
+                is Node.Import.Kind.Memory -> WasmExternalKind.MEMORY.name
+                is Node.Import.Kind.Global -> WasmExternalKind.GLOBAL.name
+            }))
+        }
+        when (import.kind) {
+            is Node.Import.Kind.Func ->
+                ctx.typeAtIndex(import.kind.typeIndex).let { addValues(it.asmDesc) }
+            is Node.Import.Kind.Table ->
+                addValues(Array<MethodHandle>::class.ref.asMethodRetDesc(), import.kind.type.limits)
+            is Node.Import.Kind.Memory ->
+                addValues(ctx.mem.memType.asMethodRetDesc(), import.kind.type.limits)
+            is Node.Import.Kind.Global ->
+                addValues(import.kind.type.contentType.typeRef.asMethodRetDesc())
+        }
+    }
 
     fun setConstructorGlobalImports(ctx: ClsContext, func: Func, paramsBeforeImports: Int) =
         ctx.importGlobals.indices.fold(func) { func, importIndex ->
@@ -411,6 +474,13 @@ open class AstToAsm {
         }
     }
 
+    fun exportAnnotation(export: Node.Export) = AnnotationNode(WasmExport::class.ref.asmDesc).also {
+        it.values = listOf(
+            "value", export.field,
+            "kind", arrayOf(WasmExternalKind::class.ref.asmDesc, export.kind.name)
+        )
+    }
+
     fun addExportFunc(ctx: ClsContext, export: Node.Export) {
         val funcType = ctx.funcTypeAtIndex(export.index)
         val method = MethodNode(Opcodes.ACC_PUBLIC, export.field.javaIdent, funcType.asmDesc, null, null)
@@ -452,6 +522,7 @@ open class AstToAsm {
             Node.Type.Value.F32 -> Opcodes.FRETURN
             Node.Type.Value.F64 -> Opcodes.DRETURN
         }))
+        method.visibleAnnotations = listOf(exportAnnotation(export))
         ctx.cls.methods.plusAssign(method)
     }
 
@@ -481,6 +552,7 @@ open class AstToAsm {
             Node.Type.Value.F32 -> Opcodes.FRETURN
             Node.Type.Value.F64 -> Opcodes.DRETURN
         }))
+        method.visibleAnnotations = listOf(exportAnnotation(export))
         ctx.cls.methods.plusAssign(method)
     }
 
@@ -494,6 +566,7 @@ open class AstToAsm {
             FieldInsnNode(Opcodes.GETFIELD, ctx.thisRef.asmName, "memory", ctx.mem.memType.asmDesc),
             InsnNode(Opcodes.ARETURN)
         )
+        method.visibleAnnotations = listOf(exportAnnotation(export))
         ctx.cls.methods.plusAssign(method)
     }
 
@@ -507,6 +580,7 @@ open class AstToAsm {
             FieldInsnNode(Opcodes.GETFIELD, ctx.thisRef.asmName, "table", Array<MethodHandle>::class.ref.asmDesc),
             InsnNode(Opcodes.ARETURN)
         )
+        method.visibleAnnotations = listOf(exportAnnotation(export))
         ctx.cls.methods.plusAssign(method)
     }
 
@@ -514,6 +588,23 @@ open class AstToAsm {
         ctx.cls.methods.addAll(ctx.mod.funcs.mapIndexed { index, func ->
             ctx.funcBuilder.fromFunc(ctx, func, ctx.importFuncs.size + index).toMethodNode()
         })
+    }
+
+    fun addAnnotations(ctx: ClsContext) {
+        val annotationVals = mutableListOf<Any>()
+        ctx.modName?.let { annotationVals.addAll(listOf("name", it)) }
+        if (ctx.includeBinary) {
+            // We are going to store this as a string of bytes in an annotation on the class. The linker
+            // used to use this, but no longer does so it is opt-in for others to use. We choose to use an
+            // annotation instead of an attribute for the same reasons Scala chose to make the switch in
+            // 2.8+: Easier runtime reflection despite some size cost.
+            annotationVals.addAll(listOf("binary", ByteArrayOutputStream().also {
+                    ByteWriter.OutputStream(it).also { AstToBinary.fromModule(it, ctx.mod) }
+            }.toByteArray().toString(Charsets.ISO_8859_1)))
+        }
+        ctx.cls.visibleAnnotations = listOf(
+            AnnotationNode(WasmModule::class.ref.asmDesc).also { it.values = annotationVals }
+        )
     }
 
     companion object : AstToAsm()

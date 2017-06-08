@@ -16,6 +16,7 @@ data class ClsContext(
     val mod: Node.Module,
     val cls: ClassNode = ClassNode().also { it.name = (packageName.replace('.', '/') + "/$className").trimStart('/') },
     val mem: Mem = ByteBufferMem,
+    val modName: String? = null,
     val reworker: InsnReworker = InsnReworker,
     val logger: Logger = Logger.Print(Logger.Level.OFF),
     val funcBuilder: FuncBuilder = FuncBuilder,
@@ -26,7 +27,8 @@ data class ClsContext(
     val preventMemIndexOverflow: Boolean = false,
     val accurateNanBits: Boolean = true,
     val checkSignedDivIntegerOverflow: Boolean = true,
-    val jumpTableChunkSize: Int = 5000
+    val jumpTableChunkSize: Int = 5000,
+    val includeBinary: Boolean = false
 ) : Logger by logger {
     val importFuncs: List<Node.Import> by lazy { mod.imports.filter { it.kind is Node.Import.Kind.Func } }
     val importGlobals: List<Node.Import> by lazy { mod.imports.filter { it.kind is Node.Import.Kind.Global } }
