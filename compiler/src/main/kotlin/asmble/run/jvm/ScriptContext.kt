@@ -283,6 +283,7 @@ data class ScriptContext(
         bindImport(import, true, MethodType.methodType(Class.forName(mem.memType.asm.className))).
             invokeWithArguments()!!
 
+    @Suppress("UNCHECKED_CAST")
     fun resolveImportTable(import: Node.Import, tableType: Node.Type.Table) =
         bindImport(import, true, MethodType.methodType(Array<MethodHandle>::class.java)).
             invokeWithArguments()!! as Array<MethodHandle>

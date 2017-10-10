@@ -28,6 +28,7 @@ fun KFunction<*>.invokeStatic() =
 fun KFunction<*>.invokeVirtual() =
     MethodInsnNode(Opcodes.INVOKEVIRTUAL, this.declarer.ref.asmName, this.name, this.asmDesc, false)
 
+@Suppress("NOTHING_TO_INLINE")
 inline fun <T : Function<*>> forceFnType(fn: T) = fn as KFunction<*>
 
 val KClass<*>.const: LdcInsnNode get() = (if (this == Void::class) Void.TYPE else this.java).const

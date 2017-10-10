@@ -21,11 +21,9 @@ open class AstToSExpr(val parensInstrs: Boolean = true) {
             newMulti("assert_trap") + fromAction(v.action) + v.failure
         is Script.Cmd.Assertion.Malformed -> when (v.module) {
             is Script.LazyModule.SExpr -> newMulti("assert_malformed") + v.module.sexpr + v.failure
-            else -> newMulti("assert_malformed") + fromModule(v.module.value) + v.failure
         }
         is Script.Cmd.Assertion.Invalid -> when (v.module) {
             is Script.LazyModule.SExpr -> newMulti("assert_invalid") + v.module.sexpr + v.failure
-            else -> newMulti("assert_invalid") + fromModule(v.module.value) + v.failure
         }
         is Script.Cmd.Assertion.SoftInvalid ->
             newMulti("assert_soft_invalid") + fromModule(v.module) + v.failure

@@ -6,6 +6,7 @@ import asmble.compile.jvm.ClsContext
 import asmble.compile.jvm.withComputedFramesAndMaxs
 import java.io.FileOutputStream
 
+@Suppress("NAME_SHADOWING")
 open class Compile : Command<Compile.Args>() {
 
     override val name = "compile"
