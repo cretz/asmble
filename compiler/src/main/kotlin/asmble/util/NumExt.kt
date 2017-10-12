@@ -1,8 +1,13 @@
 package asmble.util
 
+import java.math.BigDecimal
 import java.math.BigInteger
 
 internal const val INT_MASK = 0xffffffffL
+internal val MAX_UINT32 = BigInteger("ffffffff", 16)
+internal val MIN_INT32 = BigInteger.valueOf(Int.MIN_VALUE.toLong())
+internal val MAX_UINT64 = BigInteger("ffffffffffffffff", 16)
+internal val MIN_INT64 = BigInteger.valueOf(Long.MIN_VALUE)
 
 fun Byte.toUnsignedShort() = (this.toInt() and 0xff).toShort()
 

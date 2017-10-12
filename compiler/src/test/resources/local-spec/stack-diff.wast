@@ -31,7 +31,7 @@
   ;; Conditionals w/ different load counts had bad stack diff
   (func (export "testConditional") (param $p i32) (result i32)
     (get_local $p)
-    (if i32 (get_local $p)
+    (if (result i32) (get_local $p)
       (then (i32.load (get_local $p)))
       (else
         (i32.add

@@ -494,8 +494,12 @@ open class FuncBuilder {
                 // Must at least have the item on the stack that the block expects if it expects something
                 val needsPopBeforeJump = needsToPopBeforeJumping(ctx, fn, block)
                 val toLabel = if (needsPopBeforeJump) LabelNode() else block.requiredLabel
-                fn.addInsns(JumpInsnNode(Opcodes.IFNE, toLabel)).let { fn ->
-                    block.endTypes.firstOrNull()?.let { fn.peekExpecting(it) }
+                fn.addInsns(JumpInsnNode(Opcodes.IFNE, toLabel)).let { origFn ->
+                    val fn = block.endTypes.firstOrNull()?.let { endType ->
+                        // We have to pop the stack and re-push to get the right type after unreachable here...
+                        //  Ref: https://github.com/WebAssembly/spec/pull/537
+                        origFn.popExpecting(endType).push(endType)
+                    } ?: origFn
                     if (needsPopBeforeJump) buildPopBeforeJump(ctx, fn, block, toLabel)
                     else fn
                 }

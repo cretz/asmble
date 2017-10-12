@@ -101,9 +101,10 @@ open class AstToSExpr(val parensInstrs: Boolean = true) {
     fun fromImportMemory(v: Node.Import.Kind.Memory, name: String? = null) =
         newMulti("memory", name) + fromMemorySig(v.type)
 
-    fun fromImportOrExport(v: ImportOrExport) =
-        if (v.importModule == null) newMulti("export") + v.field
-        else (newMulti("import") + v.importModule) + v.field
+    fun fromImportOrExport(v: ImportOrExport) = when (v) {
+        is ImportOrExport.Import -> listOf((newMulti("import") + v.module) + v.name)
+        is ImportOrExport.Export -> v.fields.map { newMulti("export") + it }
+    }
 
     fun fromImportTable(v: Node.Import.Kind.Table, name: String? = null) =
         newMulti("table", name) + fromTableSig(v.type)
@@ -232,8 +233,8 @@ open class AstToSExpr(val parensInstrs: Boolean = true) {
             if (exp == null) this else this.copy(vals = this.vals + fromString(exp))
     private operator fun SExpr.Multi.plus(exp: SExpr?) =
         if (exp == null) this else this.copy(vals = this.vals + exp)
-    private operator fun SExpr.Multi.plus(exps: List<SExpr>) =
-        if (exps.isEmpty()) this else this.copy(vals = this.vals + exps)
+    private operator fun SExpr.Multi.plus(exps: List<SExpr>?) =
+        if (exps == null || exps.isEmpty()) this else this.copy(vals = this.vals + exps)
     private fun newMulti(initSymb: String? = null, initName: String? = null): SExpr.Multi {
         initName?.also { require(it.startsWith("$")) }
         return SExpr.Multi() + initSymb + initName

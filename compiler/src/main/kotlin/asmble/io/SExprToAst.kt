@@ -66,13 +66,15 @@ open class SExprToAst {
     }
 
     fun toBlockSigMaybe(exp: SExpr.Multi, offset: Int): List<Node.Type.Value> {
-        val types = exp.vals.drop(offset).takeUntilNullLazy { if (it is SExpr.Symbol) toTypeMaybe(it) else null }
+        val multi = exp.vals.getOrNull(offset) as? SExpr.Multi
+        if (multi == null || multi.vals.firstOrNull()?.symbolStr() != "result") return emptyList()
+        val types = multi.vals.drop(1).map { it.symbol()?.let { toTypeMaybe(it) } ?: error("Unknown type on $it") }
         // We can only handle one type for now
         require(types.size  <= 1)
         return types
     }
 
-    fun toCmd(exp: SExpr.Multi): Script.Cmd {
+    fun toCmdMaybe(exp: SExpr.Multi): Script.Cmd? {
         val expName = exp.vals.first().symbolStr()
         return when(expName) {
             "module" ->
@@ -87,7 +89,7 @@ open class SExprToAst {
             "script", "input", "output" ->
                 toMeta(exp)
             else ->
-                error("Unrecognized cmd expr '$expName'")
+                null
         }
     }
 
@@ -152,7 +154,7 @@ open class SExprToAst {
         if (maybeOpAndOffset != null) {
             // Everything left in the multi should be a a multi expression
             return exp.vals.drop(maybeOpAndOffset.second).flatMap {
-                toExprMaybe(it as SExpr.Multi, ctx)
+                toExprMaybe(it as SExpr.Multi, ctx).also { if (it.isEmpty()) throw IoErr.UnknownOperator() }
             } + maybeOpAndOffset.first
         }
         // Other blocks take up the rest (ignore names)
@@ -214,7 +216,7 @@ open class SExprToAst {
         val name = exp.maybeName(currentIndex)
         if (name != null) currentIndex++
         val maybeImpExp = toImportOrExportMaybe(exp, currentIndex)
-        if (maybeImpExp != null) currentIndex++
+        maybeImpExp?.also { currentIndex += it.itemCount }
         var (nameMap, exprsUsed, sig) = toFuncSig(exp, currentIndex, origNameMap, types)
         currentIndex += exprsUsed
         val locals = exp.repeated("local", currentIndex, { toLocals(it) }).mapIndexed { index, (nameMaybe, vals) ->
@@ -224,7 +226,7 @@ open class SExprToAst {
         currentIndex += locals.size
         val (instrs, _) = toInstrs(exp, currentIndex, ExprContext(nameMap))
         // Imports can't have locals or instructions
-        if (maybeImpExp?.importModule != null) require(locals.isEmpty() && instrs.isEmpty())
+        if (maybeImpExp is ImportOrExport.Import) require(locals.isEmpty() && instrs.isEmpty())
         return Triple(name, Node.Func(sig, locals.flatten(), instrs), maybeImpExp)
     }
 
@@ -245,16 +247,22 @@ open class SExprToAst {
             nameMaybe?.also { require(vals.size == 1); nameMap += "local:$it" to index }
             vals
         }
-        val results = exp.repeated("result", offset + params.size, this::toResult)
+        val resultExps = exp.repeated("result", offset + params.size, this::toResult)
+        val results = resultExps.flatten()
         if (results.size > 1) throw IoErr.InvalidResultArity()
-        val usedExps = params.size + results.size + if (typeRef == null) 0 else 1
+        val usedExps = params.size + resultExps.size + if (typeRef == null) 0 else 1
+        // Make sure there aren't parameters following the result
+        if (resultExps.isNotEmpty() && (exp.vals.getOrNull(offset + params.size + resultExps.size) as? SExpr.Multi)?.
+                vals?.firstOrNull()?.symbolStr() == "param") {
+            throw IoErr.ResultBeforeParameter()
+        }
         // Check against type ref
         if (typeRef != null) {
             // No params or results means just use it
             if (params.isEmpty() && results.isEmpty()) return Triple(nameMap, usedExps, typeRef)
             // Otherwise, just make sure it matches
-            require(typeRef.params == params.flatten() && typeRef.ret == results.firstOrNull()) {
-                "Params for type ref do not match explicit ones"
+            if (typeRef.params != params.flatten() || typeRef.ret != results.firstOrNull()) {
+                throw IoErr.FuncTypeRefMismatch()
             }
         }
         return Triple(nameMap, usedExps, Node.Type.Func(params.flatten(), results.firstOrNull()))
@@ -266,12 +274,12 @@ open class SExprToAst {
         val name = exp.maybeName(currIndex)
         if (name != null) currIndex++
         val maybeImpExp = toImportOrExportMaybe(exp, currIndex)
-        if (maybeImpExp != null) currIndex++
+        maybeImpExp?.also { currIndex += it.itemCount }
         val sig = toGlobalSig(exp.vals[currIndex])
         currIndex++
         val (instrs, _) = toInstrs(exp, currIndex, ExprContext(nameMap))
         // Imports can't have instructions
-        if (maybeImpExp?.importModule != null) require(instrs.isEmpty())
+        if (maybeImpExp is ImportOrExport.Import) require(instrs.isEmpty())
         return Triple(name, Node.Global(sig, instrs), maybeImpExp)
     }
 
@@ -283,7 +291,11 @@ open class SExprToAst {
         }
     }
 
-    fun toImport(exp: SExpr.Multi): Triple<String, String, Node.Type> {
+    fun toImport(
+        exp: SExpr.Multi,
+        origNameMap: NameMap,
+        types: List<Node.Type.Func>
+    ): Triple<String, String, Node.Type> {
         exp.requireFirstSymbol("import")
         val module = exp.vals[1].symbolStr()!!
         val field = exp.vals[2].symbolStr()!!
@@ -291,7 +303,7 @@ open class SExprToAst {
         val kindName = kind.vals.firstOrNull()?.symbolStr()
         val kindSubOffset = if (kind.maybeName(1) == null) 1 else 2
         return Triple(module, field, when(kindName) {
-            "func" -> toFuncSig(kind, kindSubOffset, emptyMap(), emptyList()).third
+            "func" -> toFuncSig(kind, kindSubOffset, origNameMap, types).third
             "global" -> toGlobalSig(kind.vals[kindSubOffset])
             "table" -> toTableSig(kind, kindSubOffset)
             "memory" -> toMemorySig(kind, kindSubOffset)
@@ -301,12 +313,23 @@ open class SExprToAst {
 
     fun toImportOrExportMaybe(exp: SExpr.Multi, offset: Int): ImportOrExport? {
         if (offset >= exp.vals.size) return null
-        val multi = exp.vals[offset] as? SExpr.Multi ?: return null
-        val multiHead = multi.vals[0] as? SExpr.Symbol ?: return null
-        return when (multiHead.contents) {
-            "export" -> ImportOrExport(multi.vals[1].symbolStr()!!, null)
-            "import" -> ImportOrExport(multi.vals[2].symbolStr()!!, multi.vals[1].symbolStr()!!)
-            else -> null
+        var currOffset = offset
+        // Get all export fields first
+        var exportFields = emptyList<String>()
+        while (true) {
+            val multi = exp.vals.getOrNull(currOffset) as? SExpr.Multi
+            when (multi?.vals?.firstOrNull()?.symbolStr()) {
+                "import" -> return ImportOrExport.Import(
+                    name = multi.vals.getOrNull(2)?.symbolStr() ?: error("No import name"),
+                    module = multi.vals.getOrNull(1)?.symbolStr() ?: error("No import module"),
+                    exportFields = exportFields
+                )
+                "export" -> multi.vals.getOrNull(1)?.symbolStr().also {
+                    exportFields += it ?: error("No export field")
+                }
+                else -> return if (exportFields.isEmpty()) null else ImportOrExport.Export(exportFields)
+            }
+            currOffset++
         }
     }
 
@@ -324,8 +347,8 @@ open class SExprToAst {
             ret += maybeInstrAndOffset.first
             runningOffset += maybeInstrAndOffset.second
         }
-        if (mustCompleteExp) require(offset + runningOffset == exp.vals.size) {
-            "Unrecognized instruction: ${exp.vals[offset + runningOffset]}"
+        if (mustCompleteExp && offset + runningOffset != exp.vals.size) {
+            throw IoErr.UnrecognizedInstruction(exp.vals[offset + runningOffset].toString())
         }
         return Pair(ret, runningOffset)
     }
@@ -397,7 +420,7 @@ open class SExprToAst {
         opOffset++
         exp.maybeName(offset + opOffset)?.also {
             opOffset++
-            require(it == maybeName, { "Expected end for $maybeName, got $it" })
+            if (it != maybeName) throw IoErr.MismatchLabelEnd(maybeName, it)
         }
         return Pair(ret, opOffset)
     }
@@ -415,7 +438,7 @@ open class SExprToAst {
         val name = exp.maybeName(currIndex)
         if (name != null) currIndex++
         val maybeImpExp = toImportOrExportMaybe(exp, currIndex)
-        if (maybeImpExp != null) currIndex++
+        maybeImpExp?.also { currIndex += it.itemCount }
         // If it's a multi we assume "data", otherwise assume sig
         val memOrData = exp.vals[currIndex].let {
             when (it) {
@@ -449,23 +472,34 @@ open class SExprToAst {
     }
 
     fun toModule(exp: SExpr.Multi): Pair<String?, Node.Module> {
+        // As a special case, if this isn't a "module", wrap it and try again
+        if (exp.vals.firstOrNull()?.symbolStr() != "module") {
+            return toModule(SExpr.Multi(listOf(SExpr.Symbol("module")) + exp.vals))
+        }
         exp.requireFirstSymbol("module")
         val name = exp.maybeName(1)
 
-        // If all of the other symbols after the name are quoted strings,
-        // this needs to be parsed as a binary
-        exp.vals.drop(if (name == null) 1 else 2).also { otherVals ->
-            if (otherVals.isNotEmpty() && otherVals.find { it !is SExpr.Symbol || !it.quoted } == null)
-                return name to toModuleFromBytes(otherVals.fold(byteArrayOf()) { bytes, strVal ->
-                    bytes + (strVal as SExpr.Symbol).rawContentCharsToBytes()
-                })
+        // Special cases for "quote" and "binary" modules.
+        val quoteOrBinary = exp.vals.elementAtOrNull(if (name == null) 1 else 2)?.
+            symbolStr()?.takeIf { it == "quote" || it == "binary" }
+        if (quoteOrBinary != null) {
+            val bytes = exp.vals.drop(if (name == null) 2 else 3).fold(byteArrayOf()) { bytes, expr ->
+                bytes + (
+                    expr.symbol()?.takeIf { it.quoted }?.rawContentCharsToBytes() ?: error("Expected quoted string")
+                )
+            }
+            // For binary, just load from bytes
+            if (quoteOrBinary == "binary") return name to toModuleFromBytes(bytes)
+            // Otherwise, take the quoted strings and parse em
+            return toModuleFromQuotedString(bytes.toString(Charsets.US_ASCII))
         }
 
         var mod = Node.Module()
         val exps = exp.vals.mapNotNull { it as? SExpr.Multi }
 
         // Eagerly build the names (for forward decls)
-        var nameMap = toModuleForwardNameMap(exps)
+        val (nameMap, eagerTypes) = toModuleForwardNameMapAndTypes(exps)
+        mod = mod.copy(types = eagerTypes)
 
         fun Node.Module.addTypeIfNotPresent(type: Node.Type.Func): Pair<Node.Module, Int> {
             val index = this.types.indexOf(type)
@@ -478,64 +512,74 @@ open class SExprToAst {
         var globalCount = 0
         var tableCount = 0
         var memoryCount = 0
-        fun handleImport(module: String, field: String, kind: Node.Type) {
+        fun handleImport(module: String, field: String, kind: Node.Type, exportFields: List<String>) {
             // We make sure that an import doesn't happen after a non-import
-            require(mod.funcs.isEmpty() && mod.globals.isEmpty() &&
-                mod.tables.isEmpty() && mod.memories.isEmpty()) { "Import happened after non-import" }
-            val importKind = when(kind) {
+            if (mod.funcs.isNotEmpty()) throw IoErr.ImportAfterNonImport("function")
+            if (mod.globals.isNotEmpty()) throw IoErr.ImportAfterNonImport("global")
+            if (mod.tables.isNotEmpty()) throw IoErr.ImportAfterNonImport("table")
+            if (mod.memories.isNotEmpty()) throw IoErr.ImportAfterNonImport("memory")
+            val (importKind, indexAndExtKind) = when(kind) {
                 is Node.Type.Func -> mod.addTypeIfNotPresent(kind).let { (m, idx) ->
-                    funcCount++
                     mod = m
-                    Node.Import.Kind.Func(idx)
+                    Node.Import.Kind.Func(idx) to (funcCount++ to Node.ExternalKind.FUNCTION)
                 }
-                is Node.Type.Global -> { globalCount++; Node.Import.Kind.Global(kind) }
-                is Node.Type.Table -> { tableCount++; Node.Import.Kind.Table(kind) }
-                is Node.Type.Memory -> { memoryCount++; Node.Import.Kind.Memory(kind) }
+                is Node.Type.Global ->
+                    Node.Import.Kind.Global(kind) to (globalCount++ to Node.ExternalKind.GLOBAL)
+                is Node.Type.Table ->
+                    Node.Import.Kind.Table(kind) to (tableCount++ to Node.ExternalKind.TABLE)
+                is Node.Type.Memory ->
+                    Node.Import.Kind.Memory(kind) to (memoryCount++ to Node.ExternalKind.MEMORY)
                 else -> throw Exception("Unrecognized import kind: $kind")
             }
-            mod = mod.copy(imports = mod.imports + Node.Import(module, field, importKind))
+            mod = mod.copy(
+                imports = mod.imports + Node.Import(module, field, importKind),
+                exports = mod.exports + exportFields.map {
+                    Node.Export(it, indexAndExtKind.second, indexAndExtKind.first)
+                }
+            )
         }
 
-        fun addMaybeExport(impExp: ImportOrExport?, extKind: Node.ExternalKind, index: Int) {
-            impExp?.also { mod = mod.copy(exports = mod.exports + Node.Export(it.field, extKind, index)) }
+        fun addExport(exp: ImportOrExport.Export, extKind: Node.ExternalKind, index: Int) {
+            mod = mod.copy(exports = mod.exports + exp.fields.map { Node.Export(it, extKind, index) })
         }
 
         // Now just handle all expressions in order
         exps.forEach { exp ->
             when(exp.vals.firstOrNull()?.symbolStr()) {
-                "import" -> toImport(exp).let { (module, field, type) -> handleImport(module, field, type) }
-                "type" -> toTypeDef(exp, nameMap).let { (name, type) ->
-                    // We always add the type, even if it's a duplicate.
-                    // Ref: https://github.com/WebAssembly/design/issues/1041
-                    if (name != null) nameMap += "type:$name" to mod.types.size
-                    mod = mod.copy(types = mod.types + type)
+                "import" -> toImport(exp, nameMap, mod.types).let { (module, field, type) ->
+                    handleImport(module, field, type, emptyList())
                 }
+                // We do not handle types here anymore. They are handled eagerly as part of the forward pass.
+                "type" -> { }
                 "export" -> mod = mod.copy(exports = mod.exports + toExport(exp, nameMap))
                 "elem" -> mod = mod.copy(elems = mod.elems + toElem(exp, nameMap))
                 "data" -> mod = mod.copy(data = mod.data + toData(exp, nameMap))
                 "start" -> mod = mod.copy(startFuncIndex = toStart(exp, nameMap))
                 "func" -> toFunc(exp, nameMap, mod.types).also { (_, fn, impExp) ->
-                    if (impExp != null && impExp.importModule != null) {
-                        handleImport(impExp.importModule, impExp.field, fn.type)
+                    if (impExp is ImportOrExport.Import) {
+                        handleImport(impExp.module, impExp.name, fn.type, impExp.exportFields)
                     } else {
-                        addMaybeExport(impExp, Node.ExternalKind.FUNCTION, funcCount++)
+                        if (impExp is ImportOrExport.Export) addExport(impExp, Node.ExternalKind.FUNCTION, funcCount)
+                        funcCount++
                         mod = mod.copy(funcs = mod.funcs + fn).addTypeIfNotPresent(fn.type).first
                     }
                 }
                 "global" -> toGlobal(exp, nameMap).let { (_, glb, impExp) ->
-                    if (impExp != null && impExp.importModule != null) {
-                        handleImport(impExp.importModule, impExp.field, glb.type)
+                    if (impExp is ImportOrExport.Import) {
+                        handleImport(impExp.module, impExp.name, glb.type, impExp.exportFields)
                     } else {
-                        addMaybeExport(impExp, Node.ExternalKind.GLOBAL, globalCount++)
+                        if (impExp is ImportOrExport.Export) addExport(impExp, Node.ExternalKind.GLOBAL, globalCount)
+                        globalCount++
                         mod = mod.copy(globals = mod.globals + glb)
                     }
                 }
                 "table" -> toTable(exp, nameMap).let { (_, tbl, impExp) ->
-                    if (impExp != null && impExp.importModule != null) {
+                    if (impExp is ImportOrExport.Import) {
                         if (tbl !is Either.Left) error("Elem segment on import table")
-                        handleImport(impExp.importModule, impExp.field, tbl.v)
+                        handleImport(impExp.module, impExp.name, tbl.v, impExp.exportFields)
                     } else {
-                        addMaybeExport(impExp, Node.ExternalKind.TABLE, tableCount++)
+                        if (impExp is ImportOrExport.Export) addExport(impExp, Node.ExternalKind.TABLE, tableCount)
+                        tableCount++
                         when (tbl) {
                             is Either.Left -> mod = mod.copy(tables = mod.tables + tbl.v)
                             is Either.Right -> mod = mod.copy(
@@ -549,11 +593,12 @@ open class SExprToAst {
                     }
                 }
                 "memory" -> toMemory(exp).let { (_, mem, impExp) ->
-                    if (impExp != null && impExp.importModule != null) {
+                    if (impExp is ImportOrExport.Import) {
                         if (mem !is Either.Left) error("Data segment on import mem")
-                        handleImport(impExp.importModule, impExp.field, mem.v)
+                        handleImport(impExp.module, impExp.name, mem.v, impExp.exportFields)
                     } else {
-                        addMaybeExport(impExp, Node.ExternalKind.MEMORY, memoryCount++)
+                        if (impExp is ImportOrExport.Export) addExport(impExp, Node.ExternalKind.MEMORY, memoryCount)
+                        memoryCount++
                         when (mem) {
                             is Either.Left -> mod = mod.copy(memories = mod.memories + mem.v)
                             is Either.Right -> mod = mod.copy(
@@ -579,7 +624,20 @@ open class SExprToAst {
 
     fun toModuleFromBytes(bytes: ByteArray) = BinaryToAst.toModule(ByteReader.InputStream(ByteArrayInputStream(bytes)))
 
-    fun toModuleForwardNameMap(exps: List<SExpr.Multi>): NameMap {
+    fun toModuleFromQuotedString(str: String) = StrToSExpr.parse(str).let {
+        when (it) {
+            is StrToSExpr.ParseResult.Error -> error("Failed parsing quoted module: ${it.msg}")
+            is StrToSExpr.ParseResult.Success -> {
+                // If the result is not a single module sexpr, wrap it in one
+                val sexpr = it.vals.singleOrNull()?.let { it as? SExpr.Multi }?.takeIf {
+                    it.vals.firstOrNull()?.symbolStr() == "module"
+                } ?: SExpr.Multi(listOf(SExpr.Symbol("module")) + it.vals)
+                toModule(sexpr)
+            }
+        }
+    }
+
+    fun toModuleForwardNameMapAndTypes(exps: List<SExpr.Multi>): Pair<NameMap, List<Node.Type.Func>> {
         // We break into import and non-import because the index
         // tables do imports first
         val (importExps, nonImportExps) = exps.partition {
@@ -598,6 +656,7 @@ open class SExprToAst {
         var tableCount = 0
         var memoryCount = 0
         var namesToIndices = emptyMap<String, Int>()
+        var types = emptyList<Node.Type.Func>()
         fun maybeAddName(name: String?, index: Int, type: String) {
             name?.let { namesToIndices += "$type:$it" to index }
         }
@@ -625,10 +684,14 @@ open class SExprToAst {
                 "global" -> maybeAddName(kindName, globalCount++, "global")
                 "table" -> maybeAddName(kindName, tableCount++, "table")
                 "memory" -> maybeAddName(kindName, memoryCount++, "memory")
+                // We go ahead and do the full type def build here eagerly
+                "type" -> maybeAddName(kindName, types.size, "type").also { _ ->
+                    toTypeDef(it, namesToIndices).also { (_, type) -> types += type }
+                }
                 else -> {}
             }
         }
-        return namesToIndices
+        return namesToIndices to types
     }
 
     fun toOpMaybe(exp: SExpr.Multi, offset: Int, ctx: ExprContext): Pair<Node.Instr, Int>? {
@@ -678,10 +741,10 @@ open class SExprToAst {
                 if (exp.vals.size > offset + count) exp.vals[offset + count].symbolStr().also {
                     if (it != null && it.startsWith("align=")) {
                         instrAlign = it.substring(6).toInt()
-                        require(instrAlign > 0 && instrAlign and (instrAlign - 1) == 0) {
-                            "Alignment expected to be positive power of 2, but got $instrAlign"
+                        if (instrAlign <= 0 || instrAlign and (instrAlign - 1) != 0) {
+                            throw IoErr.InvalidAlignPower(instrAlign)
                         }
-                        if (instrAlign > op.argBits / 8) throw IoErr.InvalidAlign(instrAlign, op.argBits)
+                        if (instrAlign > op.argBits / 8) throw IoErr.InvalidAlignTooLarge(instrAlign, op.argBits)
                         count++
                     }
                 }
@@ -723,14 +786,18 @@ open class SExprToAst {
         return Node.ResizableLimits(init.toInt(), max?.toInt())
     }
 
-    fun toResult(exp: SExpr.Multi): Node.Type.Value {
+    fun toResult(exp: SExpr.Multi): List<Node.Type.Value> {
         exp.requireFirstSymbol("result")
-        if (exp.vals.size > 2) throw IoErr.InvalidResultArity()
-        return toType(exp.vals[1].symbol()!!)
+        return exp.vals.drop(1).map { toType(it.symbol() ?: error("Invalid result type")) }
     }
 
     fun toScript(exp: SExpr.Multi): Script {
-        return Script(exp.vals.map { toCmd(it as SExpr.Multi) })
+        val cmds = exp.vals.map { toCmdMaybe(it as SExpr.Multi) }
+        // If the commands are non-empty but they are all null, it's an inline module
+        if (cmds.isNotEmpty() && cmds.all { it == null }) {
+            return toModule(exp).let { Script(listOf(Script.Cmd.Module(it.second, it.first))) }
+        }
+        return Script(cmds.filterNotNull())
     }
 
     fun toStart(exp: SExpr.Multi, nameMap: NameMap): Int {
@@ -747,12 +814,12 @@ open class SExprToAst {
         val name = exp.maybeName(currIndex)
         if (name != null) currIndex++
         val maybeImpExp = toImportOrExportMaybe(exp, currIndex)
-        if (maybeImpExp != null) currIndex++
+        maybeImpExp?.also { currIndex += it.itemCount }
         // If elem type is there, we load the elems instead
         val elemType = toElemTypeMaybe(exp, currIndex)
         val tableOrElems =
             if (elemType != null) {
-                require(maybeImpExp?.importModule == null)
+                require(maybeImpExp !is ImportOrExport.Import)
                 val elem = exp.vals[currIndex + 1] as SExpr.Multi
                 elem.requireFirstSymbol("elem")
                 Either.Right(Node.Elem(
@@ -770,7 +837,7 @@ open class SExprToAst {
     }
 
     fun toType(exp: SExpr.Symbol): Node.Type.Value {
-        return toTypeMaybe(exp) ?: throw Exception("Unknown value type: ${exp.contents}")
+        return toTypeMaybe(exp) ?: throw IoErr.InvalidType(exp.contents)
     }
 
     fun toTypeMaybe(exp: SExpr.Symbol): Node.Type.Value? = when(exp.contents) {
@@ -792,7 +859,7 @@ open class SExprToAst {
     }
 
     fun toVar(exp: SExpr.Symbol, nameMap: NameMap, nameType: String): Int {
-        return toVarMaybe(exp, nameMap, nameType) ?: throw Exception("No var on exp $exp")
+        return toVarMaybe(exp, nameMap, nameType) ?: throw IoErr.InvalidVar(exp.toString())
     }
 
     fun toVarMaybe(exp: SExpr, nameMap: NameMap, nameType: String): Int? {
@@ -805,37 +872,74 @@ open class SExprToAst {
         }
     }
 
+    private fun String.sansUnderscores(): String {
+        // The underscores can only be between digits (which can be hex)
+        fun isDigit(c: Char) = c.isDigit() || (startsWith("0x", true) && (c in 'a'..'f' || c in 'A'..'F'))
+        var ret = this
+        var underscoreIndex = 0
+        while (true){
+            underscoreIndex = ret.indexOf('_', underscoreIndex)
+            if (underscoreIndex == -1) return ret
+            // Can't be at beginning or end
+            if (underscoreIndex == 0 || underscoreIndex == ret.length - 1 ||
+                    !isDigit(ret[underscoreIndex - 1]) || !isDigit(ret[underscoreIndex + 1])) {
+                throw IoErr.ConstantUnknownOperator(this)
+            }
+            ret = ret.removeRange(underscoreIndex, underscoreIndex + 1)
+        }
+    }
     private fun String.toBigIntegerConst() =
-        if (this.contains("0x")) BigInteger(this.replace("0x", ""), 16)
+        if (contains("0x")) BigInteger(replace("0x", ""), 16)
         else BigInteger(this)
-    private fun String.toIntConst() = toBigIntegerConst().toInt()
-    private fun String.toLongConst() = toBigIntegerConst().toLong()
-    private fun String.toUnsignedIntConst() =
-        (if (this.contains("0x")) Long.valueOf(this.replace("0x", ""), 16)
+    private fun String.toIntConst() = sansUnderscores().run {
+        toBigIntegerConst().
+            also { if (it > MAX_UINT32) throw IoErr.ConstantOutOfRange(it) }.
+            also { if (it < MIN_INT32) throw IoErr.ConstantOutOfRange(it) }.
+            toInt()
+    }
+    private fun String.toLongConst() = sansUnderscores().run {
+        toBigIntegerConst().
+            also { if (it > MAX_UINT64) throw IoErr.ConstantOutOfRange(it) }.
+            also { if (it < MIN_INT64) throw IoErr.ConstantOutOfRange(it) }.
+            toLong()
+    }
+    private fun String.toUnsignedIntConst() = sansUnderscores().run {
+        (if (contains("0x")) Long.valueOf(replace("0x", ""), 16)
         else Long.valueOf(this)).unsignedToSignedInt().toUnsignedLong()
+    }
 
-    private fun String.toFloatConst() =
-        if (this == "infinity" || this == "+infinity") Float.POSITIVE_INFINITY
-        else if (this == "-infinity") Float.NEGATIVE_INFINITY
+    private fun String.toFloatConst() = sansUnderscores().run {
+        if (this == "infinity" || this == "+infinity" || this == "inf" || this == "+inf") Float.POSITIVE_INFINITY
+        else if (this == "-infinity" || this == "-inf") Float.NEGATIVE_INFINITY
         else if (this == "nan" || this == "+nan") Float.fromIntBits(0x7fc00000)
         else if (this == "-nan") Float.fromIntBits(0xffc00000.toInt())
         else if (this.startsWith("nan:") || this.startsWith("+nan:")) Float.fromIntBits(
             0x7f800000 + this.substring(this.indexOf(':') + 1).toIntConst()
         ) else if (this.startsWith("-nan:")) Float.fromIntBits(
             0xff800000.toInt() + this.substring(this.indexOf(':') + 1).toIntConst()
-        ) else if (this.startsWith("0x") && !this.contains('P', true)) this.toLongConst().toFloat()
-        else this.toFloat()
-    private fun String.toDoubleConst() =
-        if (this == "infinity" || this == "+infinity") Double.POSITIVE_INFINITY
-        else if (this == "-infinity") Double.NEGATIVE_INFINITY
+        ) else {
+            // If there is no "p" on a hex, we have to add it
+            var str = this
+            if (str.startsWith("0x", true) && !str.contains('P', true)) str += "p0"
+            str.toFloat().also { if (it.isInfinite()) throw IoErr.ConstantOutOfRange(it) }
+        }
+    }
+    private fun String.toDoubleConst() = sansUnderscores().run {
+        if (this == "infinity" || this == "+infinity" || this == "inf" || this == "+inf") Double.POSITIVE_INFINITY
+        else if (this == "-infinity" || this == "-inf") Double.NEGATIVE_INFINITY
         else if (this == "nan" || this == "+nan") Double.fromLongBits(0x7ff8000000000000)
         else if (this == "-nan") Double.fromLongBits(-2251799813685248) // i.e. 0xfff8000000000000
         else if (this.startsWith("nan:") || this.startsWith("+nan:")) Double.fromLongBits(
             0x7ff0000000000000 + this.substring(this.indexOf(':') + 1).toLongConst()
         ) else if (this.startsWith("-nan:")) Double.fromLongBits(
             -4503599627370496 + this.substring(this.indexOf(':') + 1).toLongConst() // i.e. 0xfff0000000000000
-        ) else if (this.startsWith("0x") && !this.contains('P', true)) this.toLongConst().toDouble()
-        else this.toDouble()
+        )  else {
+            // If there is no "p" on a hex, we have to add it
+            var str = this
+            if (str.startsWith("0x", true) && !str.contains('P', true)) str += "p0"
+            str.toDouble().also { if (it.isInfinite()) throw IoErr.ConstantOutOfRange(it) }
+        }
+    }
 
     private fun SExpr.requireSymbol(contents: String, quotedCheck: Boolean? = null) {
         if (this is SExpr.Symbol && this.contents == contents &&

@@ -10,6 +10,7 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
         val actual: TypeRef?
     ) : CompileErr("Expected any type of ${Arrays.toString(expected)}, got $actual") {
         override val asmErrString get() = "type mismatch"
+        override val asmErrStrings get() = listOf(asmErrString, "mismatching label")
     }
 
     class StackInjectionMismatch(
@@ -88,6 +89,7 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
 
     class UnknownTable(val index: Int) : CompileErr("No table present at index $index") {
         override val asmErrString get() = "unknown table"
+        override val asmErrStrings get() = listOf(asmErrString, "unknown table $index")
     }
 
     class UnknownType(val index: Int) : CompileErr("No type present for index $index") {

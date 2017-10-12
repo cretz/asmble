@@ -5,5 +5,8 @@
 /build
 /gradle
 /compiler/build
+/compiler/out
 /emscripten-runtime/build
+/emscripten-runtime/out
 /annotations/build
+/annotations/out

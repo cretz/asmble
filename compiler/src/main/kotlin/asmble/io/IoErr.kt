@@ -1,6 +1,7 @@
 package asmble.io
 
 import asmble.AsmErr
+import java.math.BigInteger
 
 sealed class IoErr(message: String, cause: Throwable? = null) : RuntimeException(message, cause), AsmErr {
     class UnexpectedEnd : IoErr("Unexpected EOF") {
@@ -44,7 +45,11 @@ sealed class IoErr(message: String, cause: Throwable? = null) : RuntimeException
         override val asmErrString get() = "memory size must be at most 65536 pages (4GiB)"
     }
 
-    class InvalidAlign(val align: Int, val allowed: Int) : IoErr("Alignment $align larger than $allowed") {
+    class InvalidAlignPower(val align: Int) : IoErr("Alignment expected to be positive power of 2, but got $align") {
+        override val asmErrString get() = "alignment must be positive power of 2"
+    }
+
+    class InvalidAlignTooLarge(val align: Int, val allowed: Int) : IoErr("Alignment $align larger than $allowed") {
         override val asmErrString get() = "alignment must not be larger than natural"
     }
 
@@ -54,5 +59,49 @@ sealed class IoErr(message: String, cause: Throwable? = null) : RuntimeException
 
     class UnknownType(val index: Int) : IoErr("No type present for index $index") {
         override val asmErrString get() = "unknown type"
+    }
+
+    class InvalidType(val str: String) : IoErr("Invalid type: $str") {
+        override val asmErrString get() = "unexpected token"
+    }
+
+    class MismatchLabelEnd(val expected: String?, val actual: String) :
+            IoErr("Expected end for $expected, got $actual") {
+        override val asmErrString get() = "mismatching label"
+    }
+
+    class ConstantOutOfRange(val actual: Number) : IoErr("Constant out of range: $actual") {
+        override val asmErrString get() = "constant out of range"
+    }
+
+    class ConstantUnknownOperator(val str: String) : IoErr("Unknown constant operator for: $str") {
+        override val asmErrString get() = "unknown operator"
+    }
+
+    class FuncTypeRefMismatch : IoErr("Func type for type ref doesn't match explicit params/returns") {
+        override val asmErrString get() = "inline function type"
+        override val asmErrStrings get() = listOf(asmErrString, "unexpected token")
+    }
+
+    class UnrecognizedInstruction(val instr: String) : IoErr("Unrecognized instruction: $instr") {
+        override val asmErrString get() = "unexpected token"
+        override val asmErrStrings get() = listOf(asmErrString, "unknown operator")
+    }
+
+    class ImportAfterNonImport(val nonImportType: String) : IoErr("Import happened after $nonImportType") {
+        override val asmErrString get() = "import after $nonImportType"
+    }
+
+    class UnknownOperator : IoErr("Unknown operator") {
+        override val asmErrString get() = "unknown operator"
+    }
+
+    class InvalidVar(val found: String) : IoErr("Var ref expected, found: $found") {
+        override val asmErrString get() = "unknown operator"
+    }
+
+    class ResultBeforeParameter : IoErr("Function result before parameter") {
+        override val asmErrString get() = "result before parameter"
+        override val asmErrStrings get() = listOf(asmErrString, "unexpected token")
     }
 }

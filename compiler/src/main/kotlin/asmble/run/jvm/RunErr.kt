@@ -8,14 +8,14 @@ sealed class RunErr(message: String, cause: Throwable? = null) : RuntimeExceptio
         val expected: Int,
         val actual: Int
     ) : RunErr("Import memory limit $actual but expecting at least $expected") {
-        override val asmErrString get() = "actual size smaller than declared"
+        override val asmErrString get() = "incompatible import type"
     }
 
     class ImportMemoryCapacityTooLarge(
         val expected: Int,
         val actual: Int
     ) : RunErr("Import table capacity $actual but expecting no more than $expected") {
-        override val asmErrString get() = "maximum size larger than declared"
+        override val asmErrString get() = "incompatible import type"
     }
 
     class InvalidDataIndex(
@@ -30,14 +30,14 @@ sealed class RunErr(message: String, cause: Throwable? = null) : RuntimeExceptio
         val expected: Int,
         val actual: Int
     ) : RunErr("Import table sized $actual but expecting at least $expected") {
-        override val asmErrString get() = "actual size smaller than declared"
+        override val asmErrString get() = "incompatible import type"
     }
 
     class ImportTableTooLarge(
         val expected: Int,
         val actual: Int
     ) : RunErr("Import table sized $actual but expecting no more than $expected") {
-        override val asmErrString get() = "maximum size larger than declared"
+        override val asmErrString get() = "incompatible import type"
     }
 
     class InvalidElemIndex(
@@ -45,5 +45,13 @@ sealed class RunErr(message: String, cause: Throwable? = null) : RuntimeExceptio
         val tableSize: Int
     ) : RunErr("Trying to set elem at index $index but table size is only $tableSize") {
         override val asmErrString get() = "elements segment does not fit"
+    }
+
+    class ImportNotFound(
+        val module: String,
+        val field: String
+    ) : RunErr("Cannot find compatible import for $module::$field") {
+        override val asmErrString get() = "unknown import"
+        override val asmErrStrings get() = listOf(asmErrString, "incompatible import type")
     }
 }

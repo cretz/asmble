@@ -176,7 +176,12 @@ data class ScriptContext(
         val msgs = exceptionTranslator.translate(innerEx)
         if (msgs.isEmpty())
             throw ScriptAssertionError(a, "Expected failure '$expectedString' but got unknown err", cause = innerEx)
-        if (!msgs.any { it.contains(expectedString) })
+        var msgToFind = expectedString
+        // Special case for "uninitialized element" error match. This is because the error is expected to
+        //  be "uninitialized number #" where # is the indirect call number. But it is at runtime where this fails
+        //  so it is not worth it for us to store the index of failure. So we generalize it.
+        if (msgToFind.startsWith("uninitialized element")) msgToFind = "uninitialized element"
+        if (!msgs.any { it.contains(msgToFind) })
             throw ScriptAssertionError(a, "Expected failure '$expectedString' in $msgs", cause = innerEx)
     }
 
@@ -269,7 +274,7 @@ data class ScriptContext(
             is Node.Import.Kind.Global -> WasmExternalKind.GLOBAL
         }
         return module.bindMethod(this, import.field, kind, javaName, methodType) ?:
-            throw NoSuchMethodException("Cannot find import for ${import.module}::${import.field}")
+            throw RunErr.ImportNotFound(import.module, import.field)
     }
 
     fun resolveImportFunc(import: Node.Import, funcType: Node.Type.Func) =

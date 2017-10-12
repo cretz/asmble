@@ -32,7 +32,7 @@ class SpecTestUnit(name: String, wast: String, expectedOutput: String?) : BaseTe
         // capacity since you lose speed.
         "imports" -> {
             val isTableMaxErr = t is ScriptAssertionError && (t.assertion as? Script.Cmd.Assertion.Unlinkable).let {
-                it != null && it.failure == "maximum size larger than declared" &&
+                it != null && it.failure == "incompatible import type" &&
                     it.module.imports.singleOrNull()?.kind is Node.Import.Kind.Table
             }
             if (isTableMaxErr) "Table max capacities are not validated" else null
