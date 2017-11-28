@@ -7,9 +7,13 @@ buildscript {
 
     repositories {
         mavenCentral()
+        maven {
+            url "https://plugins.gradle.org/m2/"
+        }
     }
     dependencies {
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+        classpath 'me.champeau.gradle:jmh-gradle-plugin:0.4.4'
     }
 }
 
@@ -48,4 +52,63 @@ project(':compiler') {
         testCompile "org.jetbrains.kotlin:kotlin-test-junit:$kotlin_version"
         testCompile "org.ow2.asm:asm-debug-all:$asm_version"
     }
+}
+
+project(':examples') {
+    subprojects {
+        dependencies {
+            compileOnly project(':compiler')
+        }
+
+        task rustToWasm(type: Exec) {
+            commandLine 'cargo', 'build', '--release'
+        }
+
+        ext.wasmFileName = { ->
+            def wasmFiles = fileTree(dir: 'target/wasm32-unknown-unknown/release', includes: ['*.wasm']).files
+            if (wasmFiles.size() != 1) throw new GradleException('Expected single WASM file, got ' + wasmFiles.size())
+            return wasmFiles.iterator().next()
+        }
+
+        task wasmFile() {
+            dependsOn rustToWasm
+            doFirst {
+                println 'File: ' + wasmFileName()
+            }
+        }
+
+        task showWast(type: JavaExec) {
+            dependsOn rustToWasm
+            classpath configurations.compileClasspath
+            main = 'asmble.cli.MainKt'
+            doFirst {
+                args 'translate', wasmFileName()
+            }
+        }
+
+        task compileWasm(type: JavaExec) {
+            dependsOn rustToWasm
+            classpath configurations.compileClasspath
+            main = 'asmble.cli.MainKt'
+            doFirst {
+                // args 'help', 'compile'
+                def outFile = 'build/wasm-classes/' + wasmCompiledClassName.replace('.', '/') + '.class'
+                file(outFile).parentFile.mkdirs()
+                args 'compile', wasmFileName(), wasmCompiledClassName, '-out', outFile
+            }
+        }
+    }
+}
+
+project(':examples:rust-simple') {
+    apply plugin: 'application'
+    ext.wasmCompiledClassName = 'asmble.generated.RustSimple'
+    dependencies {
+        compile files('build/wasm-classes')
+    }
+    compileJava {
+        dependsOn compileWasm
+    }
+
+    mainClassName = 'asmble.examples.rustsimple.Main'
 }

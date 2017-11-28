@@ -79,7 +79,7 @@ open class Linker {
             params = params.map(ModuleClass::ref),
             ret = mod.ref
         )
-        // The stack here on our is for building params to constructor...
+        // The stack here on out is for building params to constructor...
 
         // The constructor we'll use is:
         // * Mem-class based constructor if it's an import

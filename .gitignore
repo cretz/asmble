@@ -10,3 +10,6 @@
 /emscripten-runtime/out
 /annotations/build
 /annotations/out
+/examples/rust-simple/Cargo.lock
+/examples/rust-simple/build
+/examples/rust-simple/target
