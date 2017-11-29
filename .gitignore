@@ -13,3 +13,6 @@
 /examples/rust-simple/Cargo.lock
 /examples/rust-simple/build
 /examples/rust-simple/target
+/examples/rust-string/Cargo.lock
+/examples/rust-string/build
+/examples/rust-string/target

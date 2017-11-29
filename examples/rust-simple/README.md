@@ -12,7 +12,7 @@ to `asmble.generated.RustSimple` in `build/wasm-classes`. The class is used by
 To run it yourself, run the following from the root `asmble` dir (assuming you have built the Gradle wrapper described
 in the root README's "Building and Testing" section):
 
-    ./gradlew --no-daemon :examples:rust-simple:run
+    gradlew --no-daemon :examples:rust-simple:run
 
 Yes, this does include Rust's std lib, but it's not that big of a deal (I'm keeping it around because in other examples
 as part of [issue #9](https://github.com/cretz/asmble/issues/9) I'll need it). The actual method executed for `add_one`

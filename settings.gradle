@@ -2,4 +2,5 @@ rootProject.name = 'asmble'
 include 'annotations',
         'compiler',
         'emscripten-runtime',
-        'examples:rust-simple'
+        'examples:rust-simple',
+        'examples:rust-string'

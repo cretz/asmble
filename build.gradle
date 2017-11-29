@@ -60,12 +60,19 @@ project(':examples') {
             compileOnly project(':compiler')
         }
 
+        ext.rustBuildRelease = true
+
         task rustToWasm(type: Exec) {
-            commandLine 'cargo', 'build', '--release'
+            if (rustBuildRelease) {
+                commandLine 'cargo', 'build', '--release'
+            } else {
+                commandLine 'cargo', 'build'
+            }
         }
 
         ext.wasmFileName = { ->
-            def wasmFiles = fileTree(dir: 'target/wasm32-unknown-unknown/release', includes: ['*.wasm']).files
+            def buildType = rustBuildRelease ? 'release' : 'debug'
+            def wasmFiles = fileTree(dir: "target/wasm32-unknown-unknown/$buildType", includes: ['*.wasm']).files
             if (wasmFiles.size() != 1) throw new GradleException('Expected single WASM file, got ' + wasmFiles.size())
             return wasmFiles.iterator().next()
         }
@@ -111,4 +118,17 @@ project(':examples:rust-simple') {
     }
 
     mainClassName = 'asmble.examples.rustsimple.Main'
+}
+
+project(':examples:rust-string') {
+    apply plugin: 'application'
+    ext.wasmCompiledClassName = 'asmble.generated.RustString'
+    dependencies {
+        compile files('build/wasm-classes')
+    }
+    compileJava {
+        dependsOn compileWasm
+    }
+
+    mainClassName = 'asmble.examples.ruststring.Main'
 }
