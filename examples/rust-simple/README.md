@@ -14,8 +14,9 @@ in the root README's "Building and Testing" section):
 
     ./gradlew --no-daemon :examples:rust-simple:run
 
-Yes, this does include Rust's std lib, but it's not that big of a deal. The actual method executed for `add_one` looks
-like this decompiled:
+Yes, this does include Rust's std lib, but it's not that big of a deal (I'm keeping it around because in other examples
+as part of [issue #9](https://github.com/cretz/asmble/issues/9) I'll need it). The actual method executed for `add_one`
+looks like this decompiled:
 
 ```java
     private int $func0(final int n) {
