@@ -70,30 +70,30 @@ project(':examples') {
             }
         }
 
-        ext.wasmFileName = { ->
+        ext.rustWasmFileName = { ->
             def buildType = rustBuildRelease ? 'release' : 'debug'
             def wasmFiles = fileTree(dir: "target/wasm32-unknown-unknown/$buildType", includes: ['*.wasm']).files
             if (wasmFiles.size() != 1) throw new GradleException('Expected single WASM file, got ' + wasmFiles.size())
             return wasmFiles.iterator().next()
         }
 
-        task wasmFile() {
+        task rustWasmFile() {
             dependsOn rustToWasm
             doFirst {
-                println 'File: ' + wasmFileName()
+                println 'File: ' + rustWasmFileName()
             }
         }
 
-        task showWast(type: JavaExec) {
+        task showRustWast(type: JavaExec) {
             dependsOn rustToWasm
             classpath configurations.compileClasspath
             main = 'asmble.cli.MainKt'
             doFirst {
-                args 'translate', wasmFileName()
+                args 'translate', rustWasmFileName()
             }
         }
 
-        task compileWasm(type: JavaExec) {
+        task compileRustWasm(type: JavaExec) {
             dependsOn rustToWasm
             classpath configurations.compileClasspath
             main = 'asmble.cli.MainKt'
@@ -101,10 +101,22 @@ project(':examples') {
                 // args 'help', 'compile'
                 def outFile = 'build/wasm-classes/' + wasmCompiledClassName.replace('.', '/') + '.class'
                 file(outFile).parentFile.mkdirs()
-                args 'compile', wasmFileName(), wasmCompiledClassName, '-out', outFile
+                args 'compile', rustWasmFileName(), wasmCompiledClassName, '-out', outFile
             }
         }
     }
+}
+
+project(':examples:rust-regex') {
+    apply plugin: 'application'
+    ext.wasmCompiledClassName = 'asmble.generated.RustRegex'
+    dependencies {
+        compile files('build/wasm-classes')
+    }
+    compileJava {
+        dependsOn compileRustWasm
+    }
+    mainClassName = 'asmble.examples.rustregex.Main'
 }
 
 project(':examples:rust-simple') {
@@ -114,9 +126,8 @@ project(':examples:rust-simple') {
         compile files('build/wasm-classes')
     }
     compileJava {
-        dependsOn compileWasm
+        dependsOn compileRustWasm
     }
-
     mainClassName = 'asmble.examples.rustsimple.Main'
 }
 
@@ -127,8 +138,7 @@ project(':examples:rust-string') {
         compile files('build/wasm-classes')
     }
     compileJava {
-        dependsOn compileWasm
+        dependsOn compileRustWasm
     }
-
     mainClassName = 'asmble.examples.ruststring.Main'
 }

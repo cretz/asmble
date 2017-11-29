@@ -16,3 +16,6 @@
 /examples/rust-string/Cargo.lock
 /examples/rust-string/build
 /examples/rust-string/target
+/examples/rust-regex/Cargo.lock
+/examples/rust-regex/build
+/examples/rust-regex/target
