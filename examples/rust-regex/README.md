@@ -1,8 +1,8 @@
 ### Example: Rust Regex
 
 This shows an example of using the Rust regex library on the JVM compiled via WASM. This builds on
-the [rust-simple](../rust-simple) and [rust-string](../rust-string) examples. There is also a simple benchmark checking
-the performance compared to the built-in Java regex engine.
+the [rust-simple](../rust-simple) and [rust-string](../rust-string) examples. See the former for build prereqs. There is
+also a simple benchmark checking the performance compared to the built-in Java regex engine.
 
 #### Main
 
