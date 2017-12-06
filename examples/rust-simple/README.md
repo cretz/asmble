@@ -10,9 +10,9 @@ to `asmble.generated.RustSimple` in `build/wasm-classes`. The class is used by
 `add_one` is invoked with `25` to return `26`.
 
 To run it yourself, you need the Gradle wrapper installed (see the root README's "Building and Testing" section, namely
-`gradle wrapper` in the root w/ latest Gradle) and the latest Rust nightly (i.e. `rustup default nightly`) with the
-`wasm32-unknown-unknown` target installed (i.e. `rustup target add wasm32-unknown-unknown --toolchain nightly`). Then
-run the following from the root `asmble` dir:
+`gradle wrapper` in the root w/ latest Gradle) and the latest Rust nightly (i.e. `rustup default nightly` and
+`rustup update`) with the `wasm32-unknown-unknown` target installed (i.e.
+`rustup target add wasm32-unknown-unknown --toolchain nightly`). Then run the following from the root `asmble` dir:
 
     gradlew --no-daemon :examples:rust-simple:run
 
