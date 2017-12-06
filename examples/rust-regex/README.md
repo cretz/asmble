@@ -125,9 +125,9 @@ To keep from making this a big long post like most benchmark posts tend to be, h
   accessible heap before the benchmark started to be fair.
 * Like the unit test, I excluded `[a-q][^u-z]{13}x` because Rust is really slow at it (Java wins by a mile here). Also
   like the unit test, `?|?` is actually `∞|✓`.
-* Of the ones tested, Rust is faster in 6 and Java is faster in the other 10. And where it is faster, it is much faster.
-  This is quite decent since the Rust+WASM version uses `ByteBuffer`s everywhere, has some overflow checks, and in
-  general there are some impedance mismatches with the WASM bytecode and the JVM bytecode.
+* Of the ones tested, Rust is faster in 6 and Java is faster in the other 10. And where Rust is faster, it is much
+  faster. This is quite decent since the Rust+WASM version uses `ByteBuffer`s everywhere, has some overflow checks, and
+  in general there are some impedance mismatches with the WASM bytecode and the JVM bytecode.
 * Notice the low error numbers on the Rust versions. The error number is the deviation between invocations. This shows
   the WASM-to-JVM ends up quite deterministic (or maybe, that there is just too much cruft to JIT, heh).
 * If I were more serious about it, I'd check with other OS's, add more iterations, tweak some compiler options, include 
