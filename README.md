@@ -32,7 +32,7 @@ The result will be:
 
     70 : i32
 
-Which is how the test harness prints an integer.
+Which is how the test harness prints an integer. See the [examples](examples) directory for more examples.
 
 ## CLI Usage
 

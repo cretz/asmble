@@ -7,9 +7,9 @@ import java.nio.charset.StandardCharsets;
 
 public class RustLib implements RegexLib<RustLib.Ptr> {
 
-    // 300 pages is good for now
+    // 600 pages is enough for our use
     private static final int PAGE_SIZE = 65536;
-    private static final int MAX_MEMORY = 300 * PAGE_SIZE;
+    private static final int MAX_MEMORY = 600 * PAGE_SIZE;
 
     private final RustRegex rustRegex;
 
