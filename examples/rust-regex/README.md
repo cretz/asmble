@@ -6,7 +6,7 @@ the performance compared to the built-in Java regex engine.
 
 #### Main
 
-In this version, we include the `regex` crate. The main loads a ~15k text file Project Gutenberg collection of Mark
+In this version, we include the `regex` crate. The main loads a ~15MB text file Project Gutenberg collection of Mark
 Twain works (taken from [this blog post](https://rust-leipzig.github.io/regex/2017/03/28/comparison-of-regex-engines/)
 that does Rust regex performance benchmarks). Both the Java and Rust regex engines are abstracted into a common
 interface. When run, it checks how many times the word "Twain" appears via both regex engines.
