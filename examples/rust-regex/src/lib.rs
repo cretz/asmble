@@ -8,15 +8,31 @@ use std::mem;
 use std::str;
 
 #[no_mangle]
-pub extern "C" fn compile_pattern(str_ptr: *mut u8, len: usize) -> *const Regex {
+pub extern "C" fn compile_pattern(str_ptr: *mut u8, len: usize) -> *mut Regex {
     unsafe {
         let bytes = Vec::<u8>::from_raw_parts(str_ptr, len, len);
-        let s = str::from_utf8(&bytes).unwrap();
-        let r = Regex::new(s).unwrap();
-        let raw_r = &r as *const Regex;
-        mem::forget(s);
+        let s = str::from_utf8_unchecked(&bytes);
+        let r = Box::new(Regex::new(s).unwrap());
+        Box::into_raw(r)
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn dispose_pattern(r: *mut Regex) {
+    unsafe {
+        let _r = Box::from_raw(r);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn match_count(r: *mut Regex, str_ptr: *mut u8, len: usize) -> usize {
+    unsafe {
+        let bytes = Vec::<u8>::from_raw_parts(str_ptr, len, len);
+        let s = str::from_utf8_unchecked(&bytes);
+        let r = Box::from_raw(r);
+        let count = r.find_iter(s).count();
         mem::forget(r);
-        raw_r
+        count
     }
 }
 

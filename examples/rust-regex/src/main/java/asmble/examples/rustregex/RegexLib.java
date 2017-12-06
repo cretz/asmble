@@ -1,10 +1,12 @@
 package asmble.examples.rustregex;
 
-public interface RegexLib {
+public interface RegexLib<T> {
 
-    RegexPattern compile(String str);
+    RegexPattern<T> compile(String str);
 
-    interface RegexPattern {
-        int matchCount(String target);
+    T prepareTarget(String target);
+    
+    interface RegexPattern<T> {
+        int matchCount(T target);
     }
 }

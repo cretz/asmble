@@ -7,13 +7,16 @@ import java.nio.charset.StandardCharsets;
 
 public class Main {
 
-    // 20 pages is good for now
-    private static final int PAGE_SIZE = 65536;
-    private static final int MAX_MEMORY = 20 * PAGE_SIZE;
-
     public static void main(String[] args) throws Exception {
-        String twainText = loadTwainText();
-        System.out.println("Appearances of 'Twain': " + new JavaLib().compile("Twain").matchCount(twainText));
+        String twainString = loadTwainText();
+        System.out.println("'Twain' count in Java: " + matchCount(twainString, "Twain", new JavaLib()));
+        System.out.println("'Twain' count in Rust: " + matchCount(twainString, "Twain", new RustLib()));
+    }
+
+    public static <T> int matchCount(String target, String pattern, RegexLib<T> lib) {
+        RegexLib.RegexPattern<T> compiledPattern = lib.compile(pattern);
+        T preparedTarget = lib.prepareTarget(target);
+        return compiledPattern.matchCount(preparedTarget);
     }
 
     public static String loadTwainText() throws IOException {

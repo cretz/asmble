@@ -3,21 +3,26 @@ package asmble.examples.rustregex;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class JavaLib implements RegexLib {
+public class JavaLib implements RegexLib<String> {
     @Override
     public JavaPattern compile(String str) {
         return new JavaPattern(str);
     }
 
-    public static class JavaPattern implements RegexPattern {
+    @Override
+    public String prepareTarget(String target) {
+        return target;
+    }
 
-        final Pattern pattern;
+    public class JavaPattern implements RegexPattern<String> {
 
-        JavaPattern(String pattern) {
+        private final Pattern pattern;
+
+        private JavaPattern(String pattern) {
             this(Pattern.compile(pattern));
         }
 
-        JavaPattern(Pattern pattern) {
+        private JavaPattern(Pattern pattern) {
             this.pattern = pattern;
         }
 
