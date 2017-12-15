@@ -60,6 +60,40 @@ project(':examples') {
             compileOnly project(':compiler')
         }
 
+        // C/C++ example helpers
+
+        task cToWasm {
+            doFirst {
+                mkdir 'build'
+                exec {
+                    def cFileName = fileTree(dir: 'src', includes: ['*.c']).files.iterator().next()
+                    commandLine 'clang', '--target=wasm32-unknown-unknown-wasm', '-O3', cFileName, '-c', '-o', 'build/lib.wasm'
+                }
+            }   
+        }
+
+        task showCWast(type: JavaExec) {
+            dependsOn cToWasm
+            classpath configurations.compileClasspath
+            main = 'asmble.cli.MainKt'
+            doFirst {
+                args 'translate', 'build/lib.wasm'
+            }
+        }
+
+        task compileCWasm(type: JavaExec) {
+            dependsOn cToWasm
+            classpath configurations.compileClasspath
+            main = 'asmble.cli.MainKt'
+            doFirst {
+                def outFile = 'build/wasm-classes/' + wasmCompiledClassName.replace('.', '/') + '.class'
+                file(outFile).parentFile.mkdirs()
+                args 'compile', 'build/lib.wasm', wasmCompiledClassName, '-out', outFile
+            }
+        }
+
+        // Rust example helpers
+
         ext.rustBuildRelease = true
 
         task rustToWasm(type: Exec) {
@@ -105,6 +139,18 @@ project(':examples') {
             }
         }
     }
+}
+
+project(':examples:c-simple') {
+    apply plugin: 'application'
+    ext.wasmCompiledClassName = 'asmble.generated.CSimple'
+    dependencies {
+        compile files('build/wasm-classes')
+    }
+    compileJava {
+        dependsOn compileCWasm
+    }
+    mainClassName = 'asmble.examples.csimple.Main'
 }
 
 project(':examples:rust-regex') {
