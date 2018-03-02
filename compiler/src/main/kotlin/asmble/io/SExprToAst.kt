@@ -12,7 +12,20 @@ import java.math.BigInteger
 typealias NameMap = Map<String, Int>
 
 open class SExprToAst {
-    data class ExprContext(val nameMap: NameMap, val blockDepth: Int = 0)
+    data class ExprContext(
+        val nameMap: NameMap,
+        val blockDepth: Int = 0,
+        val types: List<Node.Type.Func> = emptyList(),
+        val callIndirectNeverBeforeSeenFuncTypes: MutableList<Node.Type.Func> = mutableListOf()
+    )
+
+    data class FuncResult(
+        val name: String?,
+        val func: Node.Func,
+        val importOrExport: ImportOrExport?,
+        // These come from call_indirect insns
+        val additionalFuncTypesToAdd: List<Node.Type.Func>
+    )
 
     fun toAction(exp: SExpr.Multi): Script.Cmd.Action {
         var index = 1
@@ -135,7 +148,7 @@ open class SExprToAst {
 
     fun toExport(exp: SExpr.Multi, nameMap: NameMap): Node.Export {
         exp.requireFirstSymbol("export")
-        val field = exp.vals[1].symbolStr()!!
+        val field = exp.vals[1].symbolUtf8Str()!!
         val kind = exp.vals[2] as SExpr.Multi
         val extKind = when(kind.vals[0].symbolStr()) {
             "func" -> Node.ExternalKind.FUNCTION
@@ -210,7 +223,7 @@ open class SExprToAst {
         exp: SExpr.Multi,
         origNameMap: NameMap,
         types: List<Node.Type.Func>
-    ): Triple<String?, Node.Func, ImportOrExport?> {
+    ): FuncResult {
         exp.requireFirstSymbol("func")
         var currentIndex = 1
         val name = exp.maybeName(currentIndex)
@@ -224,10 +237,21 @@ open class SExprToAst {
             vals
         }
         currentIndex += locals.size
-        val (instrs, _) = toInstrs(exp, currentIndex, ExprContext(nameMap))
+        // We create a context for insn parsing (it even has sa mutable var)
+        val ctx = ExprContext(
+            nameMap = nameMap,
+            // We add ourselves to the context type list if we're not there to keep the indices right
+            types = if (types.contains(sig)) types else types + sig
+        )
+        val (instrs, _) = toInstrs(exp, currentIndex, ctx)
         // Imports can't have locals or instructions
         if (maybeImpExp is ImportOrExport.Import) require(locals.isEmpty() && instrs.isEmpty())
-        return Triple(name, Node.Func(sig, locals.flatten(), instrs), maybeImpExp)
+        return FuncResult(
+            name = name,
+            func = Node.Func(sig, locals.flatten(), instrs),
+            importOrExport = maybeImpExp,
+            additionalFuncTypesToAdd = ctx.callIndirectNeverBeforeSeenFuncTypes
+        )
     }
 
     fun toFuncSig(
@@ -297,8 +321,8 @@ open class SExprToAst {
         types: List<Node.Type.Func>
     ): Triple<String, String, Node.Type> {
         exp.requireFirstSymbol("import")
-        val module = exp.vals[1].symbolStr()!!
-        val field = exp.vals[2].symbolStr()!!
+        val module = exp.vals[1].symbolUtf8Str()!!
+        val field = exp.vals[2].symbolUtf8Str()!!
         val kind = exp.vals[3] as SExpr.Multi
         val kindName = kind.vals.firstOrNull()?.symbolStr()
         val kindSubOffset = if (kind.maybeName(1) == null) 1 else 2
@@ -320,11 +344,11 @@ open class SExprToAst {
             val multi = exp.vals.getOrNull(currOffset) as? SExpr.Multi
             when (multi?.vals?.firstOrNull()?.symbolStr()) {
                 "import" -> return ImportOrExport.Import(
-                    name = multi.vals.getOrNull(2)?.symbolStr() ?: error("No import name"),
-                    module = multi.vals.getOrNull(1)?.symbolStr() ?: error("No import module"),
+                    name = multi.vals.getOrNull(2)?.symbolUtf8Str() ?: error("No import name"),
+                    module = multi.vals.getOrNull(1)?.symbolUtf8Str() ?: error("No import module"),
                     exportFields = exportFields
                 )
-                "export" -> multi.vals.getOrNull(1)?.symbolStr().also {
+                "export" -> multi.vals.getOrNull(1)?.symbolUtf8Str().also {
                     exportFields += it ?: error("No export field")
                 }
                 else -> return if (exportFields.isEmpty()) null else ImportOrExport.Export(exportFields)
@@ -555,13 +579,14 @@ open class SExprToAst {
                 "elem" -> mod = mod.copy(elems = mod.elems + toElem(exp, nameMap))
                 "data" -> mod = mod.copy(data = mod.data + toData(exp, nameMap))
                 "start" -> mod = mod.copy(startFuncIndex = toStart(exp, nameMap))
-                "func" -> toFunc(exp, nameMap, mod.types).also { (_, fn, impExp) ->
+                "func" -> toFunc(exp, nameMap, mod.types).also { (_, fn, impExp, additionalFuncTypes) ->
                     if (impExp is ImportOrExport.Import) {
                         handleImport(impExp.module, impExp.name, fn.type, impExp.exportFields)
                     } else {
                         if (impExp is ImportOrExport.Export) addExport(impExp, Node.ExternalKind.FUNCTION, funcCount)
                         funcCount++
                         mod = mod.copy(funcs = mod.funcs + fn).addTypeIfNotPresent(fn.type).first
+                        mod = additionalFuncTypes.fold(mod) { mod, typ -> mod.addTypeIfNotPresent(typ).first }
                     }
                 }
                 "global" -> toGlobal(exp, nameMap).let { (_, glb, impExp) ->
@@ -724,7 +749,27 @@ open class SExprToAst {
                 Pair(op.create(vars.dropLast(1), vars.last()), offset + 1 + vars.size)
             }
             is InstrOp.CallOp.IndexArg -> Pair(op.create(oneVar("func")), 2)
-            is InstrOp.CallOp.IndexReservedArg -> Pair(op.create(oneVar("type"), false), 2)
+            is InstrOp.CallOp.IndexReservedArg -> {
+                // First lookup the func sig
+                val (updatedNameMap, expsUsed, funcType) = toFuncSig(exp, offset + 1, ctx.nameMap, ctx.types)
+                // Make sure there are no changes to the name map
+                if (ctx.nameMap.size != updatedNameMap.size) throw IoErr.IndirectCallSetParamNames()
+                // Obtain the func index from the types table, the indirects table, or just add it
+                var funcTypeIndex = ctx.types.indexOf(funcType)
+                // If it's not in the type list, check the call indirect list
+                if (funcTypeIndex == -1) {
+                    funcTypeIndex = ctx.callIndirectNeverBeforeSeenFuncTypes.indexOf(funcType)
+                    // If it's not there either, add it as a fresh
+                    if (funcTypeIndex == -1) {
+                        funcTypeIndex = ctx.callIndirectNeverBeforeSeenFuncTypes.size
+                        ctx.callIndirectNeverBeforeSeenFuncTypes += funcType
+                    }
+                    // And of course increase it by the overall type list size since they'll be added to that later
+                    funcTypeIndex += ctx.types.size
+                }
+                Pair(op.create(funcTypeIndex, false), expsUsed + 1)
+
+            }
             is InstrOp.ParamOp.NoArg -> Pair(op.create, 1)
             is InstrOp.VarOp.IndexArg -> Pair(op.create(
                 oneVar(if (head.contents.endsWith("global")) "global" else "local")), 2)
@@ -952,6 +997,10 @@ open class SExprToAst {
 
     private fun SExpr.symbol() = this as? SExpr.Symbol
     private fun SExpr.symbolStr() = this.symbol()?.contents
+    private fun SExpr.symbolUtf8Str() = this.symbol()?.let {
+        if (it.hasNonUtf8ByteSeqs) throw IoErr.InvalidUtf8Encoding()
+        it.contents
+    }
 
     private fun SExpr.Multi.maybeName(index: Int): String? {
         if (this.vals.size > index && this.vals[index] is SExpr.Symbol) {

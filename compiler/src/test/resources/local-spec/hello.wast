@@ -1031,7 +1031,7 @@
      )
     )
     (drop
-     (call_indirect $FUNCSIG$iiii
+     (call_indirect (type $FUNCSIG$iiii)
       (get_local $0)
       (i32.const 0)
       (i32.const 0)
@@ -7356,7 +7356,7 @@
      )
     )
     (return
-     (call_indirect $FUNCSIG$iiii
+     (call_indirect (type $FUNCSIG$iiii)
       (get_local $2)
       (get_local $0)
       (get_local $1)
@@ -7428,7 +7428,7 @@
     (br_if $label$0
      (i32.lt_u
       (tee_local $6
-       (call_indirect $FUNCSIG$iiii
+       (call_indirect (type $FUNCSIG$iiii)
         (get_local $2)
         (get_local $0)
         (tee_local $8
@@ -7721,7 +7721,7 @@
      )
     )
     (drop
-     (call_indirect $FUNCSIG$iiii
+     (call_indirect (type $FUNCSIG$iiii)
       (get_local $0)
       (i32.const 0)
       (i32.const 0)
@@ -7757,7 +7757,7 @@
      )
     )
     (drop
-     (call_indirect $FUNCSIG$iiii
+     (call_indirect (type $FUNCSIG$iiii)
       (get_local $0)
       (i32.sub
        (get_local $1)
@@ -20738,7 +20738,7 @@
   (unreachable)
  )
  (func $dynCall_iiii (param $fptr i32) (param $0 i32) (param $1 i32) (param $2 i32) (result i32)
-  (call_indirect $FUNCSIG$iiii
+  (call_indirect (type $FUNCSIG$iiii)
    (get_local $0)
    (get_local $1)
    (get_local $2)
@@ -20746,7 +20746,7 @@
   )
  )
  (func $dynCall_ii (param $fptr i32) (param $0 i32) (result i32)
-  (call_indirect $FUNCSIG$ii
+  (call_indirect (type $FUNCSIG$ii)
    (get_local $0)
    (get_local $fptr)
   )

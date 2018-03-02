@@ -265,7 +265,7 @@ data class ScriptContext(
 
     fun bindImport(import: Node.Import, getter: Boolean, methodType: MethodType): MethodHandle {
         // Find a method that matches our expectations
-        val module = registrations[import.module] ?: error("Unable to find module ${import.module}")
+        val module = registrations[import.module] ?: throw RunErr.ImportNotFound(import.module, import.field)
         val javaName = if (getter) "get" + import.field.javaIdent.capitalize() else import.field.javaIdent
         val kind = when (import.kind) {
             is Node.Import.Kind.Func -> WasmExternalKind.FUNCTION

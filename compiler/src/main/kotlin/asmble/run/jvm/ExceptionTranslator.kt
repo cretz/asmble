@@ -18,7 +18,7 @@ open class ExceptionTranslator {
         is NullPointerException -> listOf("undefined element", "uninitialized element")
         is StackOverflowError -> listOf("call stack exhausted")
         is UnsupportedOperationException -> listOf("unreachable executed")
-        is WrongMethodTypeException -> listOf("indirect call signature mismatch")
+        is WrongMethodTypeException -> listOf("indirect call type mismatch")
         is NumberFormatException -> listOf("i32 constant")
         else -> emptyList()
     }

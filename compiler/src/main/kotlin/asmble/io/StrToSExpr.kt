@@ -1,6 +1,8 @@
 package asmble.io
 
 import asmble.ast.SExpr
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
 
 open class StrToSExpr {
     sealed class ParseResult {
@@ -53,9 +55,29 @@ open class StrToSExpr {
                 }
                 '"' -> {
                     offset++
-                    // Check escapes
+                    // We go over each char here checking escapes
                     var retStr = ""
+
+                    // The WASM spec says we can treat chars normally unless they are hex escapes at which point they
+                    // are raw bytes. Since we want to store everything as a string for later use, we need to keep track
+                    // which set of raw bytes were invalid UTF-8 for UTF-8 validation later. Alternatively, we could
+                    // just store in bytes and decode on use but this is easier. We keep a list of byte "runs" and at
+                    // the end of each "run", we check whether they would make a valid UTF-8 string.
+                    var hasNonUtf8ByteSeqs = false
+                    val currByteSeq = mutableListOf<Byte>()
+                    fun checkByteSeq() {
+                        if (!hasNonUtf8ByteSeqs && currByteSeq.isNotEmpty()) {
+                            try {
+                                Charsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(currByteSeq.toByteArray()))
+                            } catch (_: CharacterCodingException) {
+                                hasNonUtf8ByteSeqs = true
+                            }
+                            currByteSeq.clear()
+                        }
+                    }
+
                     while (err == null && !isEof && str[offset] != '"') {
+                        var wasEscapedChar = false
                         if (str[offset] == '\\') {
                             offset++
                             if (isEof) err = "EOF when expected char to unescape" else {
@@ -69,7 +91,10 @@ open class StrToSExpr {
                                         // Try to parse hex if there is enough, otherwise just gripe
                                         if (offset + 1 >= str.length) err = "Not enough to hex escape" else {
                                             try {
-                                                retStr += str.substring(offset, offset + 2).toInt(16).toChar()
+                                                val int = str.substring(offset, offset + 2).toInt(16)
+                                                retStr += int.toChar()
+                                                currByteSeq.add(int.toByte())
+                                                wasEscapedChar = true
                                                 offset++
                                             } catch (e: NumberFormatException) {
                                                 err = "Unknown escape: ${str.substring(offset, offset + 2)}: $e"
@@ -83,10 +108,12 @@ open class StrToSExpr {
                             retStr += str[offset]
                             offset++
                         }
+                        if (!wasEscapedChar) checkByteSeq()
                     }
+                    checkByteSeq()
                     if (err == null && str[offset] != '"') err = "EOF when expected '\"'"
                     else if (err == null) offset++
-                    val ret = SExpr.Symbol(retStr, true)
+                    val ret = SExpr.Symbol(retStr, true, hasNonUtf8ByteSeqs)
                     exprOffsetMap.put(System.identityHashCode(ret), origOffset)
                     return ret
                 }

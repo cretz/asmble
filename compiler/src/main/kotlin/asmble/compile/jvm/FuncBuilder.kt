@@ -498,7 +498,10 @@ open class FuncBuilder {
                     val fn = block.endTypes.firstOrNull()?.let { endType ->
                         // We have to pop the stack and re-push to get the right type after unreachable here...
                         //  Ref: https://github.com/WebAssembly/spec/pull/537
-                        origFn.popExpecting(endType).push(endType)
+                        // Update: but only if it's not a loop
+                        //  Ref: https://github.com/WebAssembly/spec/pull/610
+                        if (block.insn is Node.Instr.Loop) origFn
+                        else origFn.popExpecting(endType).push(endType)
                     } ?: origFn
                     if (needsPopBeforeJump) buildPopBeforeJump(ctx, fn, block, toLabel)
                     else fn

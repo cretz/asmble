@@ -84,7 +84,7 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
     }
 
     class UnknownMemory(val index: Int) : CompileErr("No memory present at index $index") {
-        override val asmErrString get() = "unknown memory"
+        override val asmErrString get() = "unknown memory $index"
     }
 
     class UnknownTable(val index: Int) : CompileErr("No table present at index $index") {

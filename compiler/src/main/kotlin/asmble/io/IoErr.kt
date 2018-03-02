@@ -19,6 +19,8 @@ sealed class IoErr(message: String, cause: Throwable? = null) : RuntimeException
 
     class InvalidSectionId(id: Int) : IoErr("Invalid section ID of $id") {
         override val asmErrString get() = "invalid section id"
+        // Since we test section length before section content, we get a different error than the spec
+        override val asmErrStrings get() = listOf(asmErrString, "invalid mutability")
     }
 
     class InvalidCodeLength(funcLen: Int, codeLen: Int) : IoErr("Got $funcLen funcs but only $codeLen bodies") {
@@ -27,6 +29,10 @@ sealed class IoErr(message: String, cause: Throwable? = null) : RuntimeException
 
     class InvalidMutability : IoErr("Invalid mutability boolean") {
         override val asmErrString get() = "invalid mutability"
+    }
+
+    class InvalidReservedArg : IoErr("Invalid reserved arg") {
+        override val asmErrString get() = "zero flag expected"
     }
 
     class MultipleMemories : IoErr("Only single memory allowed") {
@@ -94,6 +100,7 @@ sealed class IoErr(message: String, cause: Throwable? = null) : RuntimeException
 
     class UnknownOperator : IoErr("Unknown operator") {
         override val asmErrString get() = "unknown operator"
+        override val asmErrStrings get() = listOf(asmErrString, "unexpected token")
     }
 
     class InvalidVar(val found: String) : IoErr("Var ref expected, found: $found") {
@@ -103,5 +110,13 @@ sealed class IoErr(message: String, cause: Throwable? = null) : RuntimeException
     class ResultBeforeParameter : IoErr("Function result before parameter") {
         override val asmErrString get() = "result before parameter"
         override val asmErrStrings get() = listOf(asmErrString, "unexpected token")
+    }
+
+    class IndirectCallSetParamNames : IoErr("Indirect call tried to set name to param in func type") {
+        override val asmErrString get() = "unexpected token"
+    }
+
+    class InvalidUtf8Encoding : IoErr("Some byte sequence was not UTF-8 compatible") {
+        override val asmErrString get() = "invalid UTF-8 encoding"
     }
 }

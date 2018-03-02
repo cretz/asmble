@@ -41,9 +41,10 @@ sealed class RunErr(message: String, cause: Throwable? = null) : RuntimeExceptio
     }
 
     class InvalidElemIndex(
-        val index: Int,
+        val offset: Int,
+        val elemSize: Int,
         val tableSize: Int
-    ) : RunErr("Trying to set elem at index $index but table size is only $tableSize") {
+    ) : RunErr("Trying to set $elemSize elems at offset $offset but table size is only $tableSize") {
         override val asmErrString get() = "elements segment does not fit"
     }
 

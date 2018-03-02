@@ -113,7 +113,7 @@ open class BinaryToAst(
                 op.create(b.readVarUInt32AsInt())
             is Node.InstrOp.CallOp.IndexReservedArg -> op.create(
                 b.readVarUInt32AsInt(),
-                b.readVarUInt1()
+                b.readVarUInt1().also { if (it) throw IoErr.InvalidReservedArg() }
             )
             is Node.InstrOp.ParamOp.NoArg ->
                 op.create
@@ -124,7 +124,7 @@ open class BinaryToAst(
                 b.readVarUInt32()
             )
             is Node.InstrOp.MemOp.ReservedArg ->
-                op.create(b.readVarUInt1())
+                op.create(b.readVarUInt1().also { if (it) throw IoErr.InvalidReservedArg() })
             is Node.InstrOp.ConstOp.IntArg ->
                 op.create(b.readVarInt32())
             is Node.InstrOp.ConstOp.LongArg ->

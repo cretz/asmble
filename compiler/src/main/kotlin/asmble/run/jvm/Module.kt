@@ -152,7 +152,8 @@ interface Module {
             }
             if (tableSize != null) mod.elems.forEach { elem ->
                 constIntExpr(elem.offset)?.let { offset ->
-                    if (offset >= tableSize) throw RunErr.InvalidElemIndex(offset, tableSize)
+                    if (offset + elem.funcIndices.size > tableSize)
+                        throw RunErr.InvalidElemIndex(offset, elem.funcIndices.size, tableSize)
                 }
             }
             if (memLimit != null) mod.data.forEach { data ->
