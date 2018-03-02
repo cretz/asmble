@@ -5,6 +5,7 @@
 /gradlew.bat
 /.gradle
 /.idea
+/asmble.iml
 /build
 /gradle
 /compiler/bin
