@@ -1,7 +1,6 @@
 package asmble.io
 
 import asmble.AsmErr
-import java.math.BigInteger
 
 sealed class IoErr(message: String, cause: Throwable? = null) : RuntimeException(message, cause), AsmErr {
     class UnexpectedEnd : IoErr("Unexpected EOF") {
@@ -118,5 +117,10 @@ sealed class IoErr(message: String, cause: Throwable? = null) : RuntimeException
 
     class InvalidUtf8Encoding : IoErr("Some byte sequence was not UTF-8 compatible") {
         override val asmErrString get() = "invalid UTF-8 encoding"
+    }
+
+    class InvalidLeb128Number : IoErr("Invalid LEB128 number") {
+        override val asmErrString get() = "integer representation too long"
+        override val asmErrStrings get() = listOf(asmErrString, "integer too large")
     }
 }

@@ -223,8 +223,8 @@ sealed class Node {
         data class I64Store8(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
         data class I64Store16(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
         data class I64Store32(override val align: Int, override val offset: Long) : Instr(), Args.AlignOffset
-        data class CurrentMemory(override val reserved: Boolean) : Instr(), Args.Reserved
-        data class GrowMemory(override val reserved: Boolean) : Instr(), Args.Reserved
+        data class MemorySize(override val reserved: Boolean) : Instr(), Args.Reserved
+        data class MemoryGrow(override val reserved: Boolean) : Instr(), Args.Reserved
 
         // Constants
         data class I32Const(override val value: Int) : Instr(), Args.Const<Int>
@@ -511,8 +511,8 @@ sealed class Node {
                 opMapEntry("i64.store8", 0x3c, ::MemOpAlignOffsetArg, Instr::I64Store8, Instr.I64Store8::class)
                 opMapEntry("i64.store16", 0x3d, ::MemOpAlignOffsetArg, Instr::I64Store16, Instr.I64Store16::class)
                 opMapEntry("i64.store32", 0x3e, ::MemOpAlignOffsetArg, Instr::I64Store32, Instr.I64Store32::class)
-                opMapEntry("current_memory", 0x3f, ::MemOpReservedArg, Instr::CurrentMemory, Instr.CurrentMemory::class)
-                opMapEntry("grow_memory", 0x40, ::MemOpReservedArg, Instr::GrowMemory, Instr.GrowMemory::class)
+                opMapEntry("memory.size", 0x3f, ::MemOpReservedArg, Instr::MemorySize, Instr.MemorySize::class)
+                opMapEntry("memory.grow", 0x40, ::MemOpReservedArg, Instr::MemoryGrow, Instr.MemoryGrow::class)
 
                 opMapEntry("i32.const", 0x41, ::ConstOpIntArg, Instr::I32Const, Instr.I32Const::class)
                 opMapEntry("i64.const", 0x42, ::ConstOpLongArg, Instr::I64Const, Instr.I64Const::class)

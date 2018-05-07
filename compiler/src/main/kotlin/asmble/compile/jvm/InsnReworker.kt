@@ -194,7 +194,7 @@ open class InsnReworker {
                 is Node.Instr.I64Store32 ->
                     injectBeforeLastStackCount(Insn.MemNeededOnStack, 2)
                 // Grow memory requires "mem" before the single param
-                is Node.Instr.GrowMemory ->
+                is Node.Instr.MemoryGrow ->
                     injectBeforeLastStackCount(Insn.MemNeededOnStack, 1)
                 else -> { }
             }
@@ -239,8 +239,8 @@ open class InsnReworker {
         is Node.Instr.I32Store, is Node.Instr.I64Store, is Node.Instr.F32Store, is Node.Instr.F64Store,
         is Node.Instr.I32Store8, is Node.Instr.I32Store16, is Node.Instr.I64Store8, is Node.Instr.I64Store16,
         is Node.Instr.I64Store32 -> POP_PARAM
-        is Node.Instr.CurrentMemory -> PUSH_RESULT
-        is Node.Instr.GrowMemory -> POP_PARAM + PUSH_RESULT
+        is Node.Instr.MemorySize -> PUSH_RESULT
+        is Node.Instr.MemoryGrow -> POP_PARAM + PUSH_RESULT
         is Node.Instr.I32Const, is Node.Instr.I64Const,
         is Node.Instr.F32Const, is Node.Instr.F64Const -> PUSH_RESULT
         is Node.Instr.I32Add, is Node.Instr.I32Sub, is Node.Instr.I32Mul, is Node.Instr.I32DivS,
@@ -288,12 +288,12 @@ open class InsnReworker {
         val inc =
             if (lastCouldHaveMem) 0
             else if (insn == Insn.MemNeededOnStack) 1
-            else if (insn is Insn.Node && insn.insn is Node.Instr.CurrentMemory) 1
+            else if (insn is Insn.Node && insn.insn is Node.Instr.MemorySize) 1
             else 0
         val couldSetMemNext = if (insn !is Insn.Node) false else when (insn.insn) {
             is Node.Instr.I32Store, is Node.Instr.I64Store, is Node.Instr.F32Store, is Node.Instr.F64Store,
             is Node.Instr.I32Store8, is Node.Instr.I32Store16, is Node.Instr.I64Store8, is Node.Instr.I64Store16,
-            is Node.Instr.I64Store32, is Node.Instr.GrowMemory -> true
+            is Node.Instr.I64Store32, is Node.Instr.MemoryGrow -> true
             else -> false
         }
         (count + inc) to couldSetMemNext

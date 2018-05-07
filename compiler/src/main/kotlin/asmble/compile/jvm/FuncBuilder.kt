@@ -148,10 +148,10 @@ open class FuncBuilder {
         is Node.Instr.I32Store8, is Node.Instr.I32Store16, is Node.Instr.I64Store8, is Node.Instr.I64Store16,
         is Node.Instr.I64Store32 ->
             applyStoreOp(ctx, fn, i as Node.Instr.Args.AlignOffset, index)
-        is Node.Instr.CurrentMemory ->
-            applyCurrentMemory(ctx, fn)
-        is Node.Instr.GrowMemory ->
-            applyGrowMemory(ctx, fn)
+        is Node.Instr.MemorySize ->
+            applyMemorySize(ctx, fn)
+        is Node.Instr.MemoryGrow ->
+            applyMemoryGrow(ctx, fn)
         is Node.Instr.I32Const ->
             fn.addInsns(i.value.const).push(Int::class.ref)
         is Node.Instr.I64Const ->
@@ -1062,14 +1062,14 @@ open class FuncBuilder {
         ).push(Int::class.ref)
     }
 
-    fun applyGrowMemory(ctx: FuncContext, fn: Func) =
+    fun applyMemoryGrow(ctx: FuncContext, fn: Func) =
         // Grow mem is a special case where the memory ref is already pre-injected on
         // the stack before this call. Result is an int.
         ctx.cls.assertHasMemory().let {
             ctx.cls.mem.growMemory(ctx, fn)
         }
 
-    fun applyCurrentMemory(ctx: FuncContext, fn: Func) =
+    fun applyMemorySize(ctx: FuncContext, fn: Func) =
         // Curr mem is not specially injected, so we have to put the memory on the
         // stack since we need it
         ctx.cls.assertHasMemory().let {
