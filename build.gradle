@@ -19,10 +19,22 @@ buildscript {
 
 allprojects {
     apply plugin: 'java'
+    group 'com.github.cretz.asmble'
+    version '0.4.0-SNAPSHOT'
 
     repositories {
         mavenCentral()
     }
+}
+
+project(':annotations') {
+    javadoc {
+        options.links 'https://docs.oracle.com/javase/8/docs/api/'
+        // TODO: change when https://github.com/gradle/gradle/issues/2354 is fixed
+        options.addStringOption 'Xdoclint:all', '-Xdoclint:-missing'
+    }
+
+    publishSettings(project, 'asmble-annotations', 'Asmble WASM Annotations', true)
 }
 
 project(':compiler') {
@@ -45,6 +57,8 @@ project(':compiler') {
         testCompile "org.jetbrains.kotlin:kotlin-test-junit:$kotlin_version"
         testCompile "org.ow2.asm:asm-debug-all:$asm_version"
     }
+
+    publishSettings(project, 'asmble-compiler', 'Asmble WASM Compiler', false)
 }
 
 project(':examples') {
@@ -191,4 +205,77 @@ project(':examples:rust-string') {
         dependsOn compileRustWasm
     }
     mainClassName = 'asmble.examples.ruststring.Main'
+}
+
+def publishSettings(project, projectName, projectDescription, includeJavadoc) {
+    project.with {
+        if (!project.hasProperty('ossrhUsername')) return
+        apply plugin: 'maven'
+        apply plugin: 'signing'
+
+        archivesBaseName = projectName
+
+        task packageSources(type: Jar) {
+            classifier = 'sources'
+            from sourceSets.main.allSource
+        }
+
+        if (includeJavadoc) {
+            task packageJavadoc(type: Jar, dependsOn: 'javadoc') {
+                from javadoc.destinationDir
+                classifier = 'javadoc'
+            }
+        } else {
+            task packageJavadoc(type: Jar) {
+                // Empty to satisfy Sonatype's javadoc.jar requirement
+                classifier 'javadoc'
+            }
+        }
+
+        artifacts {
+            archives packageSources, packageJavadoc
+        }
+
+        signing {
+            sign configurations.archives
+        }
+
+        uploadArchives {
+            repositories {
+                mavenDeployer {
+                    beforeDeployment { MavenDeployment deployment -> signing.signPom(deployment) }
+                    repository(url: 'https://oss.sonatype.org/service/local/staging/deploy/maven2/') {
+                        authentication(userName: ossrhUsername, password: ossrhPassword)
+                    }
+                    snapshotRepository(url: 'https://oss.sonatype.org/content/repositories/snapshots/') {
+                        authentication(userName: ossrhUsername, password: ossrhPassword)
+                    }
+                    pom.project {
+                        name projectName
+                        packaging 'jar'
+                        description projectDescription
+                        url 'https://github.com/cretz/asmble'
+                        scm {
+                            connection 'scm:git:git@github.com:cretz/asmble.git'
+                            developerConnection 'scm:git:git@github.com:cretz/asmble.git'
+                            url 'git@github.com:cretz/asmble.git'
+                        }
+                        licenses {
+                            license {
+                                name 'MIT License'
+                                url 'https://opensource.org/licenses/MIT'
+                            }
+                        }
+                        developers {
+                            developer {
+                                id 'cretz'
+                                name 'Chad Retz'
+                                url 'https://github.com/cretz'
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
