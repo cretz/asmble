@@ -183,9 +183,16 @@ JVM languages.
 
 ### Getting
 
-The latest tag can be added to your build script via [JitPack](https://jitpack.io). For example,
-[here](https://jitpack.io/#cretz/asmble/0.1.0) are instructions for using the 0.1.0 release and
-[here](https://jitpack.io/#cretz/asmble/master-SNAPSHOT) are instructions for the latest master.
+The compiler and annotations are deployed to Maven Central. The compiler is written in Kotlin and can be added as a
+Gradle dependency with:
+
+    compile 'com.github.cretz.asmble:asmble-compiler:0.3.0'
+
+This is only needed to compile of course, the compiled code has no runtime requirement. The compiled code does include
+some annotations (but in Java its ok to have annotations that are not found). If you do want to reflect the annotations,
+the annotation library can be added as a Gradle dependency with:
+
+    compile 'com.github.cretz.asmble:asmble-annotations:0.3.0'
 
 ### Building and Testing
 
