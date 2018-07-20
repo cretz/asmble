@@ -123,4 +123,8 @@ sealed class IoErr(message: String, cause: Throwable? = null) : RuntimeException
         override val asmErrString get() = "integer representation too long"
         override val asmErrStrings get() = listOf(asmErrString, "integer too large")
     }
+
+    class InvalidLocalSize(cause: NumberFormatException) : IoErr("Invalid local size", cause) {
+        override val asmErrString get() = "too many locals"
+    }
 }

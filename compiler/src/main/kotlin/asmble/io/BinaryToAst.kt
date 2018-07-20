@@ -144,8 +144,9 @@ open class BinaryToAst(
         }
     }
 
-    fun toLocals(b: ByteReader) = b.readVarUInt32AsInt().let { size ->
-        toValueType(b).let { type -> List(size) { type } }
+    fun toLocals(b: ByteReader): List<Node.Type.Value> {
+        val size = try { b.readVarUInt32AsInt() } catch (e: NumberFormatException) { throw IoErr.InvalidLocalSize(e) }
+        return toValueType(b).let { type -> List(size) { type } }
     }
 
     fun toMemoryType(b: ByteReader) = Node.Type.Memory(toResizableLimits(b))
