@@ -14,7 +14,7 @@ class SpecTestUnit(name: String, wast: String, expectedOutput: String?) : BaseTe
 
     override val defaultMaxMemPages get() = when (name) {
         "nop" -> 20
-        "resizing" -> 830
+        "memory_grow" -> 830
         "imports" -> 5
         else -> 1
     }
