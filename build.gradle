@@ -2,7 +2,7 @@ group 'asmble'
 version '0.2.0'
 
 buildscript {
-    ext.kotlin_version = '1.2.41'
+    ext.kotlin_version = '1.2.51'
     ext.asm_version = '5.2'
 
     repositories {

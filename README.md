@@ -363,9 +363,9 @@ stack (e.g. some places where we do a swap).
 Below are some performance and implementation quirks where there is a bit of an impedance mismatch between WebAssembly
 and the JVM:
 
-* WebAssembly has a nice data section for byte arrays whereas the JVM does not. Right now we build a byte array from
-  a bunch of consts at runtime which is multiple operations per byte. This can bloat the class file size, but is quite
-  fast compared to alternatives such as string constants.
+* WebAssembly has a nice data section for byte arrays whereas the JVM does not. Right now we use a single-byte-char
+  string constant (i.e. ISO-8859 charset). This saves class file size, but this means we call `String::getBytes` on
+  init to load bytes from the string constant.
 * The JVM makes no guarantees about trailing bits being preserved on NaN floating point representations like WebAssembly
   does. This causes some mismatch on WebAssembly tests depending on how the JVM "feels" (I haven't dug into why some
   bit patterns stay and some don't when NaNs are passed through methods).
@@ -416,6 +416,8 @@ languages but is missing the big problem: lack of a standard library. There is n
 WASM compiled from Rust, C, Java, etc if e.g. they all have their own way of handling strings. Someone needs to build a
 definition of an importable set of modules that does all of these things, even if it's in WebIDL. I dunno, maybe the
 effort is already there, I haven't really looked.
+
+There is https://github.com/konsoletyper/teavm
 
 **So I can compile something in C via Emscripten and have it run on the JVM with this?**
 
