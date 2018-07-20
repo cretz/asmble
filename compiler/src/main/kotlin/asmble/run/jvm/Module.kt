@@ -116,9 +116,9 @@ interface Module {
             }
 
             // Global imports
-            val globalImports = mod.imports.mapNotNull {
-                if (it.kind is Node.Import.Kind.Global) ctx.resolveImportGlobal(it, it.kind.type)
-                else null
+            val globalImports = mod.imports.flatMap {
+                if (it.kind is Node.Import.Kind.Global) ctx.resolveImportGlobals(it, it.kind.type)
+                else emptyList()
             }
             constructorParams += globalImports
 

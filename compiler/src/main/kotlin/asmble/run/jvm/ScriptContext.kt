@@ -263,10 +263,12 @@ data class ScriptContext(
         return Module.Compiled(mod, classLoader.fromBuiltContext(ctx), name, ctx.mem)
     }
 
-    fun bindImport(import: Node.Import, getter: Boolean, methodType: MethodType): MethodHandle {
+    fun bindImport(import: Node.Import, getter: Boolean, methodType: MethodType) = bindImport(
+        import, if (getter) "get" + import.field.javaIdent.capitalize() else import.field.javaIdent, methodType)
+
+    fun bindImport(import: Node.Import, javaName: String, methodType: MethodType): MethodHandle {
         // Find a method that matches our expectations
         val module = registrations[import.module] ?: throw RunErr.ImportNotFound(import.module, import.field)
-        val javaName = if (getter) "get" + import.field.javaIdent.capitalize() else import.field.javaIdent
         val kind = when (import.kind) {
             is Node.Import.Kind.Func -> WasmExternalKind.FUNCTION
             is Node.Import.Kind.Table -> WasmExternalKind.TABLE
@@ -281,8 +283,18 @@ data class ScriptContext(
         bindImport(import, false,
             MethodType.methodType(funcType.ret?.jclass ?: Void.TYPE, funcType.params.map { it.jclass }))
 
-    fun resolveImportGlobal(import: Node.Import, globalType: Node.Type.Global) =
-        bindImport(import, true, MethodType.methodType(globalType.contentType.jclass))
+    fun resolveImportGlobals(import: Node.Import, globalType: Node.Type.Global): List<MethodHandle> {
+        val getter = bindImport(import, true, MethodType.methodType(globalType.contentType.jclass))
+        // Whether the setter is present or not defines whether it is mutable
+        val setter = try {
+            bindImport(import, "set" + import.field.javaIdent.capitalize(),
+                MethodType.methodType(Void.TYPE, globalType.contentType.jclass))
+        } catch (e: RunErr.ImportNotFound) { null }
+        // Mutability must match
+        if (globalType.mutable == (setter == null))
+            throw RunErr.ImportGlobalInvalidMutability(import.module, import.field, globalType.mutable)
+        return if (setter == null) listOf(getter) else listOf(getter, setter)
+    }
 
     fun resolveImportMemory(import: Node.Import, memoryType: Node.Type.Memory, mem: Mem) =
         bindImport(import, true, MethodType.methodType(Class.forName(mem.memType.asm.className))).

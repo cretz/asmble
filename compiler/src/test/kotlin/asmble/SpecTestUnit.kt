@@ -13,7 +13,7 @@ class SpecTestUnit(name: String, wast: String, expectedOutput: String?) : BaseTe
     override val shouldFail get() = name.endsWith(".fail")
 
     override val defaultMaxMemPages get() = when (name) {
-        "nop"-> 20
+        "nop" -> 20
         "resizing" -> 830
         "imports" -> 5
         else -> 1

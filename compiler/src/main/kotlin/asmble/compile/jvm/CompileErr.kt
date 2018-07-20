@@ -102,18 +102,6 @@ sealed class CompileErr(message: String, cause: Throwable? = null) : RuntimeExce
         override val asmErrString get() = "global is immutable"
     }
 
-    class MutableGlobalImport(
-        val index: Int
-    ) : CompileErr("Attempted to import mutable global at index $index") {
-        override val asmErrString get() = "mutable globals cannot be imported"
-    }
-
-    class MutableGlobalExport(
-        val index: Int
-    ) : CompileErr("Attempted to export global $index which is mutable") {
-        override val asmErrString get() = "mutable globals cannot be exported"
-    }
-
     class GlobalInitNotConstant(
         val index: Int
     ) : CompileErr("Expected init for global $index to be single constant value") {

@@ -13,4 +13,5 @@ public @interface WasmImport {
     WasmExternalKind kind();
     int resizableLimitInitial() default -1;
     int resizableLimitMaximum() default -1;
+    boolean globalSetter() default false;
 }

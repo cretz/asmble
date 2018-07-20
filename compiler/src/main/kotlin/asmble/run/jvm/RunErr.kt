@@ -55,4 +55,12 @@ sealed class RunErr(message: String, cause: Throwable? = null) : RuntimeExceptio
         override val asmErrString get() = "unknown import"
         override val asmErrStrings get() = listOf(asmErrString, "incompatible import type")
     }
+
+    class ImportGlobalInvalidMutability(
+        val module: String,
+        val field: String,
+        val expected: Boolean
+    ) : RunErr("Expected imported global $module::$field to have mutability as ${!expected}") {
+        override val asmErrString get() = "incompatible import type"
+    }
 }
