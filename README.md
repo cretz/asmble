@@ -256,15 +256,16 @@ In the WebAssembly MVP a table is just a set of function pointers. This is store
 
 #### Globals
 
-Globals are stored as fields on the class. A non-import global is simply a field, but an import global is a
-`MethodHandle` to the getter (and would be a `MethodHandle` to the setter if mutable globals were supported). Any values
-for the globals are set in the constructor.
+Globals are stored as fields on the class. A non-import global is simply a field that is final if not mutable. An import
+global is a `MethodHandle` to the getter and a `MethodHandle` to the setter if mutable. Any values for the globals are
+set in the constructor.
 
 #### Imports
 
 The constructor accepts all imports as params. Memory is imported via a `ByteBuffer` param, then function
-imports as `MethodHandle` params, then global imports as `MethodHandle` params, then a `MethodHandle` array param for an
-imported table. All of these values are set as fields in the constructor.
+imports as `MethodHandle` params, then global imports as `MethodHandle` params (one for getter and another for setter if
+mutable), then a `MethodHandle` array param for an imported table. All of these values are set as fields in the
+constructor.
 
 #### Exports
 
