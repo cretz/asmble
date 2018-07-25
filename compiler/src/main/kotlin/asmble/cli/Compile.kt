@@ -51,7 +51,7 @@ open class Compile : Command<Compile.Args>() {
         val inFormat =
             if (args.inFormat != "<use file extension>") args.inFormat
             else args.inFile.substringAfterLast('.', "<unknown>")
-        val script = Translate.inToAst(args.inFile, inFormat)
+        val script = Translate().also { it.logger = logger }.inToAst(args.inFile, inFormat)
         val mod = (script.commands.firstOrNull() as? Script.Cmd.Module) ?:
             error("Only a single sexpr for (module) allowed")
         val outStream = when (args.outFile) {

@@ -15,6 +15,7 @@ sealed class Node {
         val elems: List<Elem> = emptyList(),
         val funcs: List<Func> = emptyList(),
         val data: List<Data> = emptyList(),
+        val names: NameSection? = null,
         val customSections: List<CustomSection> = emptyList()
     ) : Node()
 
@@ -147,6 +148,12 @@ sealed class Node {
             return result
         }
     }
+
+    data class NameSection(
+        val moduleName: String,
+        val funcNames: Map<Int, String>,
+        val localNames: Map<Int, Map<Int, String>>
+    ) : Node()
 
     sealed class Instr : Node() {
 

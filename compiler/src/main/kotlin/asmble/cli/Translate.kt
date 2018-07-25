@@ -84,7 +84,7 @@ open class Translate : Command<Translate.Args>() {
                 }
             }
             "wasm" ->
-                Script(listOf(Script.Cmd.Module(BinaryToAst.toModule(
+                Script(listOf(Script.Cmd.Module(BinaryToAst(logger = logger).toModule(
                     ByteReader.InputStream(inBytes.inputStream())), null)))
             else -> error("Unknown in format '$inFormat'")
         }
