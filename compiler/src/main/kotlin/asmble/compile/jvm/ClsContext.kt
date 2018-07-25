@@ -39,6 +39,15 @@ data class ClsContext(
     val hasTable: Boolean by lazy {
         mod.tables.isNotEmpty() || mod.imports.any { it.kind is Node.Import.Kind.Table }
     }
+    val dedupedFuncNames: Map<Int, String>? by lazy {
+        val seen = mutableSetOf<String>()
+        mod.names?.funcNames?.toList()?.sortedBy { it.first }?.map { (index, origName) ->
+            var name = origName
+            var nameIndex = 0
+            while (!seen.add(name)) name = origName + (nameIndex++)
+            index to name
+        }?.toMap()
+    }
 
     fun assertHasMemory() { if (!hasMemory) throw CompileErr.UnknownMemory(0) }
 
@@ -71,7 +80,7 @@ data class ClsContext(
     fun importGlobalGetterFieldName(index: Int) = "import\$get" + globalName(index)
     fun importGlobalSetterFieldName(index: Int) = "import\$set" + globalName(index)
     fun globalName(index: Int) = "\$global$index"
-    fun funcName(index: Int) = "\$func$index"
+    fun funcName(index: Int) = dedupedFuncNames?.get(index)?.javaIdent ?: "\$func$index"
 
     private fun syntheticFunc(
         nameSuffix: String,
