@@ -21,16 +21,16 @@ class NamesTest {
             )
         """.trimIndent()))
         val expected = Node.NameSection(
-            moduleName = "\$mod_name",
+            moduleName = "mod_name",
             funcNames = mapOf(
-                0 to "\$import_func",
-                1 to "\$some_func"
+                0 to "import_func",
+                1 to "some_func"
             ),
             localNames = mapOf(
                 1 to mapOf(
-                    0 to "\$func_param",
-                    1 to "\$func_local0",
-                    2 to "\$func_local1"
+                    0 to "func_param",
+                    1 to "func_local0",
+                    2 to "func_local1"
                 )
             )
         )

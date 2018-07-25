@@ -40,11 +40,20 @@ data class ClsContext(
         mod.tables.isNotEmpty() || mod.imports.any { it.kind is Node.Import.Kind.Table }
     }
     val dedupedFuncNames: Map<Int, String>? by lazy {
-        val seen = mutableSetOf<String>()
+        // Consider all exports as seen
+        val seen = mod.exports.flatMap { export ->
+            when {
+                export.kind == Node.ExternalKind.FUNCTION -> listOf(export.field.javaIdent)
+                // Just to make it easy, consider all globals as having setters
+                export.kind == Node.ExternalKind.GLOBAL ->
+                    export.field.javaIdent.capitalize().let { listOf("get$it", "set$it") }
+                else -> listOf("get" + export.field.javaIdent.capitalize())
+            }
+        }.toMutableSet()
         mod.names?.funcNames?.toList()?.sortedBy { it.first }?.map { (index, origName) ->
-            var name = origName
+            var name = origName.javaIdent
             var nameIndex = 0
-            while (!seen.add(name)) name = origName + (nameIndex++)
+            while (!seen.add(name)) name = origName.javaIdent + (nameIndex++)
             index to name
         }?.toMap()
     }
@@ -80,7 +89,7 @@ data class ClsContext(
     fun importGlobalGetterFieldName(index: Int) = "import\$get" + globalName(index)
     fun importGlobalSetterFieldName(index: Int) = "import\$set" + globalName(index)
     fun globalName(index: Int) = "\$global$index"
-    fun funcName(index: Int) = dedupedFuncNames?.get(index)?.javaIdent ?: "\$func$index"
+    fun funcName(index: Int) = dedupedFuncNames?.get(index) ?: "\$func$index"
 
     private fun syntheticFunc(
         nameSuffix: String,

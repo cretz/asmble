@@ -258,10 +258,8 @@ open class AstToSExpr(val parensInstrs: Boolean = true) {
         if (exp == null) this else this.copy(vals = this.vals + exp)
     private operator fun SExpr.Multi.plus(exps: List<SExpr>?) =
         if (exps == null || exps.isEmpty()) this else this.copy(vals = this.vals + exps)
-    private fun newMulti(initSymb: String? = null, initName: String? = null): SExpr.Multi {
-        initName?.also { require(it.startsWith("$")) }
-        return SExpr.Multi() + initSymb + initName
-    }
+    private fun newMulti(initSymb: String? = null, initName: String? = null) =
+        SExpr.Multi() + initSymb + initName?.let { "$$it" }
     private fun List<SExpr.Multi>.unwrapInstrs() =
         if (parensInstrs) this else this.single().vals
     private val String.quoted get() = fromString(this, true)

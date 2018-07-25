@@ -934,7 +934,7 @@ open class SExprToAst(
     fun toVarMaybe(exp: SExpr, nameMap: NameMap, nameType: String): Int? {
         return exp.symbolStr()?.let { it ->
             if (it.startsWith("$"))
-                nameMap.get(nameType, it) ?:
+                nameMap.get(nameType, it.drop(1)) ?:
                     throw Exception("Unable to find index for name $it of type $nameType in $nameMap")
             else if (it.startsWith("0x")) it.substring(2).toIntOrNull(16)
             else it.toIntOrNull()
@@ -1029,7 +1029,7 @@ open class SExprToAst(
     private fun SExpr.Multi.maybeName(index: Int): String? {
         if (this.vals.size > index && this.vals[index] is SExpr.Symbol) {
             val sym = this.vals[index] as SExpr.Symbol
-            if (!sym.quoted && sym.contents[0] == '$') return sym.contents
+            if (!sym.quoted && sym.contents[0] == '$') return sym.contents.drop(1)
         }
         return null
     }
@@ -1069,7 +1069,7 @@ open class SExprToAst(
         fun get(type: String, name: String) = names["$type:$name"]
 
         fun getAllNamesByIndex(type: String) = names.mapNotNull { (k, v) ->
-            k.indexOf(':').takeIf { it != -1 }?.let { v to k.substring(it + 1) }
+            k.takeIf { k.startsWith("$type:") }?.let { v to k.substring(type.length + 1) }
         }.toMap()
     }
 

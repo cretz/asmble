@@ -217,8 +217,7 @@ open class BinaryToAst(
                     }
                     // Try to parse the name section
                     val section = toCustomSection(b, afterSectionId).takeIf { section ->
-                        val shouldParseNames = includeNameSection && customSections.isEmpty() &&
-                            nameSection == null && section.name == "name"
+                        val shouldParseNames = includeNameSection && nameSection == null && section.name == "name"
                         !shouldParseNames || try {
                             nameSection = toNameSection(ByteReader.InputStream(section.payload.inputStream()))
                             false

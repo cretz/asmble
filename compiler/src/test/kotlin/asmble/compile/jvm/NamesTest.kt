@@ -32,7 +32,7 @@ class NamesTest : TestBase() {
         AstToAsm.fromModule(ctx)
         val cls = ScriptContext.SimpleClassLoader(javaClass.classLoader, logger).fromBuiltContext(ctx)
         // Make sure the import field and the func are present named
-        cls.getDeclaredField("\$import_func")
-        cls.getDeclaredMethod("\$some_func", Integer.TYPE)
+        cls.getDeclaredField("import_func")
+        cls.getDeclaredMethod("some_func", Integer.TYPE)
     }
 }
