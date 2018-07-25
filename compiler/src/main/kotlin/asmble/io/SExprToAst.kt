@@ -9,22 +9,27 @@ import asmble.util.*
 import java.io.ByteArrayInputStream
 import java.math.BigInteger
 
-typealias NameMap = Map<String, Int>
-
-open class SExprToAst {
+open class SExprToAst(
+    val includeNames: Boolean = true
+) {
     data class ExprContext(
         val nameMap: NameMap,
         val blockDepth: Int = 0,
         val types: List<Node.Type.Func> = emptyList(),
         val callIndirectNeverBeforeSeenFuncTypes: MutableList<Node.Type.Func> = mutableListOf()
-    )
+    ) {
+        companion object {
+            val empty = ExprContext(NameMap(emptyMap(), null, null))
+        }
+    }
 
     data class FuncResult(
         val name: String?,
         val func: Node.Func,
         val importOrExport: ImportOrExport?,
         // These come from call_indirect insns
-        val additionalFuncTypesToAdd: List<Node.Type.Func>
+        val additionalFuncTypesToAdd: List<Node.Type.Func>,
+        val nameMap: NameMap
     )
 
     fun toAction(exp: SExpr.Multi): Script.Cmd.Action {
@@ -36,7 +41,7 @@ open class SExprToAst {
         return when(exp.vals.first().symbolStr()) {
             "invoke" ->
                 Script.Cmd.Action.Invoke(name, str, exp.vals.drop(index).map {
-                    toExprMaybe(it as SExpr.Multi, ExprContext(emptyMap()))
+                    toExprMaybe(it as SExpr.Multi, ExprContext.empty)
                 })
             "get" ->
                 Script.Cmd.Action.Get(name, str)
@@ -49,7 +54,7 @@ open class SExprToAst {
         return when(exp.vals.first().symbolStr()) {
             "assert_return" ->
                 Script.Cmd.Assertion.Return(toAction(mult),
-                    exp.vals.drop(2).map { toExprMaybe(it as SExpr.Multi, ExprContext(emptyMap())) })
+                    exp.vals.drop(2).map { toExprMaybe(it as SExpr.Multi, ExprContext.empty) })
             "assert_return_canonical_nan" ->
                 Script.Cmd.Assertion.ReturnNan(toAction(mult), canonical = true)
             "assert_return_arithmetic_nan" ->
@@ -176,7 +181,7 @@ open class SExprToAst {
         var innerCtx = ctx.copy(blockDepth = ctx.blockDepth + 1)
         exp.maybeName(opOffset)?.also {
             opOffset++
-            innerCtx = innerCtx.copy(nameMap = innerCtx.nameMap + ("block:$it" to innerCtx.blockDepth))
+            innerCtx = innerCtx.copy(nameMap = innerCtx.nameMap.add("block", it, innerCtx.blockDepth))
         }
 
         val sigs = toBlockSigMaybe(exp, opOffset)
@@ -233,7 +238,7 @@ open class SExprToAst {
         var (nameMap, exprsUsed, sig) = toFuncSig(exp, currentIndex, origNameMap, types)
         currentIndex += exprsUsed
         val locals = exp.repeated("local", currentIndex, { toLocals(it) }).mapIndexed { index, (nameMaybe, vals) ->
-            nameMaybe?.also { require(vals.size == 1); nameMap += "local:$it" to (index + sig.params.size) }
+            nameMaybe?.also { require(vals.size == 1); nameMap = nameMap.add("local", it, index + sig.params.size) }
             vals
         }
         currentIndex += locals.size
@@ -250,7 +255,8 @@ open class SExprToAst {
             name = name,
             func = Node.Func(sig, locals.flatten(), instrs),
             importOrExport = maybeImpExp,
-            additionalFuncTypesToAdd = ctx.callIndirectNeverBeforeSeenFuncTypes
+            additionalFuncTypesToAdd = ctx.callIndirectNeverBeforeSeenFuncTypes,
+            nameMap = nameMap
         )
     }
 
@@ -268,7 +274,7 @@ open class SExprToAst {
             } else null to offset
         var nameMap = origNameMap
         val params = exp.repeated("param", offset, { toParams(it) }).mapIndexed { index, (nameMaybe, vals) ->
-            nameMaybe?.also { require(vals.size == 1); nameMap += "local:$it" to index }
+            nameMaybe?.also { require(vals.size == 1); nameMap = nameMap.add("local", it, index) }
             vals
         }
         val resultExps = exp.repeated("result", offset + params.size, this::toResult)
@@ -395,7 +401,7 @@ open class SExprToAst {
         val maybeName = exp.maybeName(offset + opOffset)
         if (maybeName != null) {
             opOffset++
-            innerCtx = innerCtx.copy(nameMap = innerCtx.nameMap + ("block:$maybeName" to innerCtx.blockDepth))
+            innerCtx = innerCtx.copy(nameMap = innerCtx.nameMap.add("block", maybeName, innerCtx.blockDepth))
         }
         val sigs = toBlockSigMaybe(exp, offset + opOffset)
         opOffset += sigs.size
@@ -428,7 +434,7 @@ open class SExprToAst {
                         opOffset++
                         exp.maybeName(offset + opOffset)?.also {
                             opOffset++
-                            innerCtx = innerCtx.copy(nameMap = innerCtx.nameMap + ("block:$it" to ctx.blockDepth))
+                            innerCtx = innerCtx.copy(nameMap = innerCtx.nameMap.add("block", it, ctx.blockDepth))
                         }
                         toInstrs(exp, offset + opOffset, innerCtx, false).also {
                             ret += it.first
@@ -522,7 +528,7 @@ open class SExprToAst {
         val exps = exp.vals.mapNotNull { it as? SExpr.Multi }
 
         // Eagerly build the names (for forward decls)
-        val (nameMap, eagerTypes) = toModuleForwardNameMapAndTypes(exps)
+        var (nameMap, eagerTypes) = toModuleForwardNameMapAndTypes(exps)
         mod = mod.copy(types = eagerTypes)
 
         fun Node.Module.addTypeIfNotPresent(type: Node.Type.Func): Pair<Node.Module, Int> {
@@ -555,6 +561,7 @@ open class SExprToAst {
                     Node.Import.Kind.Memory(kind) to (memoryCount++ to Node.ExternalKind.MEMORY)
                 else -> throw Exception("Unrecognized import kind: $kind")
             }
+
             mod = mod.copy(
                 imports = mod.imports + Node.Import(module, field, importKind),
                 exports = mod.exports + exportFields.map {
@@ -579,11 +586,14 @@ open class SExprToAst {
                 "elem" -> mod = mod.copy(elems = mod.elems + toElem(exp, nameMap))
                 "data" -> mod = mod.copy(data = mod.data + toData(exp, nameMap))
                 "start" -> mod = mod.copy(startFuncIndex = toStart(exp, nameMap))
-                "func" -> toFunc(exp, nameMap, mod.types).also { (_, fn, impExp, additionalFuncTypes) ->
+                "func" -> toFunc(exp, nameMap, mod.types).also { (_, fn, impExp, additionalFuncTypes, localNameMap) ->
                     if (impExp is ImportOrExport.Import) {
                         handleImport(impExp.module, impExp.name, fn.type, impExp.exportFields)
                     } else {
                         if (impExp is ImportOrExport.Export) addExport(impExp, Node.ExternalKind.FUNCTION, funcCount)
+                        if (includeNames) nameMap = nameMap.copy(
+                            localNames = nameMap.localNames!! + (funcCount to localNameMap.getAllNamesByIndex("local"))
+                        )
                         funcCount++
                         mod = mod.copy(funcs = mod.funcs + fn).addTypeIfNotPresent(fn.type).first
                         mod = additionalFuncTypes.fold(mod) { mod, typ -> mod.addTypeIfNotPresent(typ).first }
@@ -644,6 +654,15 @@ open class SExprToAst {
         if (mod.tables.size + mod.imports.count { it.kind is Node.Import.Kind.Table } > 1)
             throw IoErr.MultipleTables()
 
+        // Set the name map pieces if we're including them
+        if (includeNames) mod = mod.copy(
+            names = Node.NameSection(
+                moduleName = name,
+                funcNames = nameMap.funcNames!!,
+                localNames = nameMap.localNames!!
+            )
+        )
+
         return name to mod
     }
 
@@ -680,10 +699,14 @@ open class SExprToAst {
         var globalCount = 0
         var tableCount = 0
         var memoryCount = 0
-        var namesToIndices = emptyMap<String, Int>()
+        var nameMap = NameMap(
+            names = emptyMap(),
+            funcNames = if (includeNames) emptyMap() else null,
+            localNames = if (includeNames) emptyMap() else null
+        )
         var types = emptyList<Node.Type.Func>()
         fun maybeAddName(name: String?, index: Int, type: String) {
-            name?.let { namesToIndices += "$type:$it" to index }
+            name?.also { nameMap = nameMap.add(type, it, index) }
         }
 
         // All imports first
@@ -711,12 +734,12 @@ open class SExprToAst {
                 "memory" -> maybeAddName(kindName, memoryCount++, "memory")
                 // We go ahead and do the full type def build here eagerly
                 "type" -> maybeAddName(kindName, types.size, "type").also { _ ->
-                    toTypeDef(it, namesToIndices).also { (_, type) -> types += type }
+                    toTypeDef(it, nameMap).also { (_, type) -> types += type }
                 }
                 else -> {}
             }
         }
-        return namesToIndices to types
+        return nameMap to types
     }
 
     fun toOpMaybe(exp: SExpr.Multi, offset: Int, ctx: ExprContext): Pair<Node.Instr, Int>? {
@@ -753,7 +776,8 @@ open class SExprToAst {
                 // First lookup the func sig
                 val (updatedNameMap, expsUsed, funcType) = toFuncSig(exp, offset + 1, ctx.nameMap, ctx.types)
                 // Make sure there are no changes to the name map
-                if (ctx.nameMap.size != updatedNameMap.size) throw IoErr.IndirectCallSetParamNames()
+                if (ctx.nameMap.size != updatedNameMap.size)
+                    throw IoErr.IndirectCallSetParamNames()
                 // Obtain the func index from the types table, the indirects table, or just add it
                 var funcTypeIndex = ctx.types.indexOf(funcType)
                 // If it's not in the type list, check the call indirect list
@@ -910,7 +934,7 @@ open class SExprToAst {
     fun toVarMaybe(exp: SExpr, nameMap: NameMap, nameType: String): Int? {
         return exp.symbolStr()?.let { it ->
             if (it.startsWith("$"))
-                nameMap["$nameType:$it"] ?:
+                nameMap.get(nameType, it) ?:
                     throw Exception("Unable to find index for name $it of type $nameType in $nameMap")
             else if (it.startsWith("0x")) it.substring(2).toIntOrNull(16)
             else it.toIntOrNull()
@@ -1026,6 +1050,27 @@ open class SExprToAst {
     private fun SExpr.Multi.requireFirstSymbol(contents: String, quotedCheck: Boolean? = null) {
         if (this.vals.isEmpty()) throw Exception("Expected symbol of $contents, got empty")
         return this.vals.first().requireSymbol(contents, quotedCheck)
+    }
+
+    data class NameMap(
+        // Key prefixed with type then colon before actual name
+        val names: Map<String, Int>,
+        // Null if not including names
+        val funcNames: Map<Int, String>?,
+        val localNames: Map<Int, Map<Int, String>>?
+    ) {
+        val size get() = names.size
+
+        fun add(type: String, name: String, index: Int) = copy(
+            names = names + ("$type:$name" to index),
+            funcNames = funcNames?.let { if (type == "func") it + (index to name) else it }
+        )
+
+        fun get(type: String, name: String) = names["$type:$name"]
+
+        fun getAllNamesByIndex(type: String) = names.mapNotNull { (k, v) ->
+            k.indexOf(':').takeIf { it != -1 }?.let { v to k.substring(it + 1) }
+        }.toMap()
     }
 
     companion object : SExprToAst()

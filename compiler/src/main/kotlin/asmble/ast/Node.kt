@@ -150,7 +150,7 @@ sealed class Node {
     }
 
     data class NameSection(
-        val moduleName: String,
+        val moduleName: String?,
         val funcNames: Map<Int, String>,
         val localNames: Map<Int, Map<Int, String>>
     ) : Node()

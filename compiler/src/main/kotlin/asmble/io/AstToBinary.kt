@@ -5,6 +5,7 @@ import asmble.util.toRawIntBits
 import asmble.util.toRawLongBits
 import asmble.util.toUnsignedBigInt
 import asmble.util.toUnsignedLong
+import java.io.ByteArrayOutputStream
 
 open class AstToBinary(val version: Long = 1L) {
 
@@ -140,6 +141,9 @@ open class AstToBinary(val version: Long = 1L) {
         fromResizableLimits(b, n.limits)
     }
 
+    fun fromModule(n: Node.Module) =
+        ByteArrayOutputStream().also { fromModule(ByteWriter.OutputStream(it), n) }.toByteArray()
+
     fun fromModule(b: ByteWriter, n: Node.Module) {
         b.writeUInt32(0x6d736100)
         b.writeUInt32(version)
@@ -160,8 +164,31 @@ open class AstToBinary(val version: Long = 1L) {
         wrapListSection(b, n, 9, n.elems, this::fromElem)
         wrapListSection(b, n, 10, n.funcs, this::fromFuncBody)
         wrapListSection(b, n, 11, n.data, this::fromData)
+        n.names?.also { fromNames(b, it) }
         // All other custom sections after the previous
         n.customSections.filter { it.afterSectionId > 11 }.forEach { fromCustomSection(b, it) }
+    }
+
+    fun fromNames(b: ByteWriter, n: Node.NameSection) {
+        fun <T> indexMap(b: ByteWriter, map: Map<Int, T>, fn: (T) -> Unit) {
+            b.writeVarUInt32(map.size)
+            map.forEach { index, v -> b.writeVarUInt32(index).also { fn(v) } }
+        }
+        fun nameMap(b: ByteWriter, map: Map<Int, String>) = indexMap(b, map) { b.writeString(it) }
+        b.writeVarUInt7(0)
+        b.withVarUInt32PayloadSizePrepended { b ->
+            b.writeString("name")
+            n.moduleName?.also { moduleName ->
+                b.writeVarUInt7(0)
+                b.withVarUInt32PayloadSizePrepended { b -> b.writeString(moduleName) }
+            }
+            if (n.funcNames.isNotEmpty()) b.writeVarUInt7(1).also {
+                b.withVarUInt32PayloadSizePrepended { b -> nameMap(b, n.funcNames) }
+            }
+            if (n.localNames.isNotEmpty()) b.writeVarUInt7(2).also {
+                b.withVarUInt32PayloadSizePrepended { b -> indexMap(b, n.localNames) { nameMap(b, it) } }
+            }
+        }
     }
 
     fun fromResizableLimits(b: ByteWriter, n: Node.ResizableLimits) {

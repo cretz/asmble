@@ -18,6 +18,13 @@ open class StrToSExpr {
         data class Error(val pos: Pos, val msg: String) : ParseResult()
     }
 
+    fun parseSingleMulti(str: CharSequence) = parse(str).let {
+        when (it) {
+            is ParseResult.Success -> (it.vals.singleOrNull() as? SExpr.Multi) ?: error("Not a single multi-expr")
+            is ParseResult.Error -> error("Failed parsing at ${it.pos.line}:${it.pos.char} - ${it.msg}")
+        }
+    }
+
     fun parse(str: CharSequence): ParseResult {
         val state = ParseState(str)
         val ret = mutableListOf<SExpr>()

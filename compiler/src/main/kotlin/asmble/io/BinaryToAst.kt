@@ -24,7 +24,7 @@ open class BinaryToAst(
     fun toNameSection(b: ByteReader) = generateSequence {
         if (b.isEof) null
         else b.readVarUInt7().toInt() to b.read(b.readVarUInt32AsInt())
-    }.fold(Node.NameSection("", emptyMap(), emptyMap())) { sect, (type, b) ->
+    }.fold(Node.NameSection(null, emptyMap(), emptyMap())) { sect, (type, b) ->
         fun <T> indexMap(b: ByteReader, fn: (ByteReader) -> T) =
             b.readList { it.readVarUInt32AsInt() to fn(it) }.let { pairs ->
                 pairs.toMap().also { require(it.size == pairs.size) { "Malformed names: duplicate indices" } }
@@ -170,6 +170,8 @@ open class BinaryToAst(
 
     fun toMemoryType(b: ByteReader) = Node.Type.Memory(toResizableLimits(b))
 
+    fun toModule(b: ByteArray) = toModule(ByteReader.InputStream(b.inputStream()))
+
     fun toModule(b: ByteReader): Node.Module {
         if (b.readUInt32() != 0x6d736100L) throw IoErr.InvalidMagicNumber()
         b.readUInt32().let { if (it != version) throw IoErr.InvalidVersion(it, listOf(version)) }
@@ -215,7 +217,8 @@ open class BinaryToAst(
                     }
                     // Try to parse the name section
                     val section = toCustomSection(b, afterSectionId).takeIf { section ->
-                        !includeNameSection && section.afterSectionId != 11 || section.name != "name" || try {
+                        val shouldParseNames = includeNameSection && customSections.isEmpty() && nameSection == null
+                        !shouldParseNames || try {
                             nameSection = toNameSection(ByteReader.InputStream(section.payload.inputStream()))
                             false
                         } catch (e: Exception) { warn { "Failed parsing name section: $e" }; true }

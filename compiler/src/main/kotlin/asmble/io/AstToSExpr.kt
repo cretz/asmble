@@ -62,13 +62,21 @@ open class AstToSExpr(val parensInstrs: Boolean = true) {
         Node.ExternalKind.GLOBAL -> newMulti("global") + v.index
     }
 
-    fun fromFunc(v: Node.Func, name: String? = null, impExp: ImportOrExport? = null) =
-        newMulti("func", name) + impExp?.let(this::fromImportOrExport) + fromFuncSig(v.type) +
-            fromLocals(v.locals) + fromInstrs(v.instructions).unwrapInstrs()
+    fun fromFunc(
+        v: Node.Func,
+        name: String? = null,
+        impExp: ImportOrExport? = null,
+        localNames: Map<Int, String> = emptyMap()
+    ) =
+        newMulti("func", name) + impExp?.let(this::fromImportOrExport) + fromFuncSig(v.type, localNames) +
+            fromLocals(v.locals, v.type.params.size, localNames) + fromInstrs(v.instructions).unwrapInstrs()
 
-    fun fromFuncSig(v: Node.Type.Func): List<SExpr> {
+    fun fromFuncSig(v: Node.Type.Func, localNames: Map<Int, String> = emptyMap()): List<SExpr> {
         var ret = emptyList<SExpr>()
-        if (v.params.isNotEmpty()) ret += newMulti("param") + v.params.map(this::fromType)
+        if (v.params.isNotEmpty()) {
+            if (localNames.isEmpty()) ret += newMulti("param") + v.params.map(this::fromType)
+            else ret += v.params.mapIndexed { index, param -> newMulti("param", localNames[index]) + fromType(param) }
+        }
         v.ret?.also { ret += newMulti("result") + fromType(it) }
         return ret
     }
@@ -80,8 +88,8 @@ open class AstToSExpr(val parensInstrs: Boolean = true) {
     fun fromGlobalSig(v: Node.Type.Global) =
         if (v.mutable) newMulti("mut") + fromType(v.contentType) else fromType(v.contentType)
 
-    fun fromImport(v: Node.Import, types: List<Node.Type.Func>) =
-        (newMulti("import") + v.module.quoted) + v.field.quoted + fromImportKind(v.kind, types)
+    fun fromImport(v: Node.Import, types: List<Node.Type.Func>, name: String? = null) =
+        (newMulti("import") + v.module.quoted) + v.field.quoted + fromImportKind(v.kind, types, name)
 
     fun fromImportFunc(v: Node.Import.Kind.Func, types: List<Node.Type.Func>, name: String? = null) =
         fromImportFunc(types.getOrElse(v.typeIndex) { throw Exception("No type at ${v.typeIndex}") }, name)
@@ -91,11 +99,11 @@ open class AstToSExpr(val parensInstrs: Boolean = true) {
     fun fromImportGlobal(v: Node.Import.Kind.Global, name: String? = null) =
         newMulti("global", name) + fromGlobalSig(v.type)
 
-    fun fromImportKind(v: Node.Import.Kind, types: List<Node.Type.Func>) = when(v) {
-        is Node.Import.Kind.Func -> fromImportFunc(v, types)
-        is Node.Import.Kind.Table -> fromImportTable(v)
-        is Node.Import.Kind.Memory -> fromImportMemory(v)
-        is Node.Import.Kind.Global -> fromImportGlobal(v)
+    fun fromImportKind(v: Node.Import.Kind, types: List<Node.Type.Func>, name: String? = null) = when(v) {
+        is Node.Import.Kind.Func -> fromImportFunc(v, types, name)
+        is Node.Import.Kind.Table -> fromImportTable(v, name)
+        is Node.Import.Kind.Memory -> fromImportMemory(v, name)
+        is Node.Import.Kind.Global -> fromImportGlobal(v, name)
     }
 
     fun fromImportMemory(v: Node.Import.Kind.Memory, name: String? = null) =
@@ -161,8 +169,10 @@ open class AstToSExpr(val parensInstrs: Boolean = true) {
         return listOf(SExpr.Multi(untilNext().first))
     }
 
-    fun fromLocals(v: List<Node.Type.Value>) =
-        if (v.isEmpty()) null else newMulti("local") + v.map(this::fromType)
+    fun fromLocals(v: List<Node.Type.Value>, paramOffset: Int, localNames: Map<Int, String> = emptyMap()) =
+        if (v.isEmpty()) emptyList()
+        else if (localNames.isEmpty()) listOf(newMulti("local") + v.map(this::fromType))
+        else v.mapIndexed { index, v -> newMulti("local", localNames[paramOffset + index]) + fromType(v) }
 
     fun fromMemory(v: Node.Type.Memory, name: String? = null, impExp: ImportOrExport? = null) =
         newMulti("memory", name) + impExp?.let(this::fromImportOrExport) + fromMemorySig(v)
@@ -175,7 +185,7 @@ open class AstToSExpr(val parensInstrs: Boolean = true) {
         is Script.Cmd.Meta.Output -> newMulti("output", v.name) + v.str
     }
 
-    fun fromModule(v: Node.Module, name: String? = null): SExpr.Multi {
+    fun fromModule(v: Node.Module, name: String? = v.names?.moduleName): SExpr.Multi {
         var ret = newMulti("module", name)
 
         // If there is a call_indirect, then we need to output all types in exact order.
@@ -187,8 +197,14 @@ open class AstToSExpr(val parensInstrs: Boolean = true) {
             v.types.filterIndexed { i, _ -> importIndices.contains(i) } - v.funcs.map { it.type }
         }
 
+        // Keep track of the current function index for names
+        var funcIndex = -1
+
         ret += types.map { fromTypeDef(it) }
-        ret += v.imports.map { fromImport(it, v.types) }
+        ret += v.imports.map {
+            if (it.kind is Node.Import.Kind.Func) funcIndex++
+            fromImport(it, v.types, v.names?.funcNames?.get(funcIndex))
+        }
         ret += v.exports.map(this::fromExport)
         ret += v.tables.map { fromTable(it) }
         ret += v.memories.map { fromMemory(it) }
@@ -196,7 +212,14 @@ open class AstToSExpr(val parensInstrs: Boolean = true) {
         ret += v.elems.map(this::fromElem)
         ret += v.data.map(this::fromData)
         ret += v.startFuncIndex?.let(this::fromStart)
-        ret += v.funcs.map { fromFunc(it) }
+        ret += v.funcs.map {
+            funcIndex++
+            fromFunc(
+                v = it,
+                name = v.names?.funcNames?.get(funcIndex),
+                localNames = v.names?.localNames?.get(funcIndex) ?: emptyMap()
+            )
+        }
         return ret
     }
 
