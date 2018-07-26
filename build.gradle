@@ -99,6 +99,31 @@ project(':examples') {
             }
         }
 
+        // Go example helpers
+
+        task goToWasm {
+            doFirst {
+                mkdir 'build'
+                exec {
+                    def goFileName = fileTree(dir: '.', includes: ['*.go']).files.iterator().next()
+                    environment 'GOOS': 'js', 'GOARCH': 'wasm'
+                    commandLine 'go', 'build', '-o', 'build/lib.wasm', goFileName
+                }
+            }
+        }
+
+        task compileGoWasm(type: JavaExec) {
+            dependsOn goToWasm
+            classpath configurations.compileClasspath
+            main = 'asmble.cli.MainKt'
+            doFirst {
+                // args 'help', 'compile'
+                def outFile = 'build/wasm-classes/' + wasmCompiledClassName.replace('.', '/') + '.class'
+                file(outFile).parentFile.mkdirs()
+                args 'compile', 'build/lib.wasm', wasmCompiledClassName, '-out', outFile, '-log', 'debug'
+            }
+        }
+
         // Rust example helpers
 
         ext.rustBuildRelease = true
@@ -158,6 +183,18 @@ project(':examples:c-simple') {
         dependsOn compileCWasm
     }
     mainClassName = 'asmble.examples.csimple.Main'
+}
+
+project(':examples:go-simple') {
+    apply plugin: 'application'
+    ext.wasmCompiledClassName = 'asmble.generated.GoSimple'
+    dependencies {
+        compile files('build/wasm-classes')
+    }
+    compileJava {
+        dependsOn compileGoWasm
+    }
+    mainClassName = 'asmble.examples.gosimple.Main'
 }
 
 project(':examples:rust-regex') {

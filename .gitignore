@@ -16,6 +16,8 @@
 /annotations/out
 /examples/c-simple/bin
 /examples/c-simple/build
+/examples/go-simple/bin
+/examples/go-simple/build
 /examples/rust-simple/Cargo.lock
 /examples/rust-simple/bin
 /examples/rust-simple/build
