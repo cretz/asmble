@@ -46,16 +46,23 @@ open class ByteBufferMem(val direct: Boolean = true) : Mem {
             let(buildOffset).popExpecting(Int::class.ref).
             addInsns(
                 forceFnType<ByteBuffer.(Int) -> Buffer>(ByteBuffer::position).invokeVirtual(),
-                TypeInsnNode(Opcodes.CHECKCAST, memType.asmName),
-                // We're going to do this as an LDC string in ISO-8859 and read it back at runtime
-                LdcInsnNode(bytes.toString(Charsets.ISO_8859_1)),
-                LdcInsnNode("ISO-8859-1"),
-                // Ug, can't do func refs on native types here...
-                MethodInsnNode(Opcodes.INVOKEVIRTUAL, String::class.ref.asmName,
-                    "getBytes", "(Ljava/lang/String;)[B", false),
-                0.const,
-                bytes.size.const,
-                forceFnType<ByteBuffer.(ByteArray, Int, Int) -> ByteBuffer>(ByteBuffer::put).invokeVirtual(),
+                TypeInsnNode(Opcodes.CHECKCAST, memType.asmName)
+            ).addInsns(
+                // We're going to do this as an LDC string in ISO-8859 and read it back at runtime. However,
+                // due to JVM limits, we can't have a string > 65536 chars, so I'll chunk it every 65500 chars.
+                bytes.chunked(65500).flatMap { bytes ->
+                    sequenceOf(
+                        LdcInsnNode(bytes.toString(Charsets.ISO_8859_1)),
+                        LdcInsnNode("ISO-8859-1"),
+                        // Ug, can't do func refs on native types here...
+                        MethodInsnNode(Opcodes.INVOKEVIRTUAL, String::class.ref.asmName,
+                            "getBytes", "(Ljava/lang/String;)[B", false),
+                        0.const,
+                        bytes.size.const,
+                        forceFnType<ByteBuffer.(ByteArray, Int, Int) -> ByteBuffer>(ByteBuffer::put).invokeVirtual()
+                    )
+                }.toList()
+            ).addInsns(
                 InsnNode(Opcodes.POP)
             )
 

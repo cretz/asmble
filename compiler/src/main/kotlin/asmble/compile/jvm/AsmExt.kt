@@ -210,3 +210,7 @@ fun ByteArray.asClassNode(): ClassNode {
     ClassReader(this).accept(newNode, 0)
     return newNode
 }
+
+fun ByteArray.chunked(v: Int) = (0 until size step v).asSequence().map {
+    copyOfRange(it, (it + v).takeIf { it < size } ?: size)
+}
