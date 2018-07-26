@@ -161,6 +161,7 @@ open class InsnReworker {
             if (!foundUnconditionalJump) throw CompileErr.StackInjectionMismatch(count, insn)
         }
 
+        var traceStackSize = 0 // Used only for trace
         // Go over each insn, determining where to inject
         insns.forEachIndexed { index, insn ->
             // Handle special injection cases
@@ -199,8 +200,15 @@ open class InsnReworker {
                 else -> { }
             }
 
+            // Log some trace output
+            ctx.trace {
+                insnStackDiff(ctx, insn).let {
+                    traceStackSize += it
+                    "Stack diff is $it for insn #$index $insn, stack size now: $traceStackSize"
+                }
+            }
+
             // Add the current diff
-            ctx.trace { "Stack diff is ${insnStackDiff(ctx, insn)} for insn #$index $insn" }
             stackManips += insnStackDiff(ctx, insn) to index
         }
 
@@ -238,7 +246,7 @@ open class InsnReworker {
         is Node.Instr.I64Load32S, is Node.Instr.I64Load32U -> POP_PARAM + PUSH_RESULT
         is Node.Instr.I32Store, is Node.Instr.I64Store, is Node.Instr.F32Store, is Node.Instr.F64Store,
         is Node.Instr.I32Store8, is Node.Instr.I32Store16, is Node.Instr.I64Store8, is Node.Instr.I64Store16,
-        is Node.Instr.I64Store32 -> POP_PARAM
+        is Node.Instr.I64Store32 -> POP_PARAM + POP_PARAM
         is Node.Instr.MemorySize -> PUSH_RESULT
         is Node.Instr.MemoryGrow -> POP_PARAM + PUSH_RESULT
         is Node.Instr.I32Const, is Node.Instr.I64Const,
