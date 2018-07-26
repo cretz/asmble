@@ -49,8 +49,10 @@ open class ByteBufferMem(val direct: Boolean = true) : Mem {
                 TypeInsnNode(Opcodes.CHECKCAST, memType.asmName)
             ).addInsns(
                 // We're going to do this as an LDC string in ISO-8859 and read it back at runtime. However,
-                // due to JVM limits, we can't have a string > 65536 chars, so I'll chunk it every 65500 chars.
-                bytes.chunked(65500).flatMap { bytes ->
+                // due to JVM limits, we can't have a string > 65536 chars. We chunk into 16300 because when
+                // converting to UTF8 const it can be up to 4 bytes per char, so this makes sure it doesn't
+                // overflow.
+                bytes.chunked(16300).flatMap { bytes ->
                     sequenceOf(
                         LdcInsnNode(bytes.toString(Charsets.ISO_8859_1)),
                         LdcInsnNode("ISO-8859-1"),

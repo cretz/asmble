@@ -12,7 +12,9 @@ import kotlin.test.assertEquals
 class LargeDataTest : TestBase() {
     @Test
     fun testLargeData() {
-        // This previously failed because string constants can't be longer than 65536 chars
+        // This previously failed because string constants can't be longer than 65536 chars.
+        // We create a byte array across the whole gambit of bytes to test UTF8 encoding.
+        val bytesExpected = ByteArray(70000) { ((it % 255) - Byte.MIN_VALUE).toByte() }
         val mod = Node.Module(
             memories = listOf(Node.Type.Memory(
                 limits = Node.ResizableLimits(initial = 2, maximum = 2)
@@ -20,7 +22,7 @@ class LargeDataTest : TestBase() {
             data = listOf(Node.Data(
                 index = 0,
                 offset = listOf(Node.Instr.I32Const(0)),
-                data = ByteArray(70000) { 'a'.toByte() }
+                data = bytesExpected
             ))
         )
         val ctx = ClsContext(
@@ -35,9 +37,9 @@ class LargeDataTest : TestBase() {
         val field = cls.getDeclaredField("memory").apply { isAccessible = true }
         val buf = field[cls.newInstance()] as ByteBuffer
         // Grab all + 1 and check values
-        val bytes = ByteArray(70001).also { buf.get(0, it) }
-        bytes.forEachIndexed { index, byte ->
-            assertEquals(if (index == 70000) 0.toByte() else 'a'.toByte(), byte)
+        val bytesActual = ByteArray(70001).also { buf.get(0, it) }
+        bytesActual.forEachIndexed { index, byte ->
+            assertEquals(if (index == 70000) 0.toByte() else bytesExpected[index], byte)
         }
     }
 }

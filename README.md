@@ -374,8 +374,9 @@ and the JVM:
 * WebAssembly has a nice data section for byte arrays whereas the JVM does not. Right now we use a single-byte-char
   string constant (i.e. ISO-8859 charset). This saves class file size, but this means we call `String::getBytes` on
   init to load bytes from the string constant. Due to the JVM using an unsigned 16-bit int as the string constant
-  length, the maximum length is 65536, so we chunk data sections into as many max-65500-byte lengths we need to load it
-  all.
+  length, the maximum byte length is 65536. Since the string constants are stored as UTF-8 constants, they can be up to
+  four bytes a character. Therefore, we populate memory in data chunks no larger than 16300 (nice round number to make
+  sure that even in the worse case of 4 bytes per char in UTF-8 view, we're still under the max).
 * The JVM makes no guarantees about trailing bits being preserved on NaN floating point representations like WebAssembly
   does. This causes some mismatch on WebAssembly tests depending on how the JVM "feels" (I haven't dug into why some
   bit patterns stay and some don't when NaNs are passed through methods).
