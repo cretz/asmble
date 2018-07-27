@@ -2,13 +2,13 @@ package asmble.ast.opt
 
 import asmble.ast.Node
 import asmble.ast.Stack
-import kotlin.math.roundToInt
 
 // This is a naive implementation that just grabs adjacent sets of restricted insns and breaks the one that will save
 // the most instructions off into its own function.
 open class SplitLargeFunc(
     val minSetLength: Int = 5,
-    val maxPercentOfWhole: Double = 0.6
+    val maxSetLength: Int = 20,
+    val maxParamCount: Int = 10
 ) {
 
     // Null if no replacement. Second value is number of instructions saved. fnIndex must map to actual func,
@@ -41,8 +41,7 @@ open class SplitLargeFunc(
             mod.copy(
                 funcs = mod.funcs.toMutableList().also {
                     it[actualFnIndex] = func.copy(instructions = newInsns)
-                    it + pattern.newFunc
-                },
+                } + pattern.newFunc,
                 names = mod.names?.copy(funcNames = mod.names.funcNames.toMutableMap().also {
                     it[newFuncIndex] = newName!!
                 })
@@ -59,17 +58,24 @@ open class SplitLargeFunc(
         // only have a certain set of insns that can be broken off. It can also only change the stack by 0 or 1
         // value while never dipping below the starting stack. We also store the index they started at.
         var insnSets = emptyList<InsnSet>()
-        val maxSetLength = (fn.instructions.size * maxPercentOfWhole).roundToInt()
         fn.instructions.foldIndexed(null as List<Node.Instr>?) { index, lastInsns, insn ->
-            if (!insn.canBeMoved) null else (lastInsns ?: emptyList()).plus(insn).also { newInsnSet ->
-                // If within the len requirement, it may be added
-                if (newInsnSet.size in minSetLength..maxSetLength) {
-                    // Before adding, make sure it qualifies with the stack
-                    val insnSet = InsnSet(index + 1 - newInsnSet.size, newInsnSet, null).withStackValueIfValid(stack)
-                    insnSet?.also { insnSets += it }
-                }
+            if (!insn.canBeMoved) null else (lastInsns ?: emptyList()).plus(insn).also { fullNewInsnSet ->
+                // Get all final instructions between min and max size and with allowed param count (i.e. const count)
+                val trailingInsnSet = fullNewInsnSet.takeLast(maxSetLength)
+
+                // Get all instructions between the min and max
+                insnSets += (minSetLength..maxSetLength).
+                    asSequence().
+                    flatMap { trailingInsnSet.asSequence().windowed(it) }.
+                    filter { it.count { it is Node.Instr.Args.Const<*> } <= maxParamCount }.
+                    mapNotNull { newInsnSet ->
+                        // Before adding, make sure it qualifies with the stack
+                        InsnSet(index + 1 - newInsnSet.size, newInsnSet, null).withStackValueIfValid(stack)
+                    }
             }
         }
+        // Sort the insn sets by the ones with the most insns
+        insnSets = insnSets.sortedByDescending { it.insns.size }
 
         // Now let's create replacements for each, keyed by the extracted func
         val patterns = insnSets.fold(emptyMap<Node.Func, List<Replacement>>()) { map, insnSet ->
