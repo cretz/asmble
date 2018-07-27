@@ -1,6 +1,7 @@
 package asmble.io
 
 import asmble.SpecTestUnit
+import asmble.TestBase
 import asmble.ast.Node
 import asmble.ast.Script
 import asmble.util.Logger
@@ -13,12 +14,10 @@ import java.io.ByteArrayOutputStream
 import kotlin.test.assertEquals
 
 @RunWith(Parameterized::class)
-class IoTest(val unit: SpecTestUnit) : Logger by Logger.Print(Logger.Level.INFO) {
+class IoTest(val unit: SpecTestUnit) : TestBase() {
 
     @Test
     fun testIo() {
-        // Ignore things that are supposed to fail
-        if (unit.shouldFail) return
         // Go from the AST to binary then back to AST then back to binary and confirm values are as expected
         val ast1 = unit.script.commands.mapNotNull { (it as? Script.Cmd.Module)?.module?.also {
             trace { "AST from script:\n" + SExprToStr.fromSExpr(AstToSExpr.fromModule(it)) }
@@ -46,7 +45,8 @@ class IoTest(val unit: SpecTestUnit) : Logger by Logger.Print(Logger.Level.INFO)
     }
 
     companion object {
+        // Only tests that shouldn't fail
         @JvmStatic @Parameterized.Parameters(name = "{0}")
-        fun data() = SpecTestUnit.allUnits
+        fun data() = SpecTestUnit.allUnits.filterNot { it.shouldFail }
     }
 }
