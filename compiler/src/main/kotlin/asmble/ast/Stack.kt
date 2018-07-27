@@ -1,5 +1,6 @@
 package asmble.ast
 
+// This is a utility for walking the stack. It can do validation or just walk naively.
 data class Stack(
     // If some of these values below are null, the pops/pushes may appear "unknown"
     val mod: CachedModule? = null,
