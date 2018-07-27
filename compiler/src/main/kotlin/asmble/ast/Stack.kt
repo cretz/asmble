@@ -240,7 +240,11 @@ data class Stack(
 
         fun stackChanges(v: Node.Instr, callFuncType: Node.Type.Func? = null) =
             Stack().next(v, callFuncType).insnApplies.last().stackChanges
+        fun stackChanges(mod: CachedModule, func: Node.Func, v: Node.Instr) =
+            Stack(mod, func).next(v).insnApplies.last().stackChanges
         fun stackDiff(v: Node.Instr, callFuncType: Node.Type.Func? = null) =
             stackChanges(v, callFuncType).sumBy { if (it.pop) -1 else 1 }
+        fun stackDiff(mod: CachedModule, func: Node.Func, v: Node.Instr) =
+            stackChanges(mod, func, v).sumBy { if (it.pop) -1 else 1 }
     }
 }
