@@ -7,8 +7,8 @@ import asmble.ast.Stack
 // the most instructions off into its own function.
 open class SplitLargeFunc(
     val minSetLength: Int = 5,
-    val maxSetLength: Int = 20,
-    val maxParamCount: Int = 10
+    val maxSetLength: Int = 40,
+    val maxParamCount: Int = 30
 ) {
 
     // Null if no replacement. Second value is number of instructions saved. fnIndex must map to actual func,
@@ -58,8 +58,9 @@ open class SplitLargeFunc(
         // only have a certain set of insns that can be broken off. It can also only change the stack by 0 or 1
         // value while never dipping below the starting stack. We also store the index they started at.
         var insnSets = emptyList<InsnSet>()
-        fn.instructions.foldIndexed(null as List<Node.Instr>?) { index, lastInsns, insn ->
-            if (!insn.canBeMoved) null else (lastInsns ?: emptyList()).plus(insn).also { fullNewInsnSet ->
+        // Pair in fold keyed by insn index
+        fn.instructions.foldIndexed(null as List<Pair<Int, Node.Instr>>?) { index, lastInsns, insn ->
+            if (!insn.canBeMoved) null else (lastInsns ?: emptyList()).plus(index to insn).also { fullNewInsnSet ->
                 // Get all final instructions between min and max size and with allowed param count (i.e. const count)
                 val trailingInsnSet = fullNewInsnSet.takeLast(maxSetLength)
 
@@ -67,10 +68,14 @@ open class SplitLargeFunc(
                 insnSets += (minSetLength..maxSetLength).
                     asSequence().
                     flatMap { trailingInsnSet.asSequence().windowed(it) }.
-                    filter { it.count { it is Node.Instr.Args.Const<*> } <= maxParamCount }.
-                    mapNotNull { newInsnSet ->
+                    filter { it.count { it.second is Node.Instr.Args.Const<*> } <= maxParamCount }.
+                    mapNotNull { newIndexedInsnSet ->
                         // Before adding, make sure it qualifies with the stack
-                        InsnSet(index + 1 - newInsnSet.size, newInsnSet, null).withStackValueIfValid(stack)
+                        InsnSet(
+                            startIndex = newIndexedInsnSet.first().first,
+                            insns = newIndexedInsnSet.map { it.second },
+                            valueAddedToStack = null
+                        ).withStackValueIfValid(stack)
                     }
             }
         }
@@ -110,7 +115,7 @@ open class SplitLargeFunc(
 
         // First, make sure the stack after the last insn is the same as the first or the same + 1 val
         val startingStack = stack.insnApplies[startIndex].stackAtBeginning!!
-        val endingStack = stack.insnApplies.getOrNull(startIndex + insns.size + 1)?.stackAtBeginning ?: stack.current!!
+        val endingStack = stack.insnApplies.getOrNull(startIndex + insns.size)?.stackAtBeginning ?: stack.current!!
         if (endingStack.size != startingStack.size && endingStack.size != startingStack.size + 1) return null
         if (endingStack.take(startingStack.size) != startingStack) return null
 
@@ -159,7 +164,8 @@ open class SplitLargeFunc(
         val range: IntRange,
         val preCallConsts: List<Node.Instr>
     ) {
-        val insnsSaved get() = range.last - range.first + 1 - preCallConsts.size
+        // Subtract one because there is a call after this
+        val insnsSaved get() = (range.last + 1) - range.first - 1 - preCallConsts.size
         fun overlaps(o: Replacement) = range.contains(o.range.first) || range.contains(o.range.last) ||
             o.range.contains(range.first) || o.range.contains(range.last)
     }
@@ -170,7 +176,7 @@ open class SplitLargeFunc(
         val replacements: List<Replacement>
     ) {
         // Replacement pieces saved (with one added for the invocation) less new func instructions
-        val insnsSaved get() = replacements.sumBy { 1 + it.insnsSaved } - newFunc.instructions.size
+        val insnsSaved get() = replacements.sumBy { it.insnsSaved } - newFunc.instructions.size
     }
 
     companion object : SplitLargeFunc()

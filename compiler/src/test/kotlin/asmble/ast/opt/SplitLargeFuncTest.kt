@@ -23,7 +23,7 @@ class SplitLargeFuncTest : TestBase() {
                 funcs = listOf(Node.Func(
                     type = Node.Type.Func(params = emptyList(), ret = null),
                     locals = emptyList(),
-                    instructions = (0 until 500).flatMap {
+                    instructions = (0 until 501).flatMap {
                         listOf<Node.Instr>(
                             Node.Instr.I32Const(it * 4),
                             // Let's to i * (i = 1)
@@ -47,17 +47,43 @@ class SplitLargeFuncTest : TestBase() {
         )
         // Compile it
         AstToAsm.fromModule(ctx)
-        val unsplitCls = ScriptContext.SimpleClassLoader(javaClass.classLoader, logger).fromBuiltContext(ctx)
-        val unsplitInst = unsplitCls.newInstance()
+        val cls = ScriptContext.SimpleClassLoader(javaClass.classLoader, logger).fromBuiltContext(ctx)
+        val inst = cls.newInstance()
         // Run someFunc
-        unsplitCls.getMethod("someFunc").invoke(unsplitInst)
+        cls.getMethod("someFunc").invoke(inst)
         // Get the memory out
-        val unsplitMem = unsplitCls.getMethod("getMemory").invoke(unsplitInst) as ByteBuffer
+        val mem = cls.getMethod("getMemory").invoke(inst) as ByteBuffer
         // Read out the mem values
-        (0 until 500).forEach { assertEquals(it * (it - 1), unsplitMem.getInt(it * 4)) }
+        (0 until 501).forEach { assertEquals(it * (it - 1), mem.getInt(it * 4)) }
+
         // Now split it
         val (splitMod, insnsSaved) = SplitLargeFunc.apply(ctx.mod, 0) ?: error("Nothing could be split")
-        println("SAVED! $insnsSaved NEW FUNC - " + splitMod.funcs.last())
-        // TODO: the rest
+        // Count insns and confirm it is as expected
+        val origInsnCount = ctx.mod.funcs.sumBy { it.instructions.size }
+        val newInsnCount = splitMod.funcs.sumBy { it.instructions.size }
+        assertEquals(origInsnCount - newInsnCount, insnsSaved)
+        // Compile it
+        val splitCtx = ClsContext(
+            packageName = "test",
+            className = "Temp" + UUID.randomUUID().toString().replace("-", ""),
+            logger = logger,
+            mod = splitMod
+        )
+        AstToAsm.fromModule(splitCtx)
+        val splitCls = ScriptContext.SimpleClassLoader(javaClass.classLoader, logger).fromBuiltContext(splitCtx)
+        val splitInst = splitCls.newInstance()
+        // Run someFunc
+        splitCls.getMethod("someFunc").invoke(splitInst)
+        // Get the memory out and compare it
+        val splitMem = splitCls.getMethod("getMemory").invoke(splitInst) as ByteBuffer
+        assertEquals(mem, splitMem)
+        // Dump some info
+        logger.debug {
+            val orig = ctx.mod.funcs.first()
+            val (new, split) = splitMod.funcs.let { it.first() to it.last() }
+            "Split complete, from single func with ${orig.instructions.size} insns to func " +
+                "with ${new.instructions.size} insns + delegated func " +
+                "with ${split.instructions.size} insns and ${split.type.params.size} params"
+        }
     }
 }
