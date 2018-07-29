@@ -52,24 +52,7 @@ open class Translate : Command<Translate.Args>() {
             if (args.outFormat != "<use file extension or wast for stdout>") args.outFormat
             else if (args.outFile == "--") "wast"
             else args.outFile.substringAfterLast('.', "<unknown>")
-        val outStream =
-            if (args.outFile == "--") System.out
-            else FileOutputStream(args.outFile)
-        outStream.use { outStream ->
-            when (outFormat) {
-                "wast" -> {
-                    val sexprToStr = if (args.compact) SExprToStr.Compact else SExprToStr
-                    val sexprs = AstToSExpr.fromScript(script)
-                    outStream.write(sexprToStr.fromSExpr(*sexprs.toTypedArray()).toByteArray())
-                }
-                "wasm" -> {
-                    val mod = (script.commands.firstOrNull() as? Script.Cmd.Module)?.module ?:
-                        error("Output to WASM requires input be just a single module")
-                    AstToBinary.fromModule(ByteWriter.OutputStream(outStream), mod)
-                }
-                else -> error("Unknown out format '$outFormat'")
-            }
-        }
+        astToOut(args.outFile, outFormat, args.compact, script)
     }
 
     fun inToAst(inFile: String, inFormat: String): Script {
@@ -87,6 +70,27 @@ open class Translate : Command<Translate.Args>() {
                 Script(listOf(Script.Cmd.Module(BinaryToAst(logger = logger).toModule(
                     ByteReader.InputStream(inBytes.inputStream())), null)))
             else -> error("Unknown in format '$inFormat'")
+        }
+    }
+
+    fun astToOut(outFile: String, outFormat: String, compact: Boolean, script: Script) {
+        val outStream =
+            if (outFile == "--") System.out
+            else FileOutputStream(outFile)
+        outStream.use { outStream ->
+            when (outFormat) {
+                "wast" -> {
+                    val sexprToStr = if (compact) SExprToStr.Compact else SExprToStr
+                    val sexprs = AstToSExpr.fromScript(script)
+                    outStream.write(sexprToStr.fromSExpr(*sexprs.toTypedArray()).toByteArray())
+                }
+                "wasm" -> {
+                    val mod = (script.commands.firstOrNull() as? Script.Cmd.Module)?.module ?:
+                    error("Output to WASM requires input be just a single module")
+                    AstToBinary.fromModule(ByteWriter.OutputStream(outStream), mod)
+                }
+                else -> error("Unknown out format '$outFormat'")
+            }
         }
     }
 
