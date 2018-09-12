@@ -201,7 +201,7 @@ open class Linker {
                 "instance" + mod.name.javaIdent.capitalize(), mod.ref.asmDesc),
             InsnNode(Opcodes.ARETURN)
         )
-        ctx.cls.methods.plusAssign(func)
+        ctx.cls.methods.plusAssign(func.toMethodNode())
     }
 
     class ModuleClass(val cls: Class<*>, overrideName: String? = null) {

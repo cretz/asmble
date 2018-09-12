@@ -2,8 +2,8 @@ group 'asmble'
 version '0.2.0'
 
 buildscript {
-    ext.kotlin_version = '1.2.51'
-    ext.asm_version = '5.2'
+    ext.kotlin_version = '1.2.61'
+    ext.asm_version = '6.2.1'
 
     repositories {
         mavenCentral()
@@ -55,7 +55,6 @@ project(':compiler') {
         compile "org.ow2.asm:asm-util:$asm_version"
         testCompile 'junit:junit:4.12'
         testCompile "org.jetbrains.kotlin:kotlin-test-junit:$kotlin_version"
-        testCompile "org.ow2.asm:asm-debug-all:$asm_version"
     }
 
     publishSettings(project, 'asmble-compiler', 'Asmble WASM Compiler', false)
