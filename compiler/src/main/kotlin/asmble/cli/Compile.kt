@@ -1,9 +1,9 @@
 package asmble.cli
 
 import asmble.ast.Script
+import asmble.compile.jvm.AsmToBinary
 import asmble.compile.jvm.AstToAsm
 import asmble.compile.jvm.ClsContext
-import asmble.compile.jvm.withComputedFramesAndMaxs
 import java.io.FileOutputStream
 
 @Suppress("NAME_SHADOWING")
@@ -69,7 +69,7 @@ open class Compile : Command<Compile.Args>() {
                 includeBinary = args.includeBinary
             )
             AstToAsm.fromModule(ctx)
-            outStream.write(ctx.cls.withComputedFramesAndMaxs())
+            outStream.write(AsmToBinary.fromClassNode(ctx.cls))
         }
     }
 

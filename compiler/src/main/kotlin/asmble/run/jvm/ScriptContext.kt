@@ -305,10 +305,15 @@ data class ScriptContext(
         bindImport(import, true, MethodType.methodType(Array<MethodHandle>::class.java)).
             invokeWithArguments()!! as Array<MethodHandle>
 
-    open class SimpleClassLoader(parent: ClassLoader, logger: Logger) : ClassLoader(parent), Logger by logger {
+    open class SimpleClassLoader(
+        parent: ClassLoader,
+        logger: Logger,
+        val splitWhenTooLarge: Boolean = true
+    ) : ClassLoader(parent), Logger by logger {
         fun fromBuiltContext(ctx: ClsContext): Class<*> {
             trace { "Computing frames for ASM class:\n" + ctx.cls.toAsmString() }
-            return ctx.cls.withComputedFramesAndMaxs().let { bytes ->
+            val writer = if (splitWhenTooLarge) AsmToBinary else AsmToBinary.noSplit
+            return writer.fromClassNode(ctx.cls).let { bytes ->
                 debug { "ASM class:\n" + bytes.asClassNode().toAsmString() }
                 defineClass("${ctx.packageName}.${ctx.className}",  bytes, 0, bytes.size)
             }

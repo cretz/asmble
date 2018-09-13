@@ -53,6 +53,7 @@ project(':compiler') {
         compile "org.jetbrains.kotlin:kotlin-reflect:$kotlin_version"
         compile "org.ow2.asm:asm-tree:$asm_version"
         compile "org.ow2.asm:asm-util:$asm_version"
+        compile "org.ow2.asm:asm-commons:$asm_version"
         testCompile 'junit:junit:4.12'
         testCompile "org.jetbrains.kotlin:kotlin-test-junit:$kotlin_version"
     }

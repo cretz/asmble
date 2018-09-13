@@ -2,7 +2,6 @@ package asmble.compile.jvm
 
 import asmble.ast.Node
 import org.objectweb.asm.ClassReader
-import org.objectweb.asm.ClassWriter
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
 import org.objectweb.asm.tree.*
@@ -188,16 +187,6 @@ fun MethodNode.toAsmString(): String {
 
 val Node.Type.Func.asmDesc: String get() =
     (this.ret?.typeRef ?: Void::class.ref).asMethodRetDesc(*this.params.map { it.typeRef }.toTypedArray())
-
-fun ClassNode.withComputedFramesAndMaxs(
-    cw: ClassWriter = ClassWriter(ClassWriter.COMPUTE_FRAMES + ClassWriter.COMPUTE_MAXS)
-): ByteArray {
-    // Note, compute maxs adds a bunch of NOPs for unreachable code.
-    // See $func12 of block.wast. I don't believe the extra time over the
-    // instructions to remove the NOPs is worth it.
-    this.accept(cw)
-    return cw.toByteArray()
-}
 
 fun ClassNode.toAsmString(): String {
     val stringWriter = StringWriter()

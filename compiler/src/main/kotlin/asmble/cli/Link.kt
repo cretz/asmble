@@ -1,7 +1,7 @@
 package asmble.cli
 
+import asmble.compile.jvm.AsmToBinary
 import asmble.compile.jvm.Linker
-import asmble.compile.jvm.withComputedFramesAndMaxs
 import java.io.FileOutputStream
 
 open class Link : Command<Link.Args>() {
@@ -52,7 +52,7 @@ open class Link : Command<Link.Args>() {
                 defaultMaxMemPages = args.defaultMaxMem
             )
             Linker.link(ctx)
-            outStream.write(ctx.cls.withComputedFramesAndMaxs())
+            outStream.write(AsmToBinary.fromClassNode(ctx.cls))
         }
     }
 
