@@ -16,7 +16,7 @@ class SpecTestUnit(name: String, wast: String, expectedOutput: String?) : BaseTe
         "nop" -> 20
         "memory_grow" -> 830
         "imports" -> 5
-        else -> 1
+        else -> 2
     }
 
     override fun warningInsteadOfErrReason(t: Throwable) = when (name) {

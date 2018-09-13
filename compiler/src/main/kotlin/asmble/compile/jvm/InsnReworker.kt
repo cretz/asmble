@@ -130,19 +130,11 @@ open class InsnReworker {
                 // if we are at 0, add the result of said block if necessary to the count.
                 if (insideOfBlocks > 0) {
                     // If it's not a block, just ignore it
-                    val blockStackDiff = insns[insnIndex].let {
-                        when (it) {
-                            is Node.Instr.Block -> if (it.type == null) 0 else 1
-                            is Node.Instr.Loop -> 0
-                            is Node.Instr.If -> if (it.type == null) -1 else 0
-                            else -> null
-                        }
-                    }
-                    if (blockStackDiff != null) {
+                    (insns[insnIndex] as? Node.Instr.Args.Type)?.let {
                         insideOfBlocks--
                         ctx.trace { "Found block begin, number of blocks we're still inside: $insideOfBlocks" }
-                        // We're back on our block, change the count
-                        if (insideOfBlocks == 0) countSoFar += blockStackDiff
+                        // We're back on our block, change the count if it had a result
+                        if (insideOfBlocks == 0 && it.type != null) countSoFar++
                     }
                     if (insideOfBlocks > 0) continue
                 }
@@ -221,10 +213,9 @@ open class InsnReworker {
 
     fun insnStackDiff(ctx: ClsContext, insn: Node.Instr) = when (insn) {
         is Node.Instr.Unreachable, is Node.Instr.Nop, is Node.Instr.Block,
-        is Node.Instr.Loop, is Node.Instr.If, is Node.Instr.Else,
-        is Node.Instr.End, is Node.Instr.Br, is Node.Instr.BrIf,
+        is Node.Instr.Loop, is Node.Instr.Else, is Node.Instr.End, is Node.Instr.Br,
         is Node.Instr.Return -> NOP
-        is Node.Instr.BrTable -> POP_PARAM
+        is Node.Instr.If, is Node.Instr.BrIf, is Node.Instr.BrTable -> POP_PARAM
         is Node.Instr.Call -> ctx.funcTypeAtIndex(insn.index).let {
             // All calls pop params and any return is a push
             (POP_PARAM * it.params.size) + (if (it.ret == null) NOP else PUSH_RESULT)
