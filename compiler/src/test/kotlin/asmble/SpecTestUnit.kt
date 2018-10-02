@@ -13,13 +13,19 @@ class SpecTestUnit(name: String, wast: String, expectedOutput: String?) : BaseTe
     override val shouldFail get() = name.endsWith(".fail")
 
     override val defaultMaxMemPages get() = when (name) {
-        "nop" -> 20
+        "call", "call_indirect" -> 310
+        "globals", "imports", "select" -> 7
         "memory_grow" -> 830
-        "imports" -> 5
+        "nop" -> 20
         else -> 2
     }
 
     override fun warningInsteadOfErrReason(t: Throwable) = when (name) {
+        "binary" -> {
+            val expectedFailure = ((t as? ScriptAssertionError)?.assertion as? Script.Cmd.Assertion.Malformed)?.failure
+            // TODO: Pending answer to https://github.com/WebAssembly/spec/pull/882#issuecomment-426349365
+            if (expectedFailure == "integer too large") "Binary test changed" else null
+        }
         // NaN bit patterns can be off
         "float_literals", "float_exprs", "float_misc" ->
             if (isNanMismatch(t)) "NaN JVM bit patterns can be off" else null
