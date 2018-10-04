@@ -69,7 +69,7 @@ open class Compile : Command<Compile.Args>() {
                 includeBinary = args.includeBinary
             )
             AstToAsm.fromModule(ctx)
-            outStream.write(AsmToBinary.fromClassNode(ctx.cls))
+            outStream.write(AsmToBinary(logger = logger).fromClassNode(ctx.cls))
         }
     }
 

@@ -139,6 +139,8 @@ public class Splitter implements Iterable<Splitter.SplitPoint> {
       InsnTraverseInfo info = new InsnTraverseInfo();
       info.startIndex = currIndex;
       info.endIndex = Math.min(currIndex + maxSize - 1, insns.length - 1);
+      // Reduce the end by special calls
+      constrainEndByInvokeSpecial(info);
       // Reduce the end based on try/catch blocks the start is in or that jump to
       constrainEndByTryCatchBlocks(info);
       // Reduce the end based on any jumps within
@@ -150,6 +152,17 @@ public class Splitter implements Iterable<Splitter.SplitPoint> {
       // Now that we have our largest range from the start index, we can go over each updating the local refs and stack
       // For the stack, we are going to use the
       return splitPointFromInfo(info);
+    }
+
+    protected void constrainEndByInvokeSpecial(InsnTraverseInfo info) {
+      // Can't have an invoke special of <init>
+      for (int i = info.startIndex; i <= info.endIndex; i++) {
+        AbstractInsnNode node = insns[i];
+        if (node.getOpcode() == Opcodes.INVOKESPECIAL && ((MethodInsnNode) node).name.equals("<init>")) {
+          info.endIndex = Math.max(info.startIndex, i - 1);
+          return;
+        }
+      }
     }
 
     protected void constrainEndByTryCatchBlocks(InsnTraverseInfo info) {

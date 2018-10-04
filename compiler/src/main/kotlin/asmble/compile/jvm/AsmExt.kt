@@ -177,6 +177,15 @@ fun MethodNode.addInsns(vararg insn: AbstractInsnNode): MethodNode {
     return this
 }
 
+
+fun MethodNode.cloneWithInsnRange(range: IntRange) =
+    MethodNode(access, name, desc, signature, exceptions.toTypedArray()).also { new ->
+        accept(new)
+        val indexesToRemove = (0 until range.start) + ((range.endInclusive + 1) until new.instructions.size())
+        // Remove em all in reverse
+        indexesToRemove.asReversed().forEach { new.instructions.remove(new.instructions[it]) }
+    }
+
 fun MethodNode.toAsmString(): String {
     val stringWriter = StringWriter()
     val cv = TraceClassVisitor(PrintWriter(stringWriter))
