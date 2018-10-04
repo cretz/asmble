@@ -120,7 +120,7 @@ project(':examples') {
                 // args 'help', 'compile'
                 def outFile = 'build/wasm-classes/' + wasmCompiledClassName.replace('.', '/') + '.class'
                 file(outFile).parentFile.mkdirs()
-                args 'compile', 'build/lib.wasm', wasmCompiledClassName, '-out', outFile, '-log', 'debug'
+                args 'compile', 'build/lib.wasm', wasmCompiledClassName, '-out', outFile
             }
         }
 
@@ -189,12 +189,16 @@ project(':examples:go-simple') {
     apply plugin: 'application'
     ext.wasmCompiledClassName = 'asmble.generated.GoSimple'
     dependencies {
+        compile project(':examples:go-util')
         compile files('build/wasm-classes')
     }
     compileJava {
         dependsOn compileGoWasm
     }
     mainClassName = 'asmble.examples.gosimple.Main'
+}
+
+project(':examples:go-util') {
 }
 
 project(':examples:rust-regex') {

@@ -2,6 +2,12 @@
 
 Below are some examples.
 
+### Go
+
+Compile Go to WASM and then to the JVM. In order of complexity:
+
+* [go-simple](go-simple)
+
 ### Rust
 
 Compile Rust to WASM and then to the JVM. In order of complexity:
