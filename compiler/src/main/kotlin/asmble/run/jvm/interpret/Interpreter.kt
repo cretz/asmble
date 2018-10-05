@@ -1,4 +1,4 @@
-package asmble.interpret
+package asmble.run.jvm.interpret
 
 import asmble.ast.Node
 import asmble.compile.jvm.Mem
@@ -37,7 +37,8 @@ class Interpreter {
                 is Node.Instr.Else, is Node.Instr.End -> next { }
                 is Node.Instr.Br -> StepResult.Branch(insn.relativeDepth)
                 is Node.Instr.BrIf -> if (popInt() == 0) StepResult.Next else StepResult.Branch(insn.relativeDepth)
-                is Node.Instr.BrTable -> StepResult.Branch(insn.targetTable.getOrNull(popInt()) ?: insn.default)
+                is Node.Instr.BrTable -> StepResult.Branch(insn.targetTable.getOrNull(popInt())
+                    ?: insn.default)
                 is Node.Instr.Return -> StepResult.Return
                 is Node.Instr.Call -> StepResult.Call(insn.index)
                 is Node.Instr.CallIndirect -> StepResult.Call(popInt())
@@ -121,6 +122,74 @@ class Interpreter {
                 is Node.Instr.F64Gt -> next { push(popDouble() > popDouble()) }
                 is Node.Instr.F64Le -> next { push(popDouble() <= popDouble()) }
                 is Node.Instr.F64Ge -> next { push(popDouble() >= popDouble()) }
+                is Node.Instr.I32Clz -> next { push(Integer.numberOfLeadingZeros(popInt())) }
+                is Node.Instr.I32Ctz -> next { push(Integer.numberOfTrailingZeros(popInt())) }
+                is Node.Instr.I32Popcnt -> next { push(Integer.bitCount(popInt())) }
+                is Node.Instr.I32Add -> next { push(popInt() + popInt()) }
+                is Node.Instr.I32Sub -> next { push(popInt() - popInt()) }
+                is Node.Instr.I32Mul -> next { push(popInt() * popInt()) }
+                is Node.Instr.I32DivS -> next { push(popInt() / popInt()) }
+                is Node.Instr.I32DivU -> next { push(Integer.divideUnsigned(popInt(), popInt())) }
+                is Node.Instr.I32RemS -> next { push(popInt() % popInt()) }
+                is Node.Instr.I32RemU -> next { push(Integer.remainderUnsigned(popInt(), popInt())) }
+                is Node.Instr.I32And -> next { push(popInt() and popInt()) }
+                is Node.Instr.I32Or -> next { push(popInt() or popInt()) }
+                is Node.Instr.I32Xor -> next { push(popInt() xor popInt()) }
+                is Node.Instr.I32Shl -> next { push(popInt() shl popInt()) }
+                is Node.Instr.I32ShrS -> next { push(popInt() shr popInt()) }
+                is Node.Instr.I32ShrU -> next { push(popInt() ushr popInt()) }
+                is Node.Instr.I32Rotl -> next { push(Integer.rotateLeft(popInt(), popInt())) }
+                is Node.Instr.I32Rotr -> next { push(Integer.rotateRight(popInt(), popInt())) }
+                is Node.Instr.I64Clz -> next { push(java.lang.Long.numberOfLeadingZeros(popLong()).toLong()) }
+                is Node.Instr.I64Ctz -> next { push(java.lang.Long.numberOfTrailingZeros(popLong()).toLong()) }
+                is Node.Instr.I64Popcnt -> next { push(java.lang.Long.bitCount(popLong())) }
+                is Node.Instr.I64Add -> next { push(popLong() + popLong()) }
+                is Node.Instr.I64Sub -> next { push(popLong() - popLong()) }
+                is Node.Instr.I64Mul -> next { push(popLong() * popLong()) }
+                is Node.Instr.I64DivS -> next { push(popLong() / popLong()) }
+                is Node.Instr.I64DivU -> next { push(java.lang.Long.divideUnsigned(popLong(), popLong())) }
+                is Node.Instr.I64RemS -> next { push(popLong() % popLong()) }
+                is Node.Instr.I64RemU -> next { push(java.lang.Long.remainderUnsigned(popLong(), popLong())) }
+                is Node.Instr.I64And -> next { push(popLong() and popLong()) }
+                is Node.Instr.I64Or -> next { push(popLong() or popLong()) }
+                is Node.Instr.I64Xor -> next { push(popLong() xor popLong()) }
+                is Node.Instr.I64Shl -> next { push(popLong() shl popInt()) }
+                is Node.Instr.I64ShrS -> next { push(popLong() shr popInt()) }
+                is Node.Instr.I64ShrU -> next { push(popLong() ushr popInt()) }
+                is Node.Instr.I64Rotl -> next { push(java.lang.Long.rotateLeft(popLong(), popInt())) }
+                is Node.Instr.I64Rotr -> next { push(java.lang.Long.rotateRight(popLong(), popInt())) }
+                is Node.Instr.F32Abs -> next { push(Math.abs(popFloat())) }
+                is Node.Instr.F32Neg -> next { push(-popFloat()) }
+                is Node.Instr.F32Ceil -> next { push(Math.ceil(popFloat().toDouble()).toFloat()) }
+                is Node.Instr.F32Floor -> next { push(Math.floor(popFloat().toDouble()).toFloat()) }
+                is Node.Instr.F32Trunc -> next {
+                    popFloat().toDouble().let { push((if (it >= 0.0) Math.floor(it) else Math.ceil(it)).toFloat()) }
+                }
+                is Node.Instr.F32Nearest -> next { push(Math.rint(popFloat().toDouble()).toFloat()) }
+                is Node.Instr.F32Sqrt -> next { push(Math.sqrt(popFloat().toDouble()).toFloat()) }
+                is Node.Instr.F32Add -> next { push(popFloat() + popFloat()) }
+                is Node.Instr.F32Sub -> next { push(popFloat() - popFloat()) }
+                is Node.Instr.F32Mul -> next { push(popFloat() * popFloat()) }
+                is Node.Instr.F32Div -> next { push(popFloat() / popFloat()) }
+                is Node.Instr.F32Min -> next { Math.min(popFloat(), popFloat()) }
+                is Node.Instr.F32Max -> next { Math.max(popFloat(), popFloat()) }
+                is Node.Instr.F32CopySign -> next { Math.copySign(popFloat(), popFloat()) }
+                is Node.Instr.F64Abs -> next { push(Math.abs(popDouble())) }
+                is Node.Instr.F64Neg -> next { push(-popDouble()) }
+                is Node.Instr.F64Ceil -> next { push(Math.ceil(popDouble())) }
+                is Node.Instr.F64Floor -> next { push(Math.floor(popDouble())) }
+                is Node.Instr.F64Trunc -> next {
+                    popDouble().let { push((if (it >= 0.0) Math.floor(it) else Math.ceil(it))) }
+                }
+                is Node.Instr.F64Nearest -> next { push(Math.rint(popDouble())) }
+                is Node.Instr.F64Sqrt -> next { push(Math.sqrt(popDouble())) }
+                is Node.Instr.F64Add -> next { push(popDouble() + popDouble()) }
+                is Node.Instr.F64Sub -> next { push(popDouble() - popDouble()) }
+                is Node.Instr.F64Mul -> next { push(popDouble() * popDouble()) }
+                is Node.Instr.F64Div -> next { push(popDouble() / popDouble()) }
+                is Node.Instr.F64Min -> next { Math.min(popDouble(), popDouble()) }
+                is Node.Instr.F64Max -> next { Math.max(popDouble(), popDouble()) }
+                is Node.Instr.F64CopySign -> next { Math.copySign(popDouble(), popDouble()) }
                 else -> TODO()
             }
         }
@@ -157,7 +226,8 @@ class Interpreter {
         fun push(v: Number) { valueStack += v }
         fun push(v: Boolean) { valueStack += if (v) 1 else 0 }
 
-        inline fun next(crossinline f: () -> Unit): StepResult.Next { f(); return StepResult.Next }
+        inline fun next(crossinline f: () -> Unit): StepResult.Next { f(); return StepResult.Next
+        }
     }
 
     data class Block(
