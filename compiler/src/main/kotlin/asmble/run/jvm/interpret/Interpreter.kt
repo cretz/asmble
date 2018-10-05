@@ -190,7 +190,52 @@ class Interpreter {
                 is Node.Instr.F64Min -> next { Math.min(popDouble(), popDouble()) }
                 is Node.Instr.F64Max -> next { Math.max(popDouble(), popDouble()) }
                 is Node.Instr.F64CopySign -> next { Math.copySign(popDouble(), popDouble()) }
-                else -> TODO()
+                is Node.Instr.I32WrapI64 -> next { push(popLong().toInt()) }
+                // TODO: trunc traps on overflow!
+                is Node.Instr.I32TruncSF32 -> next { push(popFloat().toInt()) }
+                is Node.Instr.I32TruncUF32 -> next { push(popFloat().toLong().toInt()) }
+                is Node.Instr.I32TruncSF64 -> next { push(popDouble().toInt()) }
+                is Node.Instr.I32TruncUF64 -> next { push(popDouble().toLong().toInt()) }
+                is Node.Instr.I64ExtendSI32 -> next { push(popInt().toLong()) }
+                is Node.Instr.I64ExtendUI32 -> next { push(popInt().toUnsignedLong()) }
+                is Node.Instr.I64TruncSF32 -> next { push(popFloat().toLong()) }
+                is Node.Instr.I64TruncUF32 -> next {
+                    // If over max long, subtract and negate
+                    popFloat().let {
+                        push(
+                            if (it < 9223372036854775807f) it.toLong()
+                            else (-9223372036854775808f + (it - 9223372036854775807f)).toLong()
+                        )
+                    }
+                }
+                is Node.Instr.I64TruncSF64 -> next { push(popDouble().toLong()) }
+                is Node.Instr.I64TruncUF64 -> next {
+                    // If over max long, subtract and negate
+                    popDouble().let {
+                        push(
+                            if (it < 9223372036854775807.0) it.toLong()
+                            else (-9223372036854775808.0 + (it - 9223372036854775807.0)).toLong()
+                        )
+                    }
+                }
+                is Node.Instr.F32ConvertSI32 -> next { push(popInt().toFloat()) }
+                is Node.Instr.F32ConvertUI32 -> next { push(popInt().toUnsignedLong().toFloat()) }
+                is Node.Instr.F32ConvertSI64 -> next { push(popLong().toFloat()) }
+                is Node.Instr.F32ConvertUI64 -> next {
+                    popLong().let { if (it >= 0) it.toFloat() else (it ushr 1).toFloat() * 2f }
+                }
+                is Node.Instr.F32DemoteF64 -> next { push(popDouble().toFloat()) }
+                is Node.Instr.F64ConvertSI32 -> next { push(popInt().toDouble()) }
+                is Node.Instr.F64ConvertUI32 -> next { push(popInt().toUnsignedLong().toDouble()) }
+                is Node.Instr.F64ConvertSI64 -> next { push(popLong().toDouble()) }
+                is Node.Instr.F64ConvertUI64 -> next {
+                    popLong().let { if (it >= 0) it.toDouble() else ((it ushr 1) or (it and 1)) * 2.0 }
+                }
+                is Node.Instr.F64PromoteF32 -> next { push(popFloat().toDouble()) }
+                is Node.Instr.I32ReinterpretF32 -> next { push(java.lang.Float.floatToRawIntBits(popFloat())) }
+                is Node.Instr.I64ReinterpretF64 -> next { push(java.lang.Double.doubleToRawLongBits(popDouble())) }
+                is Node.Instr.F32ReinterpretI32 -> next { push(java.lang.Float.intBitsToFloat(popInt())) }
+                is Node.Instr.F64ReinterpretI64 -> next { push(java.lang.Double.longBitsToDouble(popLong())) }
             }
         }
     }
