@@ -113,6 +113,15 @@ val Double.const: AbstractInsnNode get() = when (this) {
     else -> LdcInsnNode(this)
 }
 
+val Number?.valueType get() = when (this) {
+    null -> null
+    is Int -> Node.Type.Value.I32
+    is Long-> Node.Type.Value.I64
+    is Float -> Node.Type.Value.F32
+    is Double -> Node.Type.Value.F64
+    else -> error("Unrecognized value type class: $this")
+}
+
 val String.const: AbstractInsnNode get() = LdcInsnNode(this)
 
 val javaKeywords = setOf("abstract", "assert", "boolean",
@@ -176,7 +185,6 @@ fun MethodNode.addInsns(vararg insn: AbstractInsnNode): MethodNode {
     insn.forEach(this.instructions::add)
     return this
 }
-
 
 fun MethodNode.cloneWithInsnRange(range: IntRange) =
     MethodNode(access, name, desc, signature, exceptions.toTypedArray()).also { new ->

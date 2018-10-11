@@ -1,25 +1,84 @@
 package asmble.run.jvm.interpret
 
 import asmble.ast.Node
+import asmble.compile.jvm.CompileErr
 import asmble.compile.jvm.Mem
+import asmble.compile.jvm.ref
+import asmble.compile.jvm.valueType
+import asmble.util.Either
 import asmble.util.toUnsignedInt
 import asmble.util.toUnsignedLong
-import asmble.util.toUnsignedShort
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 // This is not intended to be fast, rather clear and easy to read. Very little cached/memoized, lots of extra cycles.
 class Interpreter {
 
-    fun run(ctx: Context) {
-        while (true) step(ctx)
+    fun run(
+        mod: Node.Module,
+        mem: ByteBuffer,
+        funcIndex: Int = mod.startFuncIndex ?: error("No start func index"),
+        funcArgs: List<Number> = emptyList()
+    ) = run(Context(mod, mem), funcIndex, funcArgs)
+
+    fun run(
+        ctx: Context,
+        funcIndex: Int = ctx.mod.startFuncIndex ?: error("No start func index"),
+        funcArgs: List<Number> = emptyList()
+    ): Number? {
+        // Make first call, checking params
+        var lastStep: StepResult = ctx.funcTypeAtIndex(funcIndex).let { funcType ->
+            funcArgs.mapNotNull { it.valueType }.let {
+                if (it != funcType.params) throw InterpretErr.StartFuncParamMismatch(funcType.params, it)
+            }
+            StepResult.Call(funcIndex, funcArgs, funcType.ret)
+        }
+        // Run until done
+        while (lastStep !is StepResult.Return || ctx.callStack.size > 1) {
+            next(ctx, lastStep)
+            lastStep = step(ctx)
+        }
+        return lastStep.v
     }
 
-    fun step(ctx: Context) {
+    fun step(ctx: Context): StepResult {
+        TODO()
     }
 
-    fun next(ctx: Context) {
-
+    // Errors with InterpretErr.EndReached if there is no next step to be had
+    fun next(ctx: Context, step: StepResult) {
+        when (step) {
+            // Next just moves the counter
+            is StepResult.Next -> ctx.currFuncCtx.insnIndex++
+            // TODO: branch
+            is StepResult.Branch -> TODO()
+            // Call, if import, invokes it and puts result on stack. If not, just pushes a new func context.
+            is StepResult.Call -> ctx.funcAtIndex(step.funcIndex).let {
+                when (it) {
+                    // If import, call and just put on stack and advance insn counter
+                    is Either.Left ->
+                        ctx.imports.invokeFunction(it.v.module, it.v.field, step.args, step.expectedResult).also {
+                            // Make sure result type is accurate
+                            if (it.valueType != step.expectedResult)
+                                throw InterpretErr.InvalidImportFuncResult(step.expectedResult, it)
+                            it?.also { ctx.currFuncCtx.push(it) }
+                            ctx.currFuncCtx.insnIndex++
+                        }
+                    // If inside the module, create new context to continue
+                    is Either.Right -> ctx.callStack += FuncContext(it.v)
+                }
+            }
+            // Unreachable throws
+            is StepResult.Unreachable -> throw UnsupportedOperationException("Unreachable")
+            // Return pops curr func from the call stack, push ret and move insn on prev one
+            is StepResult.Return -> ctx.callStack.removeAt(ctx.callStack.lastIndex).let { returnedFrom ->
+                if (ctx.callStack.isEmpty()) throw InterpretErr.EndReached(step.v)
+                if (returnedFrom.valueStack.isNotEmpty())
+                    throw CompileErr.UnusedStackOnReturn(returnedFrom.valueStack.map { it::class.ref } )
+                step.v?.also { ctx.currFuncCtx.valueStack += it }
+                ctx.currFuncCtx.insnIndex++
+            }
+        }
     }
 
     fun invokeSingle(ctx: Context): StepResult = ctx.currFuncCtx.run {
@@ -39,9 +98,19 @@ class Interpreter {
                 is Node.Instr.BrIf -> if (popInt() == 0) StepResult.Next else StepResult.Branch(insn.relativeDepth)
                 is Node.Instr.BrTable -> StepResult.Branch(insn.targetTable.getOrNull(popInt())
                     ?: insn.default)
-                is Node.Instr.Return -> StepResult.Return
-                is Node.Instr.Call -> StepResult.Call(insn.index)
-                is Node.Instr.CallIndirect -> StepResult.Call(popInt())
+                is Node.Instr.Return ->
+                    StepResult.Return(func.type.ret?.let { pop(it) })
+                is Node.Instr.Call -> ctx.funcTypeAtIndex(insn.index).let {
+                    StepResult.Call(insn.index, popCallArgs(it), it.ret)
+                }
+                is Node.Instr.CallIndirect -> {
+                    val funcIndex = popInt()
+                    val expectedType = ctx.typeAtIndex(insn.index).also {
+                        val actualType = ctx.funcTypeAtIndex(funcIndex)
+                        if (it != actualType) throw InterpretErr.IndirectCallTypeMismatch(it, actualType)
+                    }
+                    StepResult.Call(popInt(), popCallArgs(expectedType), expectedType.ret)
+                }
                 is Node.Instr.Drop -> next { pop() }
                 is Node.Instr.Select -> next {
                     popInt().also {
@@ -242,11 +311,28 @@ class Interpreter {
 
     data class Context(
         val mod: Node.Module,
+        var mem: ByteBuffer,
         val callStack: MutableList<FuncContext> = mutableListOf(),
-        var mem: ByteBuffer
+        val imports: Imports = Imports.None
     ) {
         init {
             require(mem.order() == ByteOrder.LITTLE_ENDIAN)
+        }
+
+        // TODO: some of this shares with the compiler's context, so how about some code reuse?
+        val importFuncs = mod.imports.filter { it.kind is Node.Import.Kind.Func }
+        fun typeAtIndex(index: Int) = mod.types.getOrNull(index) ?: throw CompileErr.UnknownType(index)
+        fun funcAtIndex(index: Int) = importFuncs.getOrNull(index).let {
+            when (it) {
+                null -> Either.Right(mod.funcs.getOrNull(index - importFuncs.size) ?: throw CompileErr.UnknownFunc(index))
+                else -> Either.Left(it)
+            }
+        }
+        fun funcTypeAtIndex(index: Int) = funcAtIndex(index).let {
+            when (it) {
+                is Either.Left -> typeAtIndex((it.v.kind as Node.Import.Kind.Func).typeIndex)
+                is Either.Right -> it.v.type
+            }
         }
 
         val currFuncCtx get() = callStack.last()
@@ -256,10 +342,10 @@ class Interpreter {
 
     data class FuncContext(
         val func: Node.Func,
-        val locals: MutableList<Number>,
-        val valueStack: MutableList<Number>,
-        val blockStack: MutableList<Block>,
-        val insnIndex: Int
+        val locals: MutableList<Number> = mutableListOf(),
+        val valueStack: MutableList<Number> = mutableListOf(),
+        val blockStack: MutableList<Block> = mutableListOf(),
+        var insnIndex: Int = 0
     ) {
         fun peek() = valueStack.last()
         fun pop() = valueStack.removeAt(valueStack.size - 1)
@@ -268,11 +354,17 @@ class Interpreter {
         fun popFloat() = pop() as Float
         fun popDouble() = pop() as Double
         fun Node.Instr.Args.AlignOffset.popMemAddr() = popInt() + offset.toInt()
+        fun pop(type: Node.Type.Value): Number = when (type) {
+            is Node.Type.Value.I32 -> popInt()
+            is Node.Type.Value.I64 -> popLong()
+            is Node.Type.Value.F32 -> popFloat()
+            is Node.Type.Value.F64 -> popDouble()
+        }
+        fun popCallArgs(type: Node.Type.Func) = type.params.map(::pop)
         fun push(v: Number) { valueStack += v }
         fun push(v: Boolean) { valueStack += if (v) 1 else 0 }
 
-        inline fun next(crossinline f: () -> Unit): StepResult.Next { f(); return StepResult.Next
-        }
+        inline fun next(crossinline f: () -> Unit): StepResult.Next { f(); return StepResult.Next }
     }
 
     data class Block(
@@ -284,8 +376,8 @@ class Interpreter {
     sealed class StepResult {
         object Next : StepResult()
         data class Branch(val blockDepth: Int, val tryElse: Boolean = false) : StepResult()
-        data class Call(val funcIndex: Int) : StepResult()
+        data class Call(val funcIndex: Int, val args: List<Number>, val expectedResult: Node.Type.Value?) : StepResult()
         object Unreachable : StepResult()
-        object Return : StepResult()
+        data class Return(val v: Number?) : StepResult()
     }
 }
