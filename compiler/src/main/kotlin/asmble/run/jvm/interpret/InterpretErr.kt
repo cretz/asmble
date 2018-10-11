@@ -12,10 +12,10 @@ sealed class InterpretErr(message: String, cause: Throwable? = null) : RuntimeEx
         override val asmErrString get() = "indirect call type mismatch"
     }
 
-    class InvalidImportFuncResult(
+    class InvalidCallResult(
         val expected: Node.Type.Value?,
         val actual: Number?
-    ) : InterpretErr("Expected import result to be $expected, got $actual")
+    ) : InterpretErr("Expected call result to be $expected, got $actual")
 
     class EndReached(returned: Number?) : InterpretErr("Reached end of invocation")
 

@@ -40,8 +40,7 @@ open class Invoke : ScriptCommand<Invoke.Args>() {
             if (args.module == "<last-in-entry>") ctx.modules.lastOrNull() ?: error("No modules available")
             else ctx.registrations[args.module] as? Module.Instance ?:
                 error("Unable to find module registered as ${args.module}")
-        // Just make sure the module is instantiated here...
-        module.instance(ctx)
+        module as Module.Compiled
         // If an export is provided, call it
         if (args.export != "<start-func>") args.export.javaIdent.let { javaName ->
             val method = module.cls.declaredMethods.find { it.name == javaName } ?:
@@ -59,7 +58,7 @@ open class Invoke : ScriptCommand<Invoke.Args>() {
                     else -> error("Unrecognized type for param ${index + 1}: $paramType")
                 }
             }
-            val result = method.invoke(module.instance(ctx), *params.toTypedArray())
+            val result = method.invoke(module.inst, *params.toTypedArray())
             if (args.resultToStdout && method.returnType != Void.TYPE) println(result)
         }
     }

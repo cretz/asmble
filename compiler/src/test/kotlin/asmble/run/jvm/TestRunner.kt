@@ -2,10 +2,7 @@ package asmble.run.jvm
 
 import asmble.BaseTestUnit
 import asmble.TestBase
-import asmble.annotation.WasmModule
-import asmble.io.AstToBinary
 import asmble.io.AstToSExpr
-import asmble.io.ByteWriter
 import asmble.io.SExprToStr
 import org.junit.Assume
 import org.junit.Test
@@ -27,21 +24,17 @@ abstract class TestRunner<out T : BaseTestUnit>(val unit: T) : TestBase() {
         } else if (ex != null) throw ex
     }
 
-    private fun run() {
+    abstract val builder: ModuleBuilder<*>
+
+    open fun run(): ScriptContext {
         debug { "AST SExpr: " + unit.ast }
         debug { "AST Str: " + SExprToStr.fromSExpr(*unit.ast.toTypedArray()) }
         debug { "AST: " + unit.script }
         debug { "AST Str: " + SExprToStr.fromSExpr(*AstToSExpr.fromScript(unit.script).toTypedArray()) }
 
         val out = ByteArrayOutputStream()
-        var scriptContext = ScriptContext(
-            packageName = unit.packageName,
-            logger = this,
-            adjustContext = { it.copy(eagerFailLargeMemOffset = false) },
-            defaultMaxMemPages = unit.defaultMaxMemPages,
-            // Include the binary data so we can check it later
-            includeBinaryInCompiledClass = true
-        ).withHarnessRegistered(PrintWriter(OutputStreamWriter(out, Charsets.UTF_8), true))
+        var scriptContext = ScriptContext(logger = this, builder = builder).
+            withHarnessRegistered(PrintWriter(OutputStreamWriter(out, Charsets.UTF_8), true))
 
         // This will fail assertions as necessary
         scriptContext = unit.script.commands.fold(scriptContext) { scriptContext, cmd ->
@@ -60,14 +53,6 @@ abstract class TestRunner<out T : BaseTestUnit>(val unit: T) : TestBase() {
             assertEquals(it.trimEnd(), out.toByteArray().toString(Charsets.UTF_8).trimEnd())
         }
 
-        // Also check the annotations
-        scriptContext.modules.forEach { mod ->
-            val expectedBinaryString = ByteArrayOutputStream().also {
-                ByteWriter.OutputStream(it).also { AstToBinary.fromModule(it, mod.mod) }
-            }.toByteArray().toString(Charsets.ISO_8859_1)
-            val actualBinaryString =
-                mod.cls.getDeclaredAnnotation(WasmModule::class.java)?.binary ?: error("No annotation")
-            assertEquals(expectedBinaryString, actualBinaryString)
-        }
+        return scriptContext
     }
 }

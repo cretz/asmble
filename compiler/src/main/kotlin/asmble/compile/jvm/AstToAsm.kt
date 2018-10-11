@@ -385,7 +385,7 @@ open class AstToAsm {
         }
         // Otherwise, it was imported and we can set the elems on the imported one
         // from the parameter
-        // TODO: I think this is a security concern and bad practice, may revisit
+        // TODO: I think this is a security concern and bad practice, may revisit (TODO: consider cloning the array)
         val importIndex = ctx.importFuncs.size + ctx.importGlobals.sumBy {
             // Immutable is 1, mutable is 2
             if ((it.kind as? Node.Import.Kind.Global)?.type?.mutable == false) 1 else 2

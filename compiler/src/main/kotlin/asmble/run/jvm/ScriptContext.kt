@@ -1,47 +1,34 @@
 package asmble.run.jvm
 
-import asmble.annotation.WasmExternalKind
 import asmble.ast.Node
 import asmble.ast.Script
-import asmble.compile.jvm.*
+import asmble.compile.jvm.valueType
 import asmble.io.AstToSExpr
 import asmble.io.SExprToStr
 import asmble.util.Logger
 import asmble.util.toRawIntBits
 import asmble.util.toRawLongBits
-import org.objectweb.asm.ClassReader
-import org.objectweb.asm.ClassVisitor
-import org.objectweb.asm.Opcodes
 import java.io.PrintWriter
 import java.lang.invoke.MethodHandle
-import java.lang.invoke.MethodHandles
-import java.lang.invoke.MethodType
 import java.lang.reflect.InvocationTargetException
 import java.util.*
 
 data class ScriptContext(
-    val packageName: String,
-    val modules: List<Module.Compiled> = emptyList(),
+    val modules: List<Module> = emptyList(),
     val registrations: Map<String, Module> = emptyMap(),
     val logger: Logger = Logger.Print(Logger.Level.OFF),
-    val adjustContext: (ClsContext) -> ClsContext = { it },
-    val classLoader: SimpleClassLoader =
-        ScriptContext.SimpleClassLoader(ScriptContext::class.java.classLoader, logger),
     val exceptionTranslator: ExceptionTranslator = ExceptionTranslator,
-    val defaultMaxMemPages: Int = 1,
-    val includeBinaryInCompiledClass: Boolean = false
-) : Logger by logger {
+    val builder: ModuleBuilder<*> = ModuleBuilder.Compiled(logger = logger)
+) : Module.ImportResolver, Logger by logger {
     fun withHarnessRegistered(out: PrintWriter = PrintWriter(System.out, true)) =
-        withModuleRegistered("spectest", Module.Native(TestHarness(out)))
+        withModuleRegistered(Module.Native("spectest", TestHarness(out)))
 
-    fun withModuleRegistered(name: String, mod: Module) = copy(registrations = registrations + (name to mod))
+    fun withModuleRegistered(mod: Module) =
+        copy(registrations = registrations + ((mod.name ?: error("Missing module name")) to mod))
 
     fun runCommand(cmd: Script.Cmd) = when (cmd) {
         is Script.Cmd.Module ->
-            // We ask for the module instance because some things are built on <init> expectation
-            compileModule(cmd.module, "Module${modules.size}", cmd.name).also { it.instance(this) }.let {
-                copy(modules = modules + it)
-            }
+            copy(modules = modules + buildModule(cmd.module, "Module${modules.size}", cmd.name))
         is Script.Cmd.Register ->
             copy(registrations = registrations + (
                 cmd.string to (
@@ -53,7 +40,7 @@ data class ScriptContext(
             doAction(cmd).let { this }
         is Script.Cmd.Assertion ->
             doAssertion(cmd).let { this }
-        else -> TODO("BOO: $cmd")
+        is Script.Cmd.Meta -> throw NotImplementedError("Meta commands cannot be run")
     }
 
     fun doAssertion(cmd: Script.Cmd.Assertion) {
@@ -73,7 +60,8 @@ data class ScriptContext(
 
     fun assertReturn(ret: Script.Cmd.Assertion.Return) {
         require(ret.exprs.size < 2)
-        val (retType, retVal) = doAction(ret.action)
+        val retVal = doAction(ret.action)
+        val retType = retVal?.javaClass?.valueType
         when (retType) {
             null ->
                 if (ret.exprs.isNotEmpty())
@@ -106,8 +94,8 @@ data class ScriptContext(
     }
 
     fun assertReturnNan(ret: Script.Cmd.Assertion.ReturnNan) {
-        val (retType, retVal) = doAction(ret.action)
-        when (retType) {
+        val retVal = doAction(ret.action)
+        when (retVal?.javaClass?.valueType) {
             Node.Type.Value.F32 ->
                 if (!(retVal as Float).isNaN()) throw ScriptAssertionError(ret, "Expected NaN, got $retVal", retVal)
             Node.Type.Value.F64 ->
@@ -129,7 +117,7 @@ data class ScriptContext(
         try {
             debug { "Compiling malformed: " + SExprToStr.Compact.fromSExpr(AstToSExpr.fromModule(malformed.module.value)) }
             val className = "malformed" + UUID.randomUUID().toString().replace("-", "")
-            compileModule(malformed.module.value, className, null)
+            buildModule(malformed.module.value, className, null)
             throw ScriptAssertionError(
                 malformed,
                 "Expected malformed module with error '${malformed.failure}', was valid"
@@ -141,7 +129,7 @@ data class ScriptContext(
         try {
             debug { "Compiling invalid: " + SExprToStr.Compact.fromSExpr(AstToSExpr.fromModule(invalid.module.value)) }
             val className = "invalid" + UUID.randomUUID().toString().replace("-", "")
-            compileModule(invalid.module.value, className, null)
+            buildModule(invalid.module.value, className, null)
             throw ScriptAssertionError(invalid, "Expected invalid module with error '${invalid.failure}', was valid")
         } catch (e: Exception) { assertFailure(invalid, e, invalid.failure) }
     }
@@ -149,7 +137,7 @@ data class ScriptContext(
     fun assertUnlinkable(unlink: Script.Cmd.Assertion.Unlinkable) {
         try {
             val className = "unlinkable" + UUID.randomUUID().toString().replace("-", "")
-            compileModule(unlink.module, className, null).instance(this)
+            buildModule(unlink.module, className, null)
             throw ScriptAssertionError(unlink, "Expected module link error with '${unlink.failure}', was valid")
         } catch (e: Throwable) { assertFailure(unlink, e, unlink.failure) }
     }
@@ -157,7 +145,7 @@ data class ScriptContext(
     fun assertTrapModule(trap: Script.Cmd.Assertion.TrapModule) {
         try {
             val className = "trapmod" + UUID.randomUUID().toString().replace("-", "")
-            compileModule(trap.module, className, null).instance(this)
+            buildModule(trap.module, className, null)
             throw ScriptAssertionError(trap, "Expected module init error with '${trap.failure}', was valid")
         } catch (e: Throwable) { assertFailure(trap, e, trap.failure) }
     }
@@ -190,50 +178,29 @@ data class ScriptContext(
         is Script.Cmd.Action.Get -> doGet(cmd)
     }
 
-    fun doGet(cmd: Script.Cmd.Action.Get): Pair<Node.Type.Value, Any> {
+    fun doGet(cmd: Script.Cmd.Action.Get): Number {
         // Grab last module or named one
         val module = if (cmd.name == null) modules.last() else modules.first { it.name == cmd.name }
-        // Just call the getter
-        val getter = module.cls.getDeclaredMethod("get" + cmd.string.javaIdent.capitalize())
-        return getter.returnType.valueType!! to getter.invoke(module.instance(this))
+        return module.exportedGlobal(cmd.string)!!.first.invokeWithArguments() as Number
     }
 
-    fun doInvoke(cmd: Script.Cmd.Action.Invoke): Pair<Node.Type.Value?, Any?> {
+    fun doInvoke(cmd: Script.Cmd.Action.Invoke): Number? {
         // If there is a module name, use that index, otherwise just search.
-        val (compMod, method) = modules.filter { cmd.name == null || it.name == cmd.name }.flatMap { compMod ->
-            compMod.cls.declaredMethods.filter { it.name == cmd.string.javaIdent }.map { compMod to it }
-        }.let { methodPairs ->
-            // If there are multiple, we get the last one
-            if (methodPairs.isEmpty()) error("Unable to find method for invoke named ${cmd.string.javaIdent}")
-            else if (methodPairs.size == 1) methodPairs.single()
-            else methodPairs.last().also { debug { "Found multiple methods for ${cmd.string.javaIdent}, using last"} }
-        }
-
+        val module = if (cmd.name == null) modules.last() else modules.first { it.name == cmd.name }
         // Invoke all parameter expressions
-        require(cmd.exprs.size == method.parameterTypes.size)
-        val params = cmd.exprs.zip(method.parameterTypes).map { (expr, paramType) ->
-            runExpr(expr, paramType.valueType!!)
-        }
-
+        val mh = module.exportedFunc(cmd.string)!!
+        val paramTypes = mh.type().parameterList()
+        require(cmd.exprs.size == paramTypes.size)
+        val params = cmd.exprs.zip(paramTypes).map { (expr, paramType) -> runExpr(expr, paramType.valueType!!)!! }
         // Run returning the result
-        return method.returnType.valueType to method.invoke(compMod.instance(this), *params.toTypedArray())
+        return mh.invokeWithArguments(*params.toTypedArray()) as Number?
     }
 
-    fun runExpr(insns: List<Node.Instr>) {
-        MethodHandleUtil.invokeVoid(compileExpr(insns, null))
-    }
+    fun runExpr(insns: List<Node.Instr>, retType: Node.Type.Value?) =
+        buildExpr(insns, retType).exportedFunc("expr")!!.invokeWithArguments() as Number?
 
-    fun runExpr(insns: List<Node.Instr>, retType: Node.Type.Value): Any = compileExpr(insns, retType).let { handle ->
-        when (retType) {
-            is Node.Type.Value.I32 -> MethodHandleUtil.invokeInt(handle)
-            is Node.Type.Value.I64 -> MethodHandleUtil.invokeLong(handle)
-            is Node.Type.Value.F32 -> MethodHandleUtil.invokeFloat(handle)
-            is Node.Type.Value.F64 -> MethodHandleUtil.invokeDouble(handle)
-        }
-    }
-
-    fun compileExpr(insns: List<Node.Instr>, retType: Node.Type.Value?): MethodHandle {
-        debug { "Compiling expression: $insns" }
+    fun buildExpr(insns: List<Node.Instr>, retType: Node.Type.Value?): Module {
+        debug { "Building expression: $insns" }
         val mod = Node.Module(
             exports = listOf(Node.Export("expr", Node.ExternalKind.FUNCTION, 0)),
             funcs = listOf(Node.Func(
@@ -242,92 +209,43 @@ data class ScriptContext(
                 instructions = insns
             ))
         )
-        val className = "expr" + UUID.randomUUID().toString().replace("-", "")
-        val compiled = compileModule(mod, className, null)
-        return MethodHandles.lookup().bind(compiled.instance(this), "expr",
-            MethodType.methodType(retType?.jclass ?: Void.TYPE))
+        return buildModule(mod, "expr" + UUID.randomUUID().toString().replace("-", ""), null)
     }
 
-    fun withCompiledModule(mod: Node.Module, className: String, name: String?) =
-        copy(modules = modules + compileModule(mod, className, name))
+    fun withBuiltModule(mod: Node.Module, className: String, name: String?) =
+        copy(modules = modules + buildModule(mod, className, name))
 
-    fun compileModule(mod: Node.Module, className: String, name: String?): Module.Compiled {
-        val ctx = ClsContext(
-            packageName = packageName,
-            className = className,
-            mod = mod,
-            logger = logger,
-            includeBinary = includeBinaryInCompiledClass
-        ).let(adjustContext)
-        AstToAsm.fromModule(ctx)
-        return Module.Compiled(mod, classLoader.fromBuiltContext(ctx), name, ctx.mem)
+    fun buildModule(mod: Node.Module, className: String, name: String?) = builder.build(this, mod, className, name)
+
+    override fun resolveImportFunc(module: String, field: String, type: Node.Type.Func): MethodHandle {
+        val hnd = registrations[module]?.exportedFunc(field) ?: throw RunErr.ImportNotFound(module, field)
+        val hndType = Node.Type.Func(
+            params = hnd.type().parameterList().map { it.valueType!! },
+            ret = hnd.type().returnType().valueType
+        )
+        if (hndType != type) throw RunErr.ImportIncompatible(module, field, type, hndType)
+        return hnd
     }
 
-    fun bindImport(import: Node.Import, getter: Boolean, methodType: MethodType) = bindImport(
-        import, if (getter) "get" + import.field.javaIdent.capitalize() else import.field.javaIdent, methodType)
-
-    fun bindImport(import: Node.Import, javaName: String, methodType: MethodType): MethodHandle {
-        // Find a method that matches our expectations
-        val module = registrations[import.module] ?: throw RunErr.ImportNotFound(import.module, import.field)
-        val kind = when (import.kind) {
-            is Node.Import.Kind.Func -> WasmExternalKind.FUNCTION
-            is Node.Import.Kind.Table -> WasmExternalKind.TABLE
-            is Node.Import.Kind.Memory -> WasmExternalKind.MEMORY
-            is Node.Import.Kind.Global -> WasmExternalKind.GLOBAL
-        }
-        return module.bindMethod(this, import.field, kind, javaName, methodType) ?:
-            throw RunErr.ImportNotFound(import.module, import.field)
+    override fun resolveImportGlobal(
+        module: String,
+        field: String,
+        type: Node.Type.Global
+    ): Pair<MethodHandle, MethodHandle?> {
+        val hnd = registrations[module]?.exportedGlobal(field) ?: throw RunErr.ImportNotFound(module, field)
+        if (!hnd.first.type().returnType().isPrimitive) throw RunErr.ImportNotFound(module, field)
+        val hndType = Node.Type.Global(
+            contentType = hnd.first.type().returnType().valueType!!,
+            mutable = hnd.second != null
+        )
+        if (hndType != type) throw RunErr.ImportIncompatible(module, field, type, hndType)
+        return hnd
     }
-
-    fun resolveImportFunc(import: Node.Import, funcType: Node.Type.Func) =
-        bindImport(import, false,
-            MethodType.methodType(funcType.ret?.jclass ?: Void.TYPE, funcType.params.map { it.jclass }))
-
-    fun resolveImportGlobals(import: Node.Import, globalType: Node.Type.Global): List<MethodHandle> {
-        val getter = bindImport(import, true, MethodType.methodType(globalType.contentType.jclass))
-        // Whether the setter is present or not defines whether it is mutable
-        val setter = try {
-            bindImport(import, "set" + import.field.javaIdent.capitalize(),
-                MethodType.methodType(Void.TYPE, globalType.contentType.jclass))
-        } catch (e: RunErr.ImportNotFound) { null }
-        // Mutability must match
-        if (globalType.mutable == (setter == null))
-            throw RunErr.ImportGlobalInvalidMutability(import.module, import.field, globalType.mutable)
-        return if (setter == null) listOf(getter) else listOf(getter, setter)
-    }
-
-    fun resolveImportMemory(import: Node.Import, memoryType: Node.Type.Memory, mem: Mem) =
-        bindImport(import, true, MethodType.methodType(Class.forName(mem.memType.asm.className))).
-            invokeWithArguments()!!
 
     @Suppress("UNCHECKED_CAST")
-    fun resolveImportTable(import: Node.Import, tableType: Node.Type.Table) =
-        bindImport(import, true, MethodType.methodType(Array<MethodHandle>::class.java)).
-            invokeWithArguments()!! as Array<MethodHandle>
+    override fun <T> resolveImportMemory(module: String, field: String, type: Node.Type.Memory, memClass: Class<T>) =
+        registrations[module]?.exportedMemory(field, memClass) ?: throw RunErr.ImportNotFound(module, field)
 
-    open class SimpleClassLoader(
-        parent: ClassLoader,
-        logger: Logger,
-        val splitWhenTooLarge: Boolean = true
-    ) : ClassLoader(parent), Logger by logger {
-        fun fromBuiltContext(ctx: ClsContext): Class<*> {
-            trace { "Computing frames for ASM class:\n" + ctx.cls.toAsmString() }
-            val writer = if (splitWhenTooLarge) AsmToBinary else AsmToBinary.noSplit
-            return writer.fromClassNode(ctx.cls).let { bytes ->
-                debug { "ASM class:\n" + bytes.asClassNode().toAsmString() }
-                defineClass("${ctx.packageName}.${ctx.className}",  bytes, 0, bytes.size)
-            }
-        }
-
-        fun addClass(bytes: ByteArray) {
-            // Just get the name
-            var className = ""
-            ClassReader(bytes).accept(object : ClassVisitor(Opcodes.ASM5) {
-                override fun visit(a: Int, b: Int, name: String, c: String?, d: String?, e: Array<out String>?) {
-                    className = name.replace('/', '.')
-                }
-            }, ClassReader.SKIP_CODE)
-            defineClass(className, bytes, 0, bytes.size)
-        }
-    }
+    override fun resolveImportTable(module: String, field: String, type: Node.Type.Table) =
+        registrations[module]?.exportedTable(field) ?: throw RunErr.ImportNotFound(module, field)
 }

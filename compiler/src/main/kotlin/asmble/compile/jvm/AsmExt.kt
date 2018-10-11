@@ -56,10 +56,10 @@ val Class<*>.ref: TypeRef get() = TypeRef(this.asmType)
 
 val Class<*>.valueType: Node.Type.Value? get() = when (this) {
     Void.TYPE -> null
-    Int::class.java -> Node.Type.Value.I32
-    Long::class.java -> Node.Type.Value.I64
-    Float::class.java -> Node.Type.Value.F32
-    Double::class.java -> Node.Type.Value.F64
+    Int::class.java, java.lang.Integer::class.java -> Node.Type.Value.I32
+    Long::class.java, java.lang.Long::class.java -> Node.Type.Value.I64
+    Float::class.java, java.lang.Float::class.java -> Node.Type.Value.F32
+    Double::class.java, java.lang.Double::class.java -> Node.Type.Value.F64
     else -> error("Unrecognized value type class: $this")
 }
 
