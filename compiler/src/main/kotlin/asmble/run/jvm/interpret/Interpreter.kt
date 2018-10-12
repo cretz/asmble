@@ -3,9 +3,12 @@ package asmble.run.jvm.interpret
 import asmble.ast.Node
 import asmble.compile.jvm.*
 import asmble.util.Either
+import asmble.util.Logger
 import asmble.util.toUnsignedInt
 import asmble.util.toUnsignedLong
 import java.lang.invoke.MethodHandle
+import java.lang.invoke.MethodHandles
+import java.lang.invoke.MethodType
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -15,20 +18,27 @@ open class Interpreter {
     fun execFunc(
         ctx: Context,
         funcIndex: Int = ctx.mod.startFuncIndex ?: error("No start func index"),
-        funcArgs: List<Number> = emptyList()
+        vararg funcArgs: Number
     ): Number? {
-        // Make first call, checking params
-        var lastStep: StepResult = ctx.funcTypeAtIndex(funcIndex).let { funcType ->
-            funcArgs.mapNotNull { it.valueType }.let {
-                if (it != funcType.params) throw InterpretErr.StartFuncParamMismatch(funcType.params, it)
-            }
-            StepResult.Call(funcIndex, funcArgs, funcType)
+        // Check params
+        val funcType = ctx.funcTypeAtIndex(funcIndex)
+        funcArgs.mapNotNull { it.valueType }.let {
+            if (it != funcType.params) throw InterpretErr.StartFuncParamMismatch(funcType.params, it)
         }
+        // Import functions are executed inline and returned
+        ctx.importFuncs.getOrNull(funcIndex)?.also {
+            return ctx.imports.invokeFunction(it.module, it.field, funcType, funcArgs.toList())
+        }
+        // This is the call stack we need to stop at
+        val startingCallStackSize = ctx.callStack.size
+        // Make the call on the context
+        var lastStep: StepResult = StepResult.Call(funcIndex, funcArgs.toList(), funcType)
         // Run until done
-        while (lastStep !is StepResult.Return || ctx.callStack.size > 1) {
+        while (lastStep !is StepResult.Return || ctx.callStack.size > startingCallStackSize + 1) {
             next(ctx, lastStep)
             lastStep = step(ctx)
         }
+        ctx.callStack.subList(startingCallStackSize + 1, ctx.callStack.size).clear()
         return lastStep.v
     }
 
@@ -40,15 +50,55 @@ open class Interpreter {
 
     // Errors with InterpretErr.EndReached if there is no next step to be had
     fun next(ctx: Context, step: StepResult) {
+        ctx.logger.trace {
+            "NEXT: $step " +
+                "[VAL STACK: ${ctx.maybeCurrFuncCtx?.valueStack}] " +
+                "[CALL STACK DEPTH: ${ctx.callStack.size}]"
+        }
         when (step) {
             // Next just moves the counter
             is StepResult.Next -> ctx.currFuncCtx.insnIndex++
-            // TODO: branch
-            is StepResult.Branch -> TODO()
+            // Branch updates the stack and moves the insn index
+            is StepResult.Branch -> ctx.currFuncCtx.run {
+                // A failed if just jumps to the else or end
+                if (step.failedIf) {
+                    require(step.blockDepth == 0)
+                    val block = blockStack.last()
+                    if (block.elseIndex != null) insnIndex = block.elseIndex + 1
+                    else {
+                        insnIndex = block.endIndex + 1
+                        blockStack.removeAt(blockStack.size - 1)
+                    }
+                } else {
+                    // Remove all blocks until the depth requested
+                    blockStack.subList(blockStack.size - step.blockDepth, blockStack.size).clear()
+                    // This can break out of the entire function
+                    if (blockStack.isEmpty()) {
+                        // Grab the stack item if present, blow away stack, put back, and move to end of func
+                        val retVal = func.type.ret?.let { pop(it) }
+                        valueStack.clear()
+                        retVal?.also { push(it) }
+                        insnIndex = func.instructions.size
+                    } else {
+                        // Remove the one at the depth requested
+                        val block = blockStack.removeAt(blockStack.size - 1)
+                        // Pop value if applicable
+                        val blockVal = block.insn.type?.let { pop(it) }
+                        // Trim the stack down to required size
+                        valueStack.subList(block.stackSizeAtStart, valueStack.size).clear()
+                        // Put the value back on if applicable
+                        blockVal?.also { push(it) }
+                        // Jump to target insn
+                        insnIndex =
+                            if (block.insn is Node.Instr.Loop && !step.forceEndOnLoop) block.startIndex
+                            else block.endIndex + 1
+                    }
+                }
+            }
             // Call, if import, invokes it and puts result on stack. If not, just pushes a new func context.
             is StepResult.Call -> ctx.funcAtIndex(step.funcIndex).let {
                 when (it) {
-                    // If import, call and just put on stack and advance insn counter
+                    // If import, call and just put on stack and advance insn  if came from insn
                     is Either.Left ->
                         ctx.imports.invokeFunction(it.v.module, it.v.field, step.type, step.args).also {
                             // Make sure result type is accurate
@@ -58,7 +108,10 @@ open class Interpreter {
                             ctx.currFuncCtx.insnIndex++
                         }
                     // If inside the module, create new context to continue
-                    is Either.Right -> ctx.callStack += FuncContext(it.v)
+                    is Either.Right -> ctx.callStack += FuncContext(it.v).also { funcCtx ->
+                        // Set the args
+                        step.args.forEachIndexed { index, arg -> funcCtx.locals[index] = arg  }
+                    }
                 }
             }
             // Call indirect is just an MH invocation
@@ -76,7 +129,7 @@ open class Interpreter {
                 if (ctx.callStack.isEmpty()) throw InterpretErr.EndReached(step.v)
                 if (returnedFrom.valueStack.isNotEmpty())
                     throw CompileErr.UnusedStackOnReturn(returnedFrom.valueStack.map { it::class.ref } )
-                step.v?.also { ctx.currFuncCtx.valueStack += it }
+                step.v?.also { ctx.currFuncCtx.push(it) }
                 ctx.currFuncCtx.insnIndex++
             }
         }
@@ -85,18 +138,25 @@ open class Interpreter {
     fun invokeSingle(ctx: Context): StepResult = ctx.currFuncCtx.run {
         // TODO: validation
         func.instructions[insnIndex].let { insn ->
+            ctx.logger.trace { "INSN #$insnIndex: $insn [STACK: $valueStack]" }
             when (insn) {
                 is Node.Instr.Unreachable -> StepResult.Unreachable
                 is Node.Instr.Nop -> next { }
-                is Node.Instr.Block, is Node.Instr.Loop ->
-                    next { blockStack += Block(insnIndex, insn, valueStack.size) }
-                is Node.Instr.If -> {
-                    blockStack += Block(insnIndex, insn, valueStack.size)
-                    if (popInt() == 0) StepResult.Next else StepResult.Branch(1, true)
+                is Node.Instr.Block, is Node.Instr.Loop -> next {
+                    blockStack += Block(insnIndex, insn as Node.Instr.Args.Type, valueStack.size, currentBlockEnd()!!)
                 }
-                is Node.Instr.Else, is Node.Instr.End -> next { }
+                is Node.Instr.If -> {
+                    blockStack += Block(insnIndex, insn, valueStack.size - 1, currentBlockEnd()!!, currentBlockElse())
+                    if (popInt() == 0) StepResult.Branch(0, failedIf = true) else StepResult.Next
+                }
+                is Node.Instr.Else ->
+                    // Jump over the whole thing and to the end, this can only be gotten here via if
+                    StepResult.Branch(0)
+                is Node.Instr.End ->
+                    // Since we reached the end by manually running through it, jump to end even on loop
+                    StepResult.Branch(0, forceEndOnLoop = true)
                 is Node.Instr.Br -> StepResult.Branch(insn.relativeDepth)
-                is Node.Instr.BrIf -> if (popInt() == 0) StepResult.Next else StepResult.Branch(insn.relativeDepth)
+                is Node.Instr.BrIf -> if (popInt() != 0) StepResult.Branch(insn.relativeDepth) else StepResult.Next
                 is Node.Instr.BrTable -> StepResult.Branch(insn.targetTable.getOrNull(popInt())
                     ?: insn.default)
                 is Node.Instr.Return ->
@@ -107,7 +167,8 @@ open class Interpreter {
                 is Node.Instr.CallIndirect -> {
                     val tableIndex = popInt()
                     val expectedType = ctx.typeAtIndex(insn.index).also {
-                        val tableMh = ctx.table?.getOrNull(tableIndex) ?: error("Missing table entry")
+                        val tableMh = ctx.table?.getOrNull(tableIndex) ?:
+                            throw InterpretErr.UndefinedElement(tableIndex)
                         val actualType = Node.Type.Func(
                             params = tableMh.type().parameterList().map { it.valueType!! },
                             ret = tableMh.type().returnType().valueType
@@ -156,82 +217,85 @@ open class Interpreter {
                 is Node.Instr.MemoryGrow -> next {
                     val newLim = popInt() * Mem.PAGE_SIZE
                     if (newLim > ctx.mem.capacity()) push(-1)
-                    else (ctx.mem.limit() / Mem.PAGE_SIZE).also { ctx.mem.limit(newLim) }
+                    else (ctx.mem.limit() / Mem.PAGE_SIZE).also {
+                        push(it)
+                        ctx.mem.limit(newLim)
+                    }
                 }
                 is Node.Instr.I32Const -> next { push(insn.value) }
                 is Node.Instr.I64Const -> next { push(insn.value) }
                 is Node.Instr.F32Const -> next { push(insn.value) }
                 is Node.Instr.F64Const -> next { push(insn.value) }
                 is Node.Instr.I32Eqz -> next { push(popInt() == 0) }
-                is Node.Instr.I32Eq -> next { push(popInt() == popInt()) }
-                is Node.Instr.I32Ne -> next { push(popInt() != popInt()) }
-                is Node.Instr.I32LtS -> next { push(popInt() < popInt()) }
-                is Node.Instr.I32LtU -> next { push(Integer.compareUnsigned(popInt(), popInt()) < 0) }
-                is Node.Instr.I32GtS -> next { push(popInt() > popInt()) }
-                is Node.Instr.I32GtU -> next { push(Integer.compareUnsigned(popInt(), popInt()) > 0) }
-                is Node.Instr.I32LeS -> next { push(popInt() <= popInt()) }
-                is Node.Instr.I32LeU -> next { push(Integer.compareUnsigned(popInt(), popInt()) <= 0) }
-                is Node.Instr.I32GeS -> next { push(popInt() >= popInt()) }
-                is Node.Instr.I32GeU -> next { push(Integer.compareUnsigned(popInt(), popInt()) >= 0) }
+                is Node.Instr.I32Eq -> nextBinOp(popInt(), popInt()) { a, b -> a == b }
+                is Node.Instr.I32Ne -> nextBinOp(popInt(), popInt()) { a, b -> a != b }
+                is Node.Instr.I32LtS -> nextBinOp(popInt(), popInt()) { a, b -> a < b }
+                is Node.Instr.I32LtU -> nextBinOp(popInt(), popInt()) { a, b -> Integer.compareUnsigned(a, b) < 0 }
+                is Node.Instr.I32GtS -> nextBinOp(popInt(), popInt()) { a, b -> a > b }
+                is Node.Instr.I32GtU -> nextBinOp(popInt(), popInt()) { a, b -> Integer.compareUnsigned(a, b) > 0 }
+                is Node.Instr.I32LeS -> nextBinOp(popInt(), popInt()) { a, b -> a <= b }
+                is Node.Instr.I32LeU -> nextBinOp(popInt(), popInt()) { a, b -> Integer.compareUnsigned(a, b) <= 0 }
+                is Node.Instr.I32GeS -> nextBinOp(popInt(), popInt()) { a, b -> a >= b }
+                is Node.Instr.I32GeU -> nextBinOp(popInt(), popInt()) { a, b -> Integer.compareUnsigned(a, b) >= 0 }
                 is Node.Instr.I64Eqz -> next { push(popLong() == 0L) }
-                is Node.Instr.I64Eq -> next { push(popLong() == popLong()) }
-                is Node.Instr.I64Ne -> next { push(popLong() != popLong()) }
-                is Node.Instr.I64LtS -> next { push(popLong() < popLong()) }
-                is Node.Instr.I64LtU -> next { push(java.lang.Long.compareUnsigned(popLong(), popLong()) < 0) }
-                is Node.Instr.I64GtS -> next { push(popLong() > popLong()) }
-                is Node.Instr.I64GtU -> next { push(java.lang.Long.compareUnsigned(popLong(), popLong()) > 0) }
-                is Node.Instr.I64LeS -> next { push(popLong() <= popLong()) }
-                is Node.Instr.I64LeU -> next { push(java.lang.Long.compareUnsigned(popLong(), popLong()) <= 0) }
-                is Node.Instr.I64GeS -> next { push(popLong() >= popLong()) }
-                is Node.Instr.I64GeU -> next { push(java.lang.Long.compareUnsigned(popLong(), popLong()) >= 0) }
-                is Node.Instr.F32Eq -> next { push(popFloat() == popFloat()) }
-                is Node.Instr.F32Ne -> next { push(popFloat() != popFloat()) }
-                is Node.Instr.F32Lt -> next { push(popFloat() < popFloat()) }
-                is Node.Instr.F32Gt -> next { push(popFloat() > popFloat()) }
-                is Node.Instr.F32Le -> next { push(popFloat() <= popFloat()) }
-                is Node.Instr.F32Ge -> next { push(popFloat() >= popFloat()) }
-                is Node.Instr.F64Eq -> next { push(popDouble() == popDouble()) }
-                is Node.Instr.F64Ne -> next { push(popDouble() != popDouble()) }
-                is Node.Instr.F64Lt -> next { push(popDouble() < popDouble()) }
-                is Node.Instr.F64Gt -> next { push(popDouble() > popDouble()) }
-                is Node.Instr.F64Le -> next { push(popDouble() <= popDouble()) }
-                is Node.Instr.F64Ge -> next { push(popDouble() >= popDouble()) }
+                is Node.Instr.I64Eq -> nextBinOp(popLong(), popLong()) { a, b -> a == b }
+                is Node.Instr.I64Ne -> nextBinOp(popLong(), popLong()) { a, b -> a != b }
+                is Node.Instr.I64LtS -> nextBinOp(popLong(), popLong()) { a, b -> a < b }
+                is Node.Instr.I64LtU -> nextBinOp(popLong(), popLong()) { a, b -> java.lang.Long.compareUnsigned(a, b) < 0 }
+                is Node.Instr.I64GtS -> nextBinOp(popLong(), popLong()) { a, b -> a > b }
+                is Node.Instr.I64GtU -> nextBinOp(popLong(), popLong()) { a, b -> java.lang.Long.compareUnsigned(a, b) > 0 }
+                is Node.Instr.I64LeS -> nextBinOp(popLong(), popLong()) { a, b -> a <= b }
+                is Node.Instr.I64LeU -> nextBinOp(popLong(), popLong()) { a, b -> java.lang.Long.compareUnsigned(a, b) <= 0 }
+                is Node.Instr.I64GeS -> nextBinOp(popLong(), popLong()) { a, b -> a >= b }
+                is Node.Instr.I64GeU -> nextBinOp(popLong(), popLong()) { a, b -> java.lang.Long.compareUnsigned(a, b) >= 0 }
+                is Node.Instr.F32Eq -> nextBinOp(popFloat(), popFloat()) { a, b -> a == b }
+                is Node.Instr.F32Ne -> nextBinOp(popFloat(), popFloat()) { a, b -> a != b }
+                is Node.Instr.F32Lt -> nextBinOp(popFloat(), popFloat()) { a, b -> a < b }
+                is Node.Instr.F32Gt -> nextBinOp(popFloat(), popFloat()) { a, b -> a > b }
+                is Node.Instr.F32Le -> nextBinOp(popFloat(), popFloat()) { a, b -> a <= b }
+                is Node.Instr.F32Ge -> nextBinOp(popFloat(), popFloat()) { a, b -> a >= b }
+                is Node.Instr.F64Eq -> nextBinOp(popDouble(), popDouble()) { a, b -> a == b }
+                is Node.Instr.F64Ne -> nextBinOp(popDouble(), popDouble()) { a, b -> a != b }
+                is Node.Instr.F64Lt -> nextBinOp(popDouble(), popDouble()) { a, b -> a < b }
+                is Node.Instr.F64Gt -> nextBinOp(popDouble(), popDouble()) { a, b -> a > b }
+                is Node.Instr.F64Le -> nextBinOp(popDouble(), popDouble()) { a, b -> a <= b }
+                is Node.Instr.F64Ge -> nextBinOp(popDouble(), popDouble()) { a, b -> a >= b }
                 is Node.Instr.I32Clz -> next { push(Integer.numberOfLeadingZeros(popInt())) }
                 is Node.Instr.I32Ctz -> next { push(Integer.numberOfTrailingZeros(popInt())) }
                 is Node.Instr.I32Popcnt -> next { push(Integer.bitCount(popInt())) }
-                is Node.Instr.I32Add -> next { push(popInt() + popInt()) }
-                is Node.Instr.I32Sub -> next { push(popInt() - popInt()) }
-                is Node.Instr.I32Mul -> next { push(popInt() * popInt()) }
-                is Node.Instr.I32DivS -> next { push(popInt() / popInt()) }
-                is Node.Instr.I32DivU -> next { push(Integer.divideUnsigned(popInt(), popInt())) }
-                is Node.Instr.I32RemS -> next { push(popInt() % popInt()) }
-                is Node.Instr.I32RemU -> next { push(Integer.remainderUnsigned(popInt(), popInt())) }
-                is Node.Instr.I32And -> next { push(popInt() and popInt()) }
-                is Node.Instr.I32Or -> next { push(popInt() or popInt()) }
-                is Node.Instr.I32Xor -> next { push(popInt() xor popInt()) }
-                is Node.Instr.I32Shl -> next { push(popInt() shl popInt()) }
-                is Node.Instr.I32ShrS -> next { push(popInt() shr popInt()) }
-                is Node.Instr.I32ShrU -> next { push(popInt() ushr popInt()) }
-                is Node.Instr.I32Rotl -> next { push(Integer.rotateLeft(popInt(), popInt())) }
-                is Node.Instr.I32Rotr -> next { push(Integer.rotateRight(popInt(), popInt())) }
+                is Node.Instr.I32Add -> nextBinOp(popInt(), popInt()) { a, b -> a + b }
+                is Node.Instr.I32Sub -> nextBinOp(popInt(), popInt()) { a, b -> a - b }
+                is Node.Instr.I32Mul -> nextBinOp(popInt(), popInt()) { a, b -> a * b }
+                is Node.Instr.I32DivS -> nextBinOp(popInt(), popInt()) { a, b -> a / b }
+                is Node.Instr.I32DivU -> nextBinOp(popInt(), popInt()) { a, b -> Integer.divideUnsigned(a, b) }
+                is Node.Instr.I32RemS -> nextBinOp(popInt(), popInt()) { a, b -> a % b }
+                is Node.Instr.I32RemU -> nextBinOp(popInt(), popInt()) { a, b -> Integer.remainderUnsigned(a, b) }
+                is Node.Instr.I32And -> nextBinOp(popInt(), popInt()) { a, b -> a and b }
+                is Node.Instr.I32Or -> nextBinOp(popInt(), popInt()) { a, b -> a or b }
+                is Node.Instr.I32Xor -> nextBinOp(popInt(), popInt()) { a, b -> a xor b }
+                is Node.Instr.I32Shl -> nextBinOp(popInt(), popInt()) { a, b -> a shl b }
+                is Node.Instr.I32ShrS -> nextBinOp(popInt(), popInt()) { a, b -> a shr b }
+                is Node.Instr.I32ShrU -> nextBinOp(popInt(), popInt()) { a, b -> a ushr b }
+                is Node.Instr.I32Rotl -> nextBinOp(popInt(), popInt()) { a, b -> Integer.rotateLeft(a, b) }
+                is Node.Instr.I32Rotr -> nextBinOp(popInt(), popInt()) { a, b -> Integer.rotateRight(a, b) }
                 is Node.Instr.I64Clz -> next { push(java.lang.Long.numberOfLeadingZeros(popLong()).toLong()) }
                 is Node.Instr.I64Ctz -> next { push(java.lang.Long.numberOfTrailingZeros(popLong()).toLong()) }
                 is Node.Instr.I64Popcnt -> next { push(java.lang.Long.bitCount(popLong())) }
-                is Node.Instr.I64Add -> next { push(popLong() + popLong()) }
-                is Node.Instr.I64Sub -> next { push(popLong() - popLong()) }
-                is Node.Instr.I64Mul -> next { push(popLong() * popLong()) }
-                is Node.Instr.I64DivS -> next { push(popLong() / popLong()) }
-                is Node.Instr.I64DivU -> next { push(java.lang.Long.divideUnsigned(popLong(), popLong())) }
-                is Node.Instr.I64RemS -> next { push(popLong() % popLong()) }
-                is Node.Instr.I64RemU -> next { push(java.lang.Long.remainderUnsigned(popLong(), popLong())) }
-                is Node.Instr.I64And -> next { push(popLong() and popLong()) }
-                is Node.Instr.I64Or -> next { push(popLong() or popLong()) }
-                is Node.Instr.I64Xor -> next { push(popLong() xor popLong()) }
-                is Node.Instr.I64Shl -> next { push(popLong() shl popInt()) }
-                is Node.Instr.I64ShrS -> next { push(popLong() shr popInt()) }
-                is Node.Instr.I64ShrU -> next { push(popLong() ushr popInt()) }
-                is Node.Instr.I64Rotl -> next { push(java.lang.Long.rotateLeft(popLong(), popInt())) }
-                is Node.Instr.I64Rotr -> next { push(java.lang.Long.rotateRight(popLong(), popInt())) }
+                is Node.Instr.I64Add -> nextBinOp(popLong(), popLong()) { a, b -> a + b }
+                is Node.Instr.I64Sub -> nextBinOp(popLong(), popLong()) { a, b -> a - b }
+                is Node.Instr.I64Mul -> nextBinOp(popLong(), popLong()) { a, b -> a * b }
+                is Node.Instr.I64DivS -> nextBinOp(popLong(), popLong()) { a, b -> a / b }
+                is Node.Instr.I64DivU -> nextBinOp(popLong(), popLong()) { a, b -> java.lang.Long.divideUnsigned(a, b) }
+                is Node.Instr.I64RemS -> nextBinOp(popLong(), popLong()) { a, b -> a % b }
+                is Node.Instr.I64RemU -> nextBinOp(popLong(), popLong()) { a, b -> java.lang.Long.remainderUnsigned(a, b) }
+                is Node.Instr.I64And -> nextBinOp(popLong(), popLong()) { a, b -> a and b }
+                is Node.Instr.I64Or -> nextBinOp(popLong(), popLong()) { a, b -> a or b }
+                is Node.Instr.I64Xor -> nextBinOp(popLong(), popLong()) { a, b -> a xor b }
+                is Node.Instr.I64Shl -> nextBinOp(popInt(), popLong()) { a, b -> a shl b }
+                is Node.Instr.I64ShrS -> nextBinOp(popInt(), popLong()) { a, b -> a shr b }
+                is Node.Instr.I64ShrU -> nextBinOp(popInt(), popLong()) { a, b -> a ushr b }
+                is Node.Instr.I64Rotl -> nextBinOp(popInt(), popLong()) { a, b -> java.lang.Long.rotateLeft(a, b) }
+                is Node.Instr.I64Rotr -> nextBinOp(popInt(), popLong()) { a, b -> java.lang.Long.rotateRight(a, b) }
                 is Node.Instr.F32Abs -> next { push(Math.abs(popFloat())) }
                 is Node.Instr.F32Neg -> next { push(-popFloat()) }
                 is Node.Instr.F32Ceil -> next { push(Math.ceil(popFloat().toDouble()).toFloat()) }
@@ -241,13 +305,13 @@ open class Interpreter {
                 }
                 is Node.Instr.F32Nearest -> next { push(Math.rint(popFloat().toDouble()).toFloat()) }
                 is Node.Instr.F32Sqrt -> next { push(Math.sqrt(popFloat().toDouble()).toFloat()) }
-                is Node.Instr.F32Add -> next { push(popFloat() + popFloat()) }
-                is Node.Instr.F32Sub -> next { push(popFloat() - popFloat()) }
-                is Node.Instr.F32Mul -> next { push(popFloat() * popFloat()) }
-                is Node.Instr.F32Div -> next { push(popFloat() / popFloat()) }
-                is Node.Instr.F32Min -> next { Math.min(popFloat(), popFloat()) }
-                is Node.Instr.F32Max -> next { Math.max(popFloat(), popFloat()) }
-                is Node.Instr.F32CopySign -> next { Math.copySign(popFloat(), popFloat()) }
+                is Node.Instr.F32Add -> nextBinOp(popFloat(), popFloat()) { a, b -> a + b }
+                is Node.Instr.F32Sub -> nextBinOp(popFloat(), popFloat()) { a, b -> a - b }
+                is Node.Instr.F32Mul -> nextBinOp(popFloat(), popFloat()) { a, b -> a * b }
+                is Node.Instr.F32Div -> nextBinOp(popFloat(), popFloat()) { a, b -> a / b }
+                is Node.Instr.F32Min -> nextBinOp(popFloat(), popFloat()) { a, b -> Math.min(a, b) }
+                is Node.Instr.F32Max -> nextBinOp(popFloat(), popFloat()) { a, b -> Math.max(a, b) }
+                is Node.Instr.F32CopySign -> nextBinOp(popFloat(), popFloat()) { a, b -> Math.copySign(a, b) }
                 is Node.Instr.F64Abs -> next { push(Math.abs(popDouble())) }
                 is Node.Instr.F64Neg -> next { push(-popDouble()) }
                 is Node.Instr.F64Ceil -> next { push(Math.ceil(popDouble())) }
@@ -257,13 +321,13 @@ open class Interpreter {
                 }
                 is Node.Instr.F64Nearest -> next { push(Math.rint(popDouble())) }
                 is Node.Instr.F64Sqrt -> next { push(Math.sqrt(popDouble())) }
-                is Node.Instr.F64Add -> next { push(popDouble() + popDouble()) }
-                is Node.Instr.F64Sub -> next { push(popDouble() - popDouble()) }
-                is Node.Instr.F64Mul -> next { push(popDouble() * popDouble()) }
-                is Node.Instr.F64Div -> next { push(popDouble() / popDouble()) }
-                is Node.Instr.F64Min -> next { Math.min(popDouble(), popDouble()) }
-                is Node.Instr.F64Max -> next { Math.max(popDouble(), popDouble()) }
-                is Node.Instr.F64CopySign -> next { Math.copySign(popDouble(), popDouble()) }
+                is Node.Instr.F64Add -> nextBinOp(popDouble(), popDouble()) { a, b -> a + b }
+                is Node.Instr.F64Sub -> nextBinOp(popDouble(), popDouble()) { a, b -> a - b }
+                is Node.Instr.F64Mul -> nextBinOp(popDouble(), popDouble()) { a, b -> a * b }
+                is Node.Instr.F64Div -> nextBinOp(popDouble(), popDouble()) { a, b -> a / b }
+                is Node.Instr.F64Min -> nextBinOp(popDouble(), popDouble()) { a, b -> Math.min(a, b) }
+                is Node.Instr.F64Max -> nextBinOp(popDouble(), popDouble()) { a, b -> Math.max(a, b) }
+                is Node.Instr.F64CopySign -> nextBinOp(popDouble(), popDouble()) { a, b -> Math.copySign(a, b) }
                 is Node.Instr.I32WrapI64 -> next { push(popLong().toInt()) }
                 // TODO: trunc traps on overflow!
                 is Node.Instr.I32TruncSF32 -> next { push(popFloat().toInt()) }
@@ -296,14 +360,14 @@ open class Interpreter {
                 is Node.Instr.F32ConvertUI32 -> next { push(popInt().toUnsignedLong().toFloat()) }
                 is Node.Instr.F32ConvertSI64 -> next { push(popLong().toFloat()) }
                 is Node.Instr.F32ConvertUI64 -> next {
-                    popLong().let { if (it >= 0) it.toFloat() else (it ushr 1).toFloat() * 2f }
+                    push(popLong().let { if (it >= 0) it.toFloat() else (it ushr 1).toFloat() * 2f })
                 }
                 is Node.Instr.F32DemoteF64 -> next { push(popDouble().toFloat()) }
                 is Node.Instr.F64ConvertSI32 -> next { push(popInt().toDouble()) }
                 is Node.Instr.F64ConvertUI32 -> next { push(popInt().toUnsignedLong().toDouble()) }
                 is Node.Instr.F64ConvertSI64 -> next { push(popLong().toDouble()) }
                 is Node.Instr.F64ConvertUI64 -> next {
-                    popLong().let { if (it >= 0) it.toDouble() else ((it ushr 1) or (it and 1)) * 2.0 }
+                    push(popLong().let { if (it >= 0) it.toDouble() else ((it ushr 1) or (it and 1)) * 2.0 })
                 }
                 is Node.Instr.F64PromoteF32 -> next { push(popFloat().toDouble()) }
                 is Node.Instr.I32ReinterpretF32 -> next { push(java.lang.Float.floatToRawIntBits(popFloat())) }
@@ -319,12 +383,14 @@ open class Interpreter {
     // Creating this does all the initialization except execute the start function
     data class Context(
         val mod: Node.Module,
+        val logger: Logger = Logger.Print(Logger.Level.OFF),
         val imports: Imports = Imports.None,
         val defaultMaxMemPages: Int = 1,
         val memByteBufferDirect: Boolean = true
     ) {
         val callStack = mutableListOf<FuncContext>()
         val currFuncCtx get() = callStack.last()
+        val maybeCurrFuncCtx get() = callStack.lastOrNull()
 
         val exportsByName = mod.exports.map { it.field to it }.toMap()
         fun exportIndex(field: String, kind: Node.ExternalKind) =
@@ -383,7 +449,15 @@ open class Interpreter {
                 is Either.Right -> it.v.type
             }
         }
-        fun boundFuncMethodHandleAtIndex(index: Int): MethodHandle = TODO()
+        fun boundFuncMethodHandleAtIndex(index: Int): MethodHandle {
+            val type = funcTypeAtIndex(index).let {
+                MethodType.methodType(it.ret?.jclass ?: Void.TYPE, it.params.map { it.jclass })
+            }
+            val origMh = MethodHandles.lookup().bind(Interpreter.Companion, "execFunc", MethodType.methodType(
+                Number::class.java, Context::class.java, Int::class.java, Array<Number>::class.java))
+            return MethodHandles.insertArguments(origMh, 0, this, index).
+                asVarargsCollector(Array<Number>::class.java).asType(type)
+        }
 
         val importGlobals = mod.imports.filter { it.kind is Node.Import.Kind.Global }
         val moduleGlobals = mod.globals.mapIndexed { index, global ->
@@ -440,40 +514,76 @@ open class Interpreter {
 
     data class FuncContext(
         val func: Node.Func,
-        val locals: MutableList<Number> = mutableListOf(),
         val valueStack: MutableList<Number> = mutableListOf(),
         val blockStack: MutableList<Block> = mutableListOf(),
         var insnIndex: Int = 0
     ) {
+        val locals = (func.type.params + func.locals).map {
+            when (it) {
+                is Node.Type.Value.I32 -> 0 as Number
+                is Node.Type.Value.I64 -> 0L as Number
+                is Node.Type.Value.F32 -> 0f as Number
+                is Node.Type.Value.F64 -> 0.0 as Number
+            }
+        }.toMutableList()
+
         fun peek() = valueStack.last()
         fun pop() = valueStack.removeAt(valueStack.size - 1)
         fun popInt() = pop() as Int
         fun popLong() = pop() as Long
         fun popFloat() = pop() as Float
         fun popDouble() = pop() as Double
-        fun Node.Instr.Args.AlignOffset.popMemAddr() = popInt() + offset.toInt()
+        fun Node.Instr.Args.AlignOffset.popMemAddr(): Int {
+            val v = popInt()
+            if (offset > Int.MAX_VALUE || offset + v > Int.MAX_VALUE) throw InterpretErr.OutOfBoundsMemory(v, offset)
+            return v + offset.toInt()
+        }
         fun pop(type: Node.Type.Value): Number = when (type) {
             is Node.Type.Value.I32 -> popInt()
             is Node.Type.Value.I64 -> popLong()
             is Node.Type.Value.F32 -> popFloat()
             is Node.Type.Value.F64 -> popDouble()
         }
-        fun popCallArgs(type: Node.Type.Func) = type.params.map(::pop)
+        fun popCallArgs(type: Node.Type.Func) = type.params.reversed().map(::pop).reversed()
         fun push(v: Number) { valueStack += v }
         fun push(v: Boolean) { valueStack += if (v) 1 else 0 }
 
-        inline fun next(crossinline f: () -> Unit): StepResult.Next { f(); return StepResult.Next }
+        fun currentBlockEndOrElse(end: Boolean): Int? {
+            // Find the next end/else
+            var blockDepth = 0
+            val index = func.instructions.drop(insnIndex + 1).indexOfFirst { insn ->
+                when (insn) { is Node.Instr.Block, is Node.Instr.Loop, is Node.Instr.If -> blockDepth++ }
+                val found = blockDepth == 0 && ((end && insn is Node.Instr.End) || (!end && insn is Node.Instr.Else))
+                if (blockDepth > 0 && insn is Node.Instr.End) blockDepth--
+                found
+            }
+            return if (index == -1) null else index + insnIndex + 1
+        }
+        fun currentBlockEnd() = currentBlockEndOrElse(true)
+        fun currentBlockElse() = currentBlockEndOrElse(false)
+
+        inline fun next(crossinline f: () -> Unit) = StepResult.Next.also { f() }
+        inline fun <T, U> nextBinOp(second: T, first: U, crossinline f: (U, T) -> Any) = StepResult.Next.also {
+            val v = f(first, second)
+            if (v is Boolean) push(v) else push(v as Number)
+        }
     }
 
     data class Block(
         val startIndex: Int,
-        val insn: Node.Instr,
-        val stackSizeAtStart: Int
+        val insn: Node.Instr.Args.Type,
+        val stackSizeAtStart: Int,
+        val endIndex: Int,
+        val elseIndex: Int? = null
     )
 
     sealed class StepResult {
         object Next : StepResult()
-        data class Branch(val blockDepth: Int, val tryElse: Boolean = false) : StepResult()
+        data class Branch(
+            val blockDepth: Int,
+            val failedIf: Boolean = false,
+            val forceEndOnLoop: Boolean = false
+        ) : StepResult()
         data class Call(
             val funcIndex: Int,
             val args: List<Number>,

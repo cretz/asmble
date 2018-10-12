@@ -2,6 +2,7 @@ package asmble.run.jvm
 
 import asmble.BaseTestUnit
 import asmble.TestBase
+import asmble.ast.Script
 import asmble.io.AstToSExpr
 import asmble.io.SExprToStr
 import org.junit.Assume
@@ -33,15 +34,18 @@ abstract class TestRunner<out T : BaseTestUnit>(val unit: T) : TestBase() {
         debug { "AST Str: " + SExprToStr.fromSExpr(*AstToSExpr.fromScript(unit.script).toTypedArray()) }
 
         val out = ByteArrayOutputStream()
-        var scriptContext = ScriptContext(logger = this, builder = builder).
-            withHarnessRegistered(PrintWriter(OutputStreamWriter(out, Charsets.UTF_8), true))
+        var scriptContext = ScriptContext(
+            logger = this,
+            builder = builder,
+            assertionExclusionFilter = ::excludeAssertion
+        ).withHarnessRegistered(PrintWriter(OutputStreamWriter(out, Charsets.UTF_8), true))
 
         // This will fail assertions as necessary
         scriptContext = unit.script.commands.fold(scriptContext) { scriptContext, cmd ->
             try {
                 scriptContext.runCommand(cmd)
             } catch (t: Throwable) {
-                val warningReason = unit.warningInsteadOfErrReason(t) ?: throw t
+                val warningReason = warningInsteadOfErrReason(t) ?: throw t
                 warn { "Unexpected error on ${unit.name}, but is a warning. Reason: $warningReason. Orig err: $t" }
                 scriptContext
             }
@@ -55,4 +59,7 @@ abstract class TestRunner<out T : BaseTestUnit>(val unit: T) : TestBase() {
 
         return scriptContext
     }
+
+    open fun warningInsteadOfErrReason(t: Throwable): String? = null
+    open fun excludeAssertion(a: Script.Cmd.Assertion) = false
 }

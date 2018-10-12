@@ -11,7 +11,8 @@ open class ExceptionTranslator {
             "/ by zero", "BigInteger divide by zero" -> listOf("integer divide by zero")
             else -> listOf(ex.message!!.decapitalize())
         }
-        is ArrayIndexOutOfBoundsException -> listOf("undefined element", "elements segment does not fit")
+        is ArrayIndexOutOfBoundsException ->
+            listOf("out of bounds memory access", "undefined element", "elements segment does not fit")
         is AsmErr -> ex.asmErrStrings
         is IndexOutOfBoundsException -> listOf("out of bounds memory access")
         is MalformedInputException -> listOf("invalid UTF-8 encoding")

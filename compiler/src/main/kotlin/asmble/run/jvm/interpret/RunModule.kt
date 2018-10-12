@@ -3,6 +3,7 @@ package asmble.run.jvm.interpret
 import asmble.ast.Node
 import asmble.run.jvm.Module
 import asmble.run.jvm.ModuleBuilder
+import asmble.util.Logger
 import java.lang.invoke.MethodHandles
 import java.lang.invoke.MethodType
 import java.nio.ByteBuffer
@@ -38,6 +39,7 @@ class RunModule(
         }
 
     class Builder(
+        val logger: Logger = Logger.Print(Logger.Level.OFF),
         val defaultMaxMemPages: Int = 1,
         val memByteBufferDirect: Boolean = true
     ) : ModuleBuilder<RunModule> {
@@ -50,6 +52,7 @@ class RunModule(
             name = name,
             ctx = Interpreter.Context(
                 mod = mod,
+                logger = logger,
                 imports = ResolverImports(imports),
                 defaultMaxMemPages = defaultMaxMemPages,
                 memByteBufferDirect = memByteBufferDirect

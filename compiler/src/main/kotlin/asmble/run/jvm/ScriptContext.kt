@@ -18,7 +18,8 @@ data class ScriptContext(
     val registrations: Map<String, Module> = emptyMap(),
     val logger: Logger = Logger.Print(Logger.Level.OFF),
     val exceptionTranslator: ExceptionTranslator = ExceptionTranslator,
-    val builder: ModuleBuilder<*> = ModuleBuilder.Compiled(logger = logger)
+    val builder: ModuleBuilder<*> = ModuleBuilder.Compiled(logger = logger),
+    val assertionExclusionFilter: (Script.Cmd.Assertion) -> Boolean = { false }
 ) : Module.ImportResolver, Logger by logger {
     fun withHarnessRegistered(out: PrintWriter = PrintWriter(System.out, true)) =
         withModuleRegistered(Module.Native("spectest", TestHarness(out)))
@@ -44,6 +45,10 @@ data class ScriptContext(
     }
 
     fun doAssertion(cmd: Script.Cmd.Assertion) {
+        if (assertionExclusionFilter(cmd)) {
+            debug { "Ignoring assertion: " + SExprToStr.fromSExpr(AstToSExpr.fromAssertion(cmd)) }
+            return
+        }
         debug { "Performing assertion: " + SExprToStr.fromSExpr(AstToSExpr.fromAssertion(cmd)) }
         when (cmd) {
             is Script.Cmd.Assertion.Return -> assertReturn(cmd)
@@ -54,7 +59,7 @@ data class ScriptContext(
             is Script.Cmd.Assertion.Unlinkable -> assertUnlinkable(cmd)
             is Script.Cmd.Assertion.TrapModule -> assertTrapModule(cmd)
             is Script.Cmd.Assertion.Exhaustion -> assertExhaustion(cmd)
-            else -> TODO("Assertion misssing: $cmd")
+            else -> TODO("Assertion missing: $cmd")
         }
     }
 

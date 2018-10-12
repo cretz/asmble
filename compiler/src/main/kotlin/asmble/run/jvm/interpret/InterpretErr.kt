@@ -23,4 +23,17 @@ sealed class InterpretErr(message: String, cause: Throwable? = null) : RuntimeEx
         val expected: List<Node.Type.Value>,
         val actual: List<Node.Type.Value>
     ) : InterpretErr("Can't call start func, expected params $expected, got $actual")
+
+    class OutOfBoundsMemory(
+        val index: Int,
+        val offset: Long
+    ) : InterpretErr("Unable to access mem $index + offset $offset") {
+        override val asmErrString get() = "out of bounds memory access"
+    }
+
+    class UndefinedElement(
+        val index: Int
+    ) : InterpretErr("No table element for index $index") {
+        override val asmErrString get() = "undefined element"
+    }
 }

@@ -22,5 +22,4 @@ open class BaseTestUnit(val name: String, val wast: String, val expectedOutput: 
     }
     open val ast: List<SExpr> get() = parseResult.vals
     open val script: Script by lazy { SExprToAst.toScript(SExpr.Multi(ast)) }
-    open fun warningInsteadOfErrReason(t: Throwable): String? = null
 }
