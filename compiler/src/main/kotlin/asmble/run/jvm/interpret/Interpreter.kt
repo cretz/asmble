@@ -2,6 +2,7 @@ package asmble.run.jvm.interpret
 
 import asmble.ast.Node
 import asmble.compile.jvm.*
+import asmble.run.jvm.RunErr
 import asmble.util.Either
 import asmble.util.Logger
 import asmble.util.toUnsignedInt
@@ -291,11 +292,11 @@ open class Interpreter {
                 is Node.Instr.I64And -> nextBinOp(popLong(), popLong()) { a, b -> a and b }
                 is Node.Instr.I64Or -> nextBinOp(popLong(), popLong()) { a, b -> a or b }
                 is Node.Instr.I64Xor -> nextBinOp(popLong(), popLong()) { a, b -> a xor b }
-                is Node.Instr.I64Shl -> nextBinOp(popInt(), popLong()) { a, b -> a shl b }
-                is Node.Instr.I64ShrS -> nextBinOp(popInt(), popLong()) { a, b -> a shr b }
-                is Node.Instr.I64ShrU -> nextBinOp(popInt(), popLong()) { a, b -> a ushr b }
-                is Node.Instr.I64Rotl -> nextBinOp(popInt(), popLong()) { a, b -> java.lang.Long.rotateLeft(a, b) }
-                is Node.Instr.I64Rotr -> nextBinOp(popInt(), popLong()) { a, b -> java.lang.Long.rotateRight(a, b) }
+                is Node.Instr.I64Shl -> nextBinOp(popLong(), popLong()) { a, b -> a shl b.toInt() }
+                is Node.Instr.I64ShrS -> nextBinOp(popLong(), popLong()) { a, b -> a shr b.toInt() }
+                is Node.Instr.I64ShrU -> nextBinOp(popLong(), popLong()) { a, b -> a ushr b.toInt() }
+                is Node.Instr.I64Rotl -> nextBinOp(popLong(), popLong()) { a, b -> java.lang.Long.rotateLeft(a, b.toInt()) }
+                is Node.Instr.I64Rotr -> nextBinOp(popLong(), popLong()) { a, b -> java.lang.Long.rotateRight(a, b.toInt()) }
                 is Node.Instr.F32Abs -> next { push(Math.abs(popFloat())) }
                 is Node.Instr.F32Neg -> next { push(-popFloat()) }
                 is Node.Instr.F32Ceil -> next { push(Math.ceil(popFloat().toDouble()).toFloat()) }
@@ -330,31 +331,39 @@ open class Interpreter {
                 is Node.Instr.F64CopySign -> nextBinOp(popDouble(), popDouble()) { a, b -> Math.copySign(a, b) }
                 is Node.Instr.I32WrapI64 -> next { push(popLong().toInt()) }
                 // TODO: trunc traps on overflow!
-                is Node.Instr.I32TruncSF32 -> next { push(popFloat().toInt()) }
-                is Node.Instr.I32TruncUF32 -> next { push(popFloat().toLong().toInt()) }
-                is Node.Instr.I32TruncSF64 -> next { push(popDouble().toInt()) }
-                is Node.Instr.I32TruncUF64 -> next { push(popDouble().toLong().toInt()) }
+                is Node.Instr.I32TruncSF32 -> next {
+                    push(ctx.checkedTrunc(popFloat(), true) { it.toInt() })
+                }
+                is Node.Instr.I32TruncUF32 -> next {
+                    push(ctx.checkedTrunc(popFloat(), false) { it.toLong().toInt() })
+                }
+                is Node.Instr.I32TruncSF64 -> next {
+                    push(ctx.checkedTrunc(popDouble(), true) { it.toInt() })
+                }
+                is Node.Instr.I32TruncUF64 -> next {
+                    push(ctx.checkedTrunc(popDouble(), false) { it.toLong().toInt() })
+                }
                 is Node.Instr.I64ExtendSI32 -> next { push(popInt().toLong()) }
                 is Node.Instr.I64ExtendUI32 -> next { push(popInt().toUnsignedLong()) }
-                is Node.Instr.I64TruncSF32 -> next { push(popFloat().toLong()) }
-                is Node.Instr.I64TruncUF32 -> next {
-                    // If over max long, subtract and negate
-                    popFloat().let {
-                        push(
-                            if (it < 9223372036854775807f) it.toLong()
-                            else (-9223372036854775808f + (it - 9223372036854775807f)).toLong()
-                        )
-                    }
+                is Node.Instr.I64TruncSF32 -> next {
+                    push(ctx.checkedTrunc(popFloat(), true) { it.toLong() })
                 }
-                is Node.Instr.I64TruncSF64 -> next { push(popDouble().toLong()) }
+                is Node.Instr.I64TruncUF32 -> next {
+                    push(ctx.checkedTrunc(popFloat(), false) {
+                        // If over max long, subtract and negate
+                        if (it < 9223372036854775807f) it.toLong()
+                        else (-9223372036854775808f + (it - 9223372036854775807f)).toLong()
+                    })
+                }
+                is Node.Instr.I64TruncSF64 -> next {
+                    push(ctx.checkedTrunc(popDouble(), true) { it.toLong() })
+                }
                 is Node.Instr.I64TruncUF64 -> next {
-                    // If over max long, subtract and negate
-                    popDouble().let {
-                        push(
-                            if (it < 9223372036854775807.0) it.toLong()
-                            else (-9223372036854775808.0 + (it - 9223372036854775807.0)).toLong()
-                        )
-                    }
+                    push(ctx.checkedTrunc(popDouble(), false) {
+                        // If over max long, subtract and negate
+                        if (it < 9223372036854775807.0) it.toLong()
+                        else (-9223372036854775808.0 + (it - 9223372036854775807.0)).toLong()
+                    })
                 }
                 is Node.Instr.F32ConvertSI32 -> next { push(popInt().toFloat()) }
                 is Node.Instr.F32ConvertUI32 -> next { push(popInt().toUnsignedLong().toFloat()) }
@@ -386,7 +395,8 @@ open class Interpreter {
         val logger: Logger = Logger.Print(Logger.Level.OFF),
         val imports: Imports = Imports.None,
         val defaultMaxMemPages: Int = 1,
-        val memByteBufferDirect: Boolean = true
+        val memByteBufferDirect: Boolean = true,
+        val checkTruncOverflow: Boolean = true
     ) {
         val callStack = mutableListOf<FuncContext>()
         val currFuncCtx get() = callStack.last()
@@ -396,6 +406,7 @@ open class Interpreter {
         fun exportIndex(field: String, kind: Node.ExternalKind) =
             exportsByName[field]?.takeIf { it.kind == kind }?.index
 
+        val importGlobals = mod.imports.filter { it.kind is Node.Import.Kind.Global }
         fun singleConstant(instrs: List<Node.Instr>): Number? = instrs.singleOrNull().let { instr ->
             when (instr) {
                 is Node.Instr.Args.Const<*> -> instr.value
@@ -428,6 +439,8 @@ open class Interpreter {
                 // Load all data
                 mod.data.forEach { data ->
                     val pos = singleConstant(data.offset) as? Int ?: throw CompileErr.OffsetNotConstant()
+                    if (pos < 0 || pos + data.data.size > mem.limit())
+                        throw RunErr.InvalidDataIndex(pos, data.data.size, mem.limit())
                     mem.duplicate().apply { position(pos) }.put(data.data)
                 }
             }
@@ -459,7 +472,6 @@ open class Interpreter {
                 asVarargsCollector(Array<Number>::class.java).asType(type)
         }
 
-        val importGlobals = mod.imports.filter { it.kind is Node.Import.Kind.Global }
         val moduleGlobals = mod.globals.mapIndexed { index, global ->
             // In MVP all globals have an init, it's either a const or an import read
             val initVal = singleConstant(global.init) ?: throw CompileErr.GlobalInitNotConstant(index)
@@ -496,18 +508,45 @@ open class Interpreter {
             if (table == null && mod.elems.isNotEmpty()) throw CompileErr.UnknownTable(0)
             table?.let { table ->
                 // Create array either cloned from import or fresh
-                val arr = importTable?.let { imports.getTable(it.module, it.field, table).copyOf() } ?:
+                val arr = importTable?.let { imports.getTable(it.module, it.field, table) } ?:
                     arrayOfNulls(table.limits.initial)
                 // Now put all the elements in there
                 mod.elems.forEach { elem ->
                     require(elem.index == 0)
                     // Offset index always a constant or import
                     val offsetVal = singleConstant(elem.offset) as? Int ?: throw CompileErr.OffsetNotConstant()
+                    // Still have to validate offset even if no func indexes
+                    if (offsetVal < 0 || offsetVal + elem.funcIndices.size > arr.size)
+                        throw RunErr.InvalidElemIndex(offsetVal, elem.funcIndices.size, arr.size)
                     elem.funcIndices.forEachIndexed { index, funcIndex ->
                         arr[offsetVal + index] = boundFuncMethodHandleAtIndex(funcIndex)
                     }
                 }
                 arr
+            }
+        }
+
+        fun <T : Number> checkedTrunc(orig: Float, signed: Boolean, to: (Float) -> T) = to(orig).also {
+            if (checkTruncOverflow) {
+                if (orig.isNaN()) throw InterpretErr.TruncIntegerNaN(orig, it.valueType!!, signed)
+                val invalid =
+                    (it is Int && signed && (orig < -2147483648f || orig >= 2147483648f)) ||
+                    (it is Int && !signed && (orig.toInt() < 0 || orig >= 4294967296f)) ||
+                    (it is Long && signed && (orig < -9223372036854775807f || orig >= 9223372036854775807f)) ||
+                    (it is Long && !signed && (orig.toInt() < 0 || orig >= 18446744073709551616f))
+                if (invalid) throw InterpretErr.TruncIntegerOverflow(orig, it.valueType!!, signed)
+            }
+        }
+
+        fun <T : Number> checkedTrunc(orig: Double, signed: Boolean, to: (Double) -> T) = to(orig).also {
+            if (checkTruncOverflow) {
+                if (orig.isNaN()) throw InterpretErr.TruncIntegerNaN(orig, it.valueType!!, signed)
+                val invalid =
+                    (it is Int && signed && (orig < -2147483648.0 || orig >= 2147483648.0)) ||
+                    (it is Int && !signed && (orig.toInt() < 0 || orig >= 4294967296.0)) ||
+                    (it is Long && signed && (orig < -9223372036854775807.0 || orig >= 9223372036854775807.0)) ||
+                    (it is Long && !signed && (orig.toInt() < 0 || orig >= 18446744073709551616.0))
+                if (invalid) throw InterpretErr.TruncIntegerOverflow(orig, it.valueType!!, signed)
             }
         }
     }

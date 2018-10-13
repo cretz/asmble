@@ -35,5 +35,22 @@ sealed class InterpretErr(message: String, cause: Throwable? = null) : RuntimeEx
         val index: Int
     ) : InterpretErr("No table element for index $index") {
         override val asmErrString get() = "undefined element"
+        override val asmErrStrings get() = listOf(asmErrString, "uninitialized element")
+    }
+
+    class TruncIntegerNaN(
+        val orig: Number,
+        val target: Node.Type.Value,
+        val signed: Boolean
+    ) : InterpretErr("Invalid to trunc $orig to $target " + if (signed) "signed" else "unsigned") {
+        override val asmErrString get() = "invalid conversion to integer"
+    }
+
+    class TruncIntegerOverflow(
+        val orig: Number,
+        val target: Node.Type.Value,
+        val signed: Boolean
+    ) : InterpretErr("Integer overflow attempting to trunc $orig to $target " + if (signed) "signed" else "unsigned") {
+        override val asmErrString get() = "integer overflow"
     }
 }

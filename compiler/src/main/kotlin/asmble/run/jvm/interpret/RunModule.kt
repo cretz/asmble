@@ -18,10 +18,12 @@ class RunModule(
     override fun exportedGlobal(field: String) = ctx.exportIndex(field, Node.ExternalKind.GLOBAL)?.let { index ->
         val type = ctx.globalTypeAtIndex(index)
         val lookup = MethodHandles.lookup()
-        val getter = lookup.bind(ctx, "getGlobal",
-            MethodType.methodType(Number::class.java, Int::class.javaPrimitiveType)).bindTo(index)
-        val setter = if (!type.mutable) null else lookup.bind(ctx, "setGlobal", MethodType.methodType(
-            Void::class.javaPrimitiveType, Int::class.javaPrimitiveType, Number::class.java)).bindTo(index)
+        var getter = lookup.bind(ctx, "getGlobal",
+            MethodType.methodType(Number::class.java, Int::class.javaPrimitiveType))
+        getter = MethodHandles.insertArguments(getter, 0, index)
+        var setter = if (!type.mutable) null else lookup.bind(ctx, "setGlobal", MethodType.methodType(
+            Void::class.javaPrimitiveType, Int::class.javaPrimitiveType, Number::class.java))
+        if (setter != null) setter = MethodHandles.insertArguments(setter, 0, index)
         getter to setter
     }
 
