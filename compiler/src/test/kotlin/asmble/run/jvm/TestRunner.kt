@@ -2,10 +2,9 @@ package asmble.run.jvm
 
 import asmble.BaseTestUnit
 import asmble.TestBase
-import asmble.annotation.WasmModule
-import asmble.io.AstToBinary
+import asmble.ast.Node
+import asmble.ast.Script
 import asmble.io.AstToSExpr
-import asmble.io.ByteWriter
 import asmble.io.SExprToStr
 import org.junit.Assume
 import org.junit.Test
@@ -27,7 +26,9 @@ abstract class TestRunner<out T : BaseTestUnit>(val unit: T) : TestBase() {
         } else if (ex != null) throw ex
     }
 
-    private fun run() {
+    abstract val builder: ModuleBuilder<*>
+
+    open fun run(): ScriptContext {
         debug { "AST SExpr: " + unit.ast }
         debug { "AST Str: " + SExprToStr.fromSExpr(*unit.ast.toTypedArray()) }
         debug { "AST: " + unit.script }
@@ -35,12 +36,8 @@ abstract class TestRunner<out T : BaseTestUnit>(val unit: T) : TestBase() {
 
         val out = ByteArrayOutputStream()
         var scriptContext = ScriptContext(
-            packageName = unit.packageName,
             logger = this,
-            adjustContext = { it.copy(eagerFailLargeMemOffset = false) },
-            defaultMaxMemPages = unit.defaultMaxMemPages,
-            // Include the binary data so we can check it later
-            includeBinaryInCompiledClass = true
+            builder = builder
         ).withHarnessRegistered(PrintWriter(OutputStreamWriter(out, Charsets.UTF_8), true))
 
         // This will fail assertions as necessary
@@ -48,7 +45,7 @@ abstract class TestRunner<out T : BaseTestUnit>(val unit: T) : TestBase() {
             try {
                 scriptContext.runCommand(cmd)
             } catch (t: Throwable) {
-                val warningReason = unit.warningInsteadOfErrReason(t) ?: throw t
+                val warningReason = warningInsteadOfErrReason(t) ?: throw t
                 warn { "Unexpected error on ${unit.name}, but is a warning. Reason: $warningReason. Orig err: $t" }
                 scriptContext
             }
@@ -60,14 +57,47 @@ abstract class TestRunner<out T : BaseTestUnit>(val unit: T) : TestBase() {
             assertEquals(it.trimEnd(), out.toByteArray().toString(Charsets.UTF_8).trimEnd())
         }
 
-        // Also check the annotations
-        scriptContext.modules.forEach { mod ->
-            val expectedBinaryString = ByteArrayOutputStream().also {
-                ByteWriter.OutputStream(it).also { AstToBinary.fromModule(it, mod.mod) }
-            }.toByteArray().toString(Charsets.ISO_8859_1)
-            val actualBinaryString =
-                mod.cls.getDeclaredAnnotation(WasmModule::class.java)?.binary ?: error("No annotation")
-            assertEquals(expectedBinaryString, actualBinaryString)
+        return scriptContext
+    }
+
+    // TODO: move this into the script context for specific assertions so the rest can continue running
+    open fun warningInsteadOfErrReason(t: Throwable): String? =  when (unit.name) {
+        "binary" -> {
+            val expectedFailure = ((t as? ScriptAssertionError)?.assertion as? Script.Cmd.Assertion.Malformed)?.failure
+            // TODO: Pending answer to https://github.com/WebAssembly/spec/pull/882#issuecomment-426349365
+            if (expectedFailure == "integer too large") "Binary test changed" else null
         }
+        // NaN bit patterns can be off
+        "float_literals", "float_exprs", "float_misc", "f32_bitwise" ->
+            if (isNanMismatch(t)) "NaN JVM bit patterns can be off" else null
+        // We don't hold table capacity right now
+        // TODO: Figure out how we want to store/retrieve table capacity. Right now
+        // a table is an array, so there is only size not capacity. Since we want to
+        // stay w/ the stdlib of the JVM, the best option may be to store the capacity
+        // as a separate int value and query it or pass it around via import as
+        // necessary. I guess I could use a vector, but it's not worth it just for
+        // capacity since you lose speed.
+        "imports" -> {
+            val isTableMaxErr = t is ScriptAssertionError && (t.assertion as? Script.Cmd.Assertion.Unlinkable).let {
+                it != null && it.failure == "incompatible import type" &&
+                    it.module.imports.singleOrNull()?.kind is Node.Import.Kind.Table
+            }
+            if (isTableMaxErr) "Table max capacities are not validated" else null
+        }
+        else -> null
+    }
+
+    private fun isNanMismatch(t: Throwable) = t is ScriptAssertionError && (
+        t.assertion is Script.Cmd.Assertion.ReturnNan ||
+            (t.assertion is Script.Cmd.Assertion.Return && (t.assertion as Script.Cmd.Assertion.Return).let {
+                it.exprs.any { it.any(this::insnIsNanConst) } ||
+                    ((it.action as? Script.Cmd.Action.Invoke)?.string?.contains("nan") ?: false)
+            })
+        )
+
+    private fun insnIsNanConst(i: Node.Instr) = when (i) {
+        is Node.Instr.F32Const -> i.value.isNaN()
+        is Node.Instr.F64Const -> i.value.isNaN()
+        else -> false
     }
 }

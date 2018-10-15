@@ -2,7 +2,7 @@ package asmble.compile.jvm
 
 import asmble.TestBase
 import asmble.ast.Node
-import asmble.run.jvm.ScriptContext
+import asmble.run.jvm.ModuleBuilder
 import asmble.util.get
 import org.junit.Test
 import java.nio.ByteBuffer
@@ -32,7 +32,7 @@ class LargeDataTest : TestBase() {
             logger = logger
         )
         AstToAsm.fromModule(ctx)
-        val cls = ScriptContext.SimpleClassLoader(javaClass.classLoader, logger).fromBuiltContext(ctx)
+        val cls = ModuleBuilder.Compiled.SimpleClassLoader(javaClass.classLoader, logger).fromBuiltContext(ctx)
         // Instantiate it, get the memory out, and check it
         val field = cls.getDeclaredField("memory").apply { isAccessible = true }
         val buf = field[cls.newInstance()] as ByteBuffer

@@ -51,12 +51,12 @@ class LargeFuncTest : TestBase() {
         AstToAsm.fromModule(ctx)
         // Confirm the method size is too large
         try {
-            ScriptContext.SimpleClassLoader(javaClass.classLoader, logger, splitWhenTooLarge = false).
+            ModuleBuilder.Compiled.SimpleClassLoader(javaClass.classLoader, logger, splitWhenTooLarge = false).
                 fromBuiltContext(ctx)
             Assert.fail()
         } catch (e: MethodTooLargeException) { }
         // Try again with split
-        val cls = ScriptContext.SimpleClassLoader(javaClass.classLoader, logger).fromBuiltContext(ctx)
+        val cls = ModuleBuilder.Compiled.SimpleClassLoader(javaClass.classLoader, logger).fromBuiltContext(ctx)
         // Create it and check that it still does what we expect
         val inst = cls.newInstance()
         // Run someFunc

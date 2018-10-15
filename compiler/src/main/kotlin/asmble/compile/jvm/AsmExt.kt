@@ -56,10 +56,10 @@ val Class<*>.ref: TypeRef get() = TypeRef(this.asmType)
 
 val Class<*>.valueType: Node.Type.Value? get() = when (this) {
     Void.TYPE -> null
-    Int::class.java -> Node.Type.Value.I32
-    Long::class.java -> Node.Type.Value.I64
-    Float::class.java -> Node.Type.Value.F32
-    Double::class.java -> Node.Type.Value.F64
+    Int::class.java, java.lang.Integer::class.java -> Node.Type.Value.I32
+    Long::class.java, java.lang.Long::class.java -> Node.Type.Value.I64
+    Float::class.java, java.lang.Float::class.java -> Node.Type.Value.F32
+    Double::class.java, java.lang.Double::class.java -> Node.Type.Value.F64
     else -> error("Unrecognized value type class: $this")
 }
 
@@ -111,6 +111,15 @@ val Double.const: AbstractInsnNode get() = when (this) {
     0.0 -> if (this.equals(-0.0)) LdcInsnNode(this) else InsnNode(Opcodes.DCONST_0)
     1.0 -> InsnNode(Opcodes.DCONST_1)
     else -> LdcInsnNode(this)
+}
+
+val Number?.valueType get() = when (this) {
+    null -> null
+    is Int -> Node.Type.Value.I32
+    is Long-> Node.Type.Value.I64
+    is Float -> Node.Type.Value.F32
+    is Double -> Node.Type.Value.F64
+    else -> error("Unrecognized value type class: $this")
 }
 
 val String.const: AbstractInsnNode get() = LdcInsnNode(this)
@@ -176,7 +185,6 @@ fun MethodNode.addInsns(vararg insn: AbstractInsnNode): MethodNode {
     insn.forEach(this.instructions::add)
     return this
 }
-
 
 fun MethodNode.cloneWithInsnRange(range: IntRange) =
     MethodNode(access, name, desc, signature, exceptions.toTypedArray()).also { new ->

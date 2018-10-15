@@ -3,7 +3,7 @@ package asmble.compile.jvm
 import asmble.TestBase
 import asmble.io.SExprToAst
 import asmble.io.StrToSExpr
-import asmble.run.jvm.ScriptContext
+import asmble.run.jvm.ModuleBuilder
 import org.junit.Test
 import java.util.*
 
@@ -30,7 +30,7 @@ class NamesTest : TestBase() {
             logger = logger
         )
         AstToAsm.fromModule(ctx)
-        val cls = ScriptContext.SimpleClassLoader(javaClass.classLoader, logger).fromBuiltContext(ctx)
+        val cls = ModuleBuilder.Compiled.SimpleClassLoader(javaClass.classLoader, logger).fromBuiltContext(ctx)
         // Make sure the import field and the func are present named
         cls.getDeclaredField("import_func")
         cls.getDeclaredMethod("some_func", Integer.TYPE)

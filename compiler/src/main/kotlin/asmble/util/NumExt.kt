@@ -9,6 +9,8 @@ internal val MIN_INT32 = BigInteger.valueOf(Int.MIN_VALUE.toLong())
 internal val MAX_UINT64 = BigInteger("ffffffffffffffff", 16)
 internal val MIN_INT64 = BigInteger.valueOf(Long.MIN_VALUE)
 
+fun Byte.toUnsignedInt() = java.lang.Byte.toUnsignedInt(this)
+fun Byte.toUnsignedLong() = java.lang.Byte.toUnsignedLong(this)
 fun Byte.toUnsignedShort() = (this.toInt() and 0xff).toShort()
 
 fun BigInteger.unsignedToSignedLong(): Long {
@@ -41,3 +43,6 @@ fun Long.unsignedToSignedInt(): Int {
 }
 
 fun Long.Companion.valueOf(s: String, radix: Int = 10) = java.lang.Long.valueOf(s, radix)
+
+fun Short.toUnsignedInt() = java.lang.Short.toUnsignedInt(this)
+fun Short.toUnsignedLong() = java.lang.Short.toUnsignedLong(this)

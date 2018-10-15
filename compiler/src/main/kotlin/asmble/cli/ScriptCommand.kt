@@ -3,6 +3,7 @@ package asmble.cli
 import asmble.ast.Script
 import asmble.compile.jvm.javaIdent
 import asmble.run.jvm.Module
+import asmble.run.jvm.ModuleBuilder
 import asmble.run.jvm.ScriptContext
 import java.io.File
 import java.util.*
@@ -45,21 +46,23 @@ abstract class ScriptCommand<T> : Command<T>() {
     )
 
     fun prepareContext(args: ScriptArgs): ScriptContext {
-        var ctx = ScriptContext(
+        val builder = ModuleBuilder.Compiled(
             packageName = "asmble.temp" + UUID.randomUUID().toString().replace("-", ""),
+            logger = logger,
             defaultMaxMemPages = args.defaultMaxMemPages
         )
+        var ctx = ScriptContext(logger = logger, builder = builder)
         // Compile everything
         ctx = args.inFiles.foldIndexed(ctx) { index, ctx, inFile ->
             try {
                 when (inFile.substringAfterLast('.')) {
-                    "class" -> ctx.classLoader.addClass(File(inFile).readBytes()).let { ctx }
+                    "class" -> builder.classLoader.addClass(File(inFile).readBytes()).let { ctx }
                     else -> Translate.inToAst(inFile, inFile.substringAfterLast('.')).let { inAst ->
                         val (mod, name) = (inAst.commands.singleOrNull() as? Script.Cmd.Module) ?:
                             error("Input file must only contain a single module")
                         val className = name?.javaIdent?.capitalize() ?:
                             "Temp" + UUID.randomUUID().toString().replace("-", "")
-                        ctx.withCompiledModule(mod, className, name).let { ctx ->
+                        ctx.withBuiltModule(mod, className, name).let { ctx ->
                             if (name == null && index != args.inFiles.size - 1)
                                 logger.warn { "File '$inFile' not last and has no name so will be unused" }
                             if (name == null || args.disableAutoRegister) ctx
@@ -71,8 +74,8 @@ abstract class ScriptCommand<T> : Command<T>() {
         }
         // Do registrations
         ctx = args.registrations.fold(ctx) { ctx, (moduleName, className) ->
-            ctx.withModuleRegistered(moduleName,
-                Module.Native(Class.forName(className, true, ctx.classLoader).newInstance()))
+            ctx.withModuleRegistered(
+                Module.Native(moduleName, Class.forName(className, true, builder.classLoader).newInstance()))
         }
         if (args.specTestRegister) ctx = ctx.withHarnessRegistered()
         return ctx

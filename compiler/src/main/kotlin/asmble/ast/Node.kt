@@ -30,10 +30,18 @@ sealed class Node {
     sealed class Type : Node() {
 
         sealed class Value : Type() {
-            object I32 : Value()
-            object I64 : Value()
-            object F32 : Value()
-            object F64 : Value()
+            object I32 : Value() {
+                override fun toString() = "I32"
+            }
+            object I64 : Value() {
+                override fun toString() = "I64"
+            }
+            object F32 : Value() {
+                override fun toString() = "F32"
+            }
+            object F64 : Value() {
+                override fun toString() = "F64"
+            }
         }
 
         data class Func(

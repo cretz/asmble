@@ -1,6 +1,7 @@
 package asmble.run.jvm
 
 import asmble.AsmErr
+import asmble.ast.Node
 
 sealed class RunErr(message: String, cause: Throwable? = null) : RuntimeException(message, cause), AsmErr {
 
@@ -51,16 +52,17 @@ sealed class RunErr(message: String, cause: Throwable? = null) : RuntimeExceptio
     class ImportNotFound(
         val module: String,
         val field: String
-    ) : RunErr("Cannot find compatible import for $module::$field") {
+    ) : RunErr("Cannot find import for $module::$field") {
         override val asmErrString get() = "unknown import"
         override val asmErrStrings get() = listOf(asmErrString, "incompatible import type")
     }
 
-    class ImportGlobalInvalidMutability(
+    class ImportIncompatible(
         val module: String,
         val field: String,
-        val expected: Boolean
-    ) : RunErr("Expected imported global $module::$field to have mutability as ${!expected}") {
+        val expected: Node.Type,
+        val actual: Node.Type
+    ) : RunErr("Import $module::$field expected type $expected, got $actual") {
         override val asmErrString get() = "incompatible import type"
     }
 }

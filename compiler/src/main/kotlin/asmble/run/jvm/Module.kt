@@ -4,72 +4,81 @@ import asmble.annotation.WasmExport
 import asmble.annotation.WasmExternalKind
 import asmble.ast.Node
 import asmble.compile.jvm.Mem
+import asmble.compile.jvm.javaIdent
 import asmble.compile.jvm.ref
 import java.lang.invoke.MethodHandle
 import java.lang.invoke.MethodHandles
-import java.lang.invoke.MethodType
 import java.lang.reflect.Constructor
 import java.lang.reflect.Modifier
 
 interface Module {
-    fun bindMethod(
-        ctx: ScriptContext,
-        wasmName: String,
-        wasmKind: WasmExternalKind,
-        javaName: String,
-        type: MethodType
-    ): MethodHandle?
+    val name: String?
 
-    data class Composite(val modules: List<Module>) : Module {
-        override fun bindMethod(
-            ctx: ScriptContext,
-            wasmName: String,
-            wasmKind: WasmExternalKind,
-            javaName: String,
-            type: MethodType
-        ) = modules.asSequence().mapNotNull { it.bindMethod(ctx, wasmName, wasmKind, javaName, type) }.singleOrNull()
+    fun exportedFunc(field: String): MethodHandle?
+    fun exportedGlobal(field: String): Pair<MethodHandle, MethodHandle?>?
+    fun <T> exportedMemory(field: String, memClass: Class<T>): T?
+    fun exportedTable(field: String): Array<MethodHandle?>?
+
+    interface ImportResolver {
+        fun resolveImportFunc(module: String, field: String, type: Node.Type.Func): MethodHandle
+        fun resolveImportGlobal(
+            module: String,
+            field: String,
+            type: Node.Type.Global
+        ): Pair<MethodHandle, MethodHandle?>
+        fun <T> resolveImportMemory(module: String, field: String, type: Node.Type.Memory, memClass: Class<T>): T
+        fun resolveImportTable(module: String, field: String, type: Node.Type.Table): Array<MethodHandle?>
     }
 
     interface Instance : Module {
         val cls: Class<*>
-        // Guaranteed to be the same instance when there is no error
-        fun instance(ctx: ScriptContext): Any
+        val inst: Any
 
-        override fun bindMethod(
-            ctx: ScriptContext,
+        fun bindMethod(
             wasmName: String,
             wasmKind: WasmExternalKind,
-            javaName: String,
-            type: MethodType
+            javaName: String = wasmName.javaIdent,
+            paramCountRequired: Int? = null
         ) = cls.methods.filter {
             // @WasmExport match or just javaName match
             Modifier.isPublic(it.modifiers) &&
                 !Modifier.isStatic(it.modifiers) &&
+                (paramCountRequired == null || it.parameterCount == paramCountRequired) &&
                 it.getDeclaredAnnotation(WasmExport::class.java).let { ann ->
                     if (ann == null) it.name == javaName else ann.value == wasmName && ann.kind == wasmKind
                 }
-        }.mapNotNull {
-            MethodHandles.lookup().unreflect(it).bindTo(instance(ctx)).takeIf { it.type() == type }
-        }.singleOrNull()
+        }.mapNotNull { MethodHandles.lookup().unreflect(it).bindTo(inst) }.singleOrNull()
+
+        override fun exportedFunc(field: String) = bindMethod(field, WasmExternalKind.FUNCTION, field.javaIdent)
+        override fun exportedGlobal(field: String) =
+            bindMethod(field, WasmExternalKind.GLOBAL, "get" + field.javaIdent.capitalize(), 0)?.let {
+                it to bindMethod(field, WasmExternalKind.GLOBAL, "set" + field.javaIdent.capitalize(), 1)
+            }
+        @SuppressWarnings("UNCHECKED_CAST")
+        override fun <T> exportedMemory(field: String, memClass: Class<T>) =
+            bindMethod(field, WasmExternalKind.MEMORY, "get" + field.javaIdent.capitalize(), 0)?.
+                takeIf { it.type().returnType() == memClass }?.let { it.invokeWithArguments() as? T }
+        @SuppressWarnings("UNCHECKED_CAST")
+        override fun exportedTable(field: String) =
+            bindMethod(field, WasmExternalKind.TABLE, "get" + field.javaIdent.capitalize(), 0)?.
+                let { it.invokeWithArguments() as? Array<MethodHandle?> }
     }
 
-    data class Native(override val cls: Class<*>, val inst: Any) : Instance {
-        constructor(inst: Any) : this(inst::class.java, inst)
-
-        override fun instance(ctx: ScriptContext) = inst
+    data class Native(override val cls: Class<*>, override val name: String?, override val inst: Any) : Instance {
+        constructor(name: String?, inst: Any) : this(inst::class.java, name, inst)
     }
 
     class Compiled(
         val mod: Node.Module,
         override val cls: Class<*>,
-        val name: String?,
-        val mem: Mem
+        override val name: String?,
+        val mem: Mem,
+        imports: ImportResolver,
+        val defaultMaxMemPages: Int = 1
     ) : Instance {
-        private var inst: Any? = null
-        override fun instance(ctx: ScriptContext) =
-            synchronized(this) { inst ?: createInstance(ctx).also { inst = it } }
+        override val inst = createInstance(imports)
 
-        private fun createInstance(ctx: ScriptContext): Any {
+        private fun createInstance(imports: ImportResolver): Any {
             // Find the constructor
             var constructorParams = emptyList<Any>()
             var constructor: Constructor<*>?
@@ -79,7 +88,8 @@ interface Module {
             val memLimit = if (memImport != null) {
                 constructor = cls.declaredConstructors.find { it.parameterTypes.firstOrNull()?.ref == mem.memType }
                 val memImportKind = memImport.kind as Node.Import.Kind.Memory
-                val memInst = ctx.resolveImportMemory(memImport, memImportKind.type, mem)
+                val memInst = imports.resolveImportMemory(memImport.module, memImport.field,
+                    memImportKind.type, Class.forName(mem.memType.asm.className))
                 constructorParams += memInst
                 val (memLimit, memCap) = mem.limitAndCapacity(memInst)
                 if (memLimit < memImportKind.type.limits.initial * Mem.PAGE_SIZE)
@@ -101,7 +111,7 @@ interface Module {
                 // If it is not there, find the one w/ the max mem amount
                 val maybeMem = mod.memories.firstOrNull()
                 if (constructor == null) {
-                    val maxMem = Math.max(maybeMem?.limits?.initial ?: 0, ctx.defaultMaxMemPages)
+                    val maxMem = Math.max(maybeMem?.limits?.initial ?: 0, defaultMaxMemPages)
                     constructor = cls.declaredConstructors.find { it.parameterTypes.firstOrNull() == Int::class.java }
                     constructorParams += maxMem * Mem.PAGE_SIZE
                 }
@@ -111,14 +121,16 @@ interface Module {
 
             // Function imports
             constructorParams += mod.imports.mapNotNull {
-                if (it.kind is Node.Import.Kind.Func) ctx.resolveImportFunc(it, mod.types[it.kind.typeIndex])
+                if (it.kind is Node.Import.Kind.Func)
+                    imports.resolveImportFunc(it.module, it.field, mod.types[it.kind.typeIndex])
                 else null
             }
 
             // Global imports
             val globalImports = mod.imports.flatMap {
-                if (it.kind is Node.Import.Kind.Global) ctx.resolveImportGlobals(it, it.kind.type)
-                else emptyList()
+                if (it.kind is Node.Import.Kind.Global) {
+                    imports.resolveImportGlobal(it.module, it.field, it.kind.type).toList().mapNotNull { it }
+                } else emptyList()
             }
             constructorParams += globalImports
 
@@ -126,7 +138,7 @@ interface Module {
             val tableImport = mod.imports.find { it.kind is Node.Import.Kind.Table }
             val tableSize = if (tableImport != null) {
                 val tableImportKind = tableImport.kind as Node.Import.Kind.Table
-                val table = ctx.resolveImportTable(tableImport, tableImportKind.type)
+                val table = imports.resolveImportTable(tableImport.module, tableImport.field, tableImportKind.type)
                 if (table.size < tableImportKind.type.limits.initial)
                     throw RunErr.ImportTableTooSmall(tableImportKind.type.limits.initial, table.size)
                 tableImportKind.type.limits.maximum?.let {
@@ -164,7 +176,6 @@ interface Module {
             }
 
             // Construct
-            ctx.debug { "Instantiating $cls using $constructor with params $constructorParams" }
             return constructor.newInstance(*constructorParams.toTypedArray())
         }
     }
