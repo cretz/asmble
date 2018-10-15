@@ -68,6 +68,8 @@ abstract class ByteReader {
             count++
         } while (cur and 0x80 == 0x80 && count <= maxCount)
         if (cur and 0x80 == 0x80) throw IoErr.InvalidLeb128Number()
+        // Result can't have used more than ceil(result/7)
+        if (cur != 0 && count - 1 > (result.toUnsignedLong() + 6) / 7) throw IoErr.InvalidLeb128Number()
         return result
     }
 

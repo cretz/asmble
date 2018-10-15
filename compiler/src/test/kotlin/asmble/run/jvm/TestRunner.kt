@@ -62,11 +62,6 @@ abstract class TestRunner<out T : BaseTestUnit>(val unit: T) : TestBase() {
 
     // TODO: move this into the script context for specific assertions so the rest can continue running
     open fun warningInsteadOfErrReason(t: Throwable): String? =  when (unit.name) {
-        "binary" -> {
-            val expectedFailure = ((t as? ScriptAssertionError)?.assertion as? Script.Cmd.Assertion.Malformed)?.failure
-            // TODO: Pending answer to https://github.com/WebAssembly/spec/pull/882#issuecomment-426349365
-            if (expectedFailure == "integer too large") "Binary test changed" else null
-        }
         // NaN bit patterns can be off
         "float_literals", "float_exprs", "float_misc", "f32_bitwise" ->
             if (isNanMismatch(t)) "NaN JVM bit patterns can be off" else null
