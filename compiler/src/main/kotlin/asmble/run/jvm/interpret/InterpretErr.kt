@@ -53,4 +53,15 @@ sealed class InterpretErr(message: String, cause: Throwable? = null) : RuntimeEx
     ) : InterpretErr("Integer overflow attempting to trunc $orig to $target " + if (signed) "signed" else "unsigned") {
         override val asmErrString get() = "integer overflow"
     }
+
+    class SignedDivOverflow(
+        val a: Number,
+        val b: Number
+    ) : InterpretErr("Integer overflow attempting $a / $b") {
+        override val asmErrString get() = "integer overflow"
+    }
+
+    class StackOverflow(val max: Int) : InterpretErr("Call stack exceeeded $max depth") {
+        override val asmErrString get() = "call stack exhausted"
+    }
 }

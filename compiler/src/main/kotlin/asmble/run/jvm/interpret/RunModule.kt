@@ -1,6 +1,7 @@
 package asmble.run.jvm.interpret
 
 import asmble.ast.Node
+import asmble.compile.jvm.jclass
 import asmble.run.jvm.Module
 import asmble.run.jvm.ModuleBuilder
 import asmble.util.Logger
@@ -20,9 +21,16 @@ class RunModule(
         val lookup = MethodHandles.lookup()
         var getter = lookup.bind(ctx, "getGlobal",
             MethodType.methodType(Number::class.java, Int::class.javaPrimitiveType))
-        getter = MethodHandles.insertArguments(getter, 0, index)
         var setter = if (!type.mutable) null else lookup.bind(ctx, "setGlobal", MethodType.methodType(
             Void::class.javaPrimitiveType, Int::class.javaPrimitiveType, Number::class.java))
+        // Cast number to specific type
+        getter = MethodHandles.explicitCastArguments(getter,
+            MethodType.methodType(type.contentType.jclass, Int::class.javaPrimitiveType))
+        if (setter != null)
+            setter = MethodHandles.explicitCastArguments(setter, MethodType.methodType(
+                Void::class.javaPrimitiveType, Int::class.javaPrimitiveType, type.contentType.jclass))
+        // Insert the index argument up front
+        getter = MethodHandles.insertArguments(getter, 0, index)
         if (setter != null) setter = MethodHandles.insertArguments(setter, 0, index)
         getter to setter
     }

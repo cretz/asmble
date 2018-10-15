@@ -80,6 +80,9 @@ open class Interpreter {
                         valueStack.clear()
                         retVal?.also { push(it) }
                         insnIndex = func.instructions.size
+                    } else if (blockStack.last().insn is Node.Instr.Loop && !step.forceEndOnLoop) {
+                        // It's just a loop continuation, go back to top
+                        insnIndex = blockStack.last().startIndex + 1
                     } else {
                         // Remove the one at the depth requested
                         val block = blockStack.removeAt(blockStack.size - 1)
@@ -89,10 +92,8 @@ open class Interpreter {
                         valueStack.subList(block.stackSizeAtStart, valueStack.size).clear()
                         // Put the value back on if applicable
                         blockVal?.also { push(it) }
-                        // Jump to target insn
-                        insnIndex =
-                            if (block.insn is Node.Instr.Loop && !step.forceEndOnLoop) block.startIndex
-                            else block.endIndex + 1
+                        // Jump past the end
+                        insnIndex = block.endIndex + 1
                     }
                 }
             }
@@ -163,9 +164,11 @@ open class Interpreter {
                 is Node.Instr.Return ->
                     StepResult.Return(func.type.ret?.let { pop(it) })
                 is Node.Instr.Call -> ctx.funcTypeAtIndex(insn.index).let {
+                    ctx.checkNextIsntStackOverflow()
                     StepResult.Call(insn.index, popCallArgs(it), it)
                 }
                 is Node.Instr.CallIndirect -> {
+                    ctx.checkNextIsntStackOverflow()
                     val tableIndex = popInt()
                     val expectedType = ctx.typeAtIndex(insn.index).also {
                         val tableMh = ctx.table?.getOrNull(tableIndex) ?:
@@ -181,9 +184,11 @@ open class Interpreter {
                 is Node.Instr.Drop -> next { pop() }
                 is Node.Instr.Select -> next {
                     popInt().also {
-                        val v1 = pop()
                         val v2 = pop()
-                        if (it == 0) push(v1) else push(v2)
+                        val v1 = pop()
+                        if (v1::class != v2::class)
+                            throw CompileErr.SelectMismatch(v1.valueType!!.typeRef, v2.valueType!!.typeRef)
+                        if (it != 0) push(v1) else push(v2)
                     }
                 }
                 is Node.Instr.GetLocal -> next { push(locals[insn.index]) }
@@ -216,11 +221,11 @@ open class Interpreter {
                 is Node.Instr.I64Store32 -> next { popLong().let { ctx.mem.putInt(insn.popMemAddr(), it.toInt()) } }
                 is Node.Instr.MemorySize -> next { push(ctx.mem.limit() / Mem.PAGE_SIZE) }
                 is Node.Instr.MemoryGrow -> next {
-                    val newLim = popInt() * Mem.PAGE_SIZE
+                    val newLim = ctx.mem.limit().toLong() + (popInt().toLong() * Mem.PAGE_SIZE)
                     if (newLim > ctx.mem.capacity()) push(-1)
                     else (ctx.mem.limit() / Mem.PAGE_SIZE).also {
                         push(it)
-                        ctx.mem.limit(newLim)
+                        ctx.mem.limit(newLim.toInt())
                     }
                 }
                 is Node.Instr.I32Const -> next { push(insn.value) }
@@ -267,7 +272,10 @@ open class Interpreter {
                 is Node.Instr.I32Add -> nextBinOp(popInt(), popInt()) { a, b -> a + b }
                 is Node.Instr.I32Sub -> nextBinOp(popInt(), popInt()) { a, b -> a - b }
                 is Node.Instr.I32Mul -> nextBinOp(popInt(), popInt()) { a, b -> a * b }
-                is Node.Instr.I32DivS -> nextBinOp(popInt(), popInt()) { a, b -> a / b }
+                is Node.Instr.I32DivS -> nextBinOp(popInt(), popInt()) { a, b ->
+                    ctx.checkedSignedDivInteger(a, b)
+                    a / b
+                }
                 is Node.Instr.I32DivU -> nextBinOp(popInt(), popInt()) { a, b -> Integer.divideUnsigned(a, b) }
                 is Node.Instr.I32RemS -> nextBinOp(popInt(), popInt()) { a, b -> a % b }
                 is Node.Instr.I32RemU -> nextBinOp(popInt(), popInt()) { a, b -> Integer.remainderUnsigned(a, b) }
@@ -281,11 +289,14 @@ open class Interpreter {
                 is Node.Instr.I32Rotr -> nextBinOp(popInt(), popInt()) { a, b -> Integer.rotateRight(a, b) }
                 is Node.Instr.I64Clz -> next { push(java.lang.Long.numberOfLeadingZeros(popLong()).toLong()) }
                 is Node.Instr.I64Ctz -> next { push(java.lang.Long.numberOfTrailingZeros(popLong()).toLong()) }
-                is Node.Instr.I64Popcnt -> next { push(java.lang.Long.bitCount(popLong())) }
+                is Node.Instr.I64Popcnt -> next { push(java.lang.Long.bitCount(popLong()).toLong()) }
                 is Node.Instr.I64Add -> nextBinOp(popLong(), popLong()) { a, b -> a + b }
                 is Node.Instr.I64Sub -> nextBinOp(popLong(), popLong()) { a, b -> a - b }
                 is Node.Instr.I64Mul -> nextBinOp(popLong(), popLong()) { a, b -> a * b }
-                is Node.Instr.I64DivS -> nextBinOp(popLong(), popLong()) { a, b -> a / b }
+                is Node.Instr.I64DivS -> nextBinOp(popLong(), popLong()) { a, b ->
+                    ctx.checkedSignedDivInteger(a, b)
+                    a / b
+                }
                 is Node.Instr.I64DivU -> nextBinOp(popLong(), popLong()) { a, b -> java.lang.Long.divideUnsigned(a, b) }
                 is Node.Instr.I64RemS -> nextBinOp(popLong(), popLong()) { a, b -> a % b }
                 is Node.Instr.I64RemU -> nextBinOp(popLong(), popLong()) { a, b -> java.lang.Long.remainderUnsigned(a, b) }
@@ -396,7 +407,9 @@ open class Interpreter {
         val imports: Imports = Imports.None,
         val defaultMaxMemPages: Int = 1,
         val memByteBufferDirect: Boolean = true,
-        val checkTruncOverflow: Boolean = true
+        val checkTruncOverflow: Boolean = true,
+        val checkSignedDivIntegerOverflow: Boolean = true,
+        val maximumCallStackDepth: Int = 3000
     ) {
         val callStack = mutableListOf<FuncContext>()
         val currFuncCtx get() = callStack.last()
@@ -547,6 +560,26 @@ open class Interpreter {
                     (it is Long && signed && (orig < -9223372036854775807.0 || orig >= 9223372036854775807.0)) ||
                     (it is Long && !signed && (orig.toInt() < 0 || orig >= 18446744073709551616.0))
                 if (invalid) throw InterpretErr.TruncIntegerOverflow(orig, it.valueType!!, signed)
+            }
+        }
+
+        fun checkedSignedDivInteger(a: Int, b: Int) {
+            if (checkSignedDivIntegerOverflow && (a == Int.MIN_VALUE && b == -1))
+                throw InterpretErr.SignedDivOverflow(a, b)
+        }
+
+        fun checkedSignedDivInteger(a: Long, b: Long) {
+            if (checkSignedDivIntegerOverflow && (a == Long.MIN_VALUE && b == -1L))
+                throw InterpretErr.SignedDivOverflow(a, b)
+        }
+
+        fun checkNextIsntStackOverflow() {
+            // TODO: note this doesn't keep count of imports and their call stack
+            if (callStack.size + 1 >= maximumCallStackDepth) {
+                // We blow away the entire stack here so code can continue...could provide stack to
+                // exception if we wanted
+                callStack.clear()
+                throw InterpretErr.StackOverflow(maximumCallStackDepth)
             }
         }
     }

@@ -37,8 +37,7 @@ abstract class TestRunner<out T : BaseTestUnit>(val unit: T) : TestBase() {
         val out = ByteArrayOutputStream()
         var scriptContext = ScriptContext(
             logger = this,
-            builder = builder,
-            assertionExclusionFilter = ::excludeAssertion
+            builder = builder
         ).withHarnessRegistered(PrintWriter(OutputStreamWriter(out, Charsets.UTF_8), true))
 
         // This will fail assertions as necessary
@@ -69,7 +68,7 @@ abstract class TestRunner<out T : BaseTestUnit>(val unit: T) : TestBase() {
             if (expectedFailure == "integer too large") "Binary test changed" else null
         }
         // NaN bit patterns can be off
-        "float_literals", "float_exprs", "float_misc" ->
+        "float_literals", "float_exprs", "float_misc", "f32_bitwise" ->
             if (isNanMismatch(t)) "NaN JVM bit patterns can be off" else null
         // We don't hold table capacity right now
         // TODO: Figure out how we want to store/retrieve table capacity. Right now
@@ -101,6 +100,4 @@ abstract class TestRunner<out T : BaseTestUnit>(val unit: T) : TestBase() {
         is Node.Instr.F64Const -> i.value.isNaN()
         else -> false
     }
-
-    open fun excludeAssertion(a: Script.Cmd.Assertion) = false
 }
