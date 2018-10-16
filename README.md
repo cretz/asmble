@@ -1,7 +1,15 @@
 # Asmble
 
 Asmble is a compiler that compiles [WebAssembly](http://webassembly.org/) code to JVM bytecode. It also contains
-utilities for working with WASM code from the command line and from JVM languages.
+an interpreter and utilities for working with WASM code from the command line and from JVM languages.
+
+## Features
+
+* WASM to JVM bytecode compiler (no runtime required)
+* WASM interpreter (instruction-at-a-time steppable)
+* Conversion utilities between WASM binary, WASM text, and WASM AST
+* Programmatic JVM library for all of the above (written in Kotlin)
+* [Examples](examples) showing how to use other languages on the JVM via WASM (e.g. Rust)
 
 ## Quick Start
 
@@ -52,6 +60,8 @@ executing `asmble` with no commands:
 
     For detailed command info, use:
       help COMMAND
+
+Some of the commands are detailed below.
 
 ### Compiling
 
@@ -122,36 +132,6 @@ Now there is a file called `MyClass.class`. Since it has a no-arg constructor be
 Note, that any Java class can be registered for the most part. It just needs to have a no-arg consstructor and any
 referenced functions need to be public, non-static, and with return/param types of only int, long, float, or double.
 
-### Running Scripts
-
-The WebAssembly spec has a concept of [scripts](https://github.com/WebAssembly/spec/tree/master/interpreter#scripts) for
-testing purposes. Running `asmble help run`:
-
-    Command: run
-    Description: Run WebAssembly script commands
-    Usage:
-      run [-in <inFile>]... [-reg <registration>]... <scriptFile>
-
-    Args:
-      -defmaxmempages <defaultMaxMemPages> - The maximum number of memory pages when a module doesn't say. Optional, default: 5
-      -in <inFile> - Files to add to classpath. Can be wasm, wast, or class file. Named wasm/wast modules here are automatically registered unless -noreg is set. Multiple allowed. Optional, default: <empty>
-      -log <logLevel> - One of: trace, debug, info, warn, error, off. Optional, default: warn
-      -noreg - If set, this will not auto-register modules with names. Optional.
-      -reg <registration> - Register class name to a module name. Format: modulename=classname. Multiple allowed. Optional, default: <empty>
-      <scriptFile> - The script file to run all commands for. This can be '--' for stdin. Must be wast format. Required.
-      -testharness - If set, registers the spec test harness as 'spectest'. Optional.
-
-So take something like the
-[start.wast](https://github.com/WebAssembly/spec/blob/6a01dab6d29b7c2b5dfd3bb3879bbd6ab76fd5dc/test/core/start.wast)
-test case from the spec and run it with the test harness:
-
-    asmble run -testharness start.wast
-
-And confirm it returns the
-[expected output](https://github.com/WebAssembly/spec/blob/6a01dab6d29b7c2b5dfd3bb3879bbd6ab76fd5dc/test/core/expected-output/start.wast.log).
-
-The comments concerning importing Java classes for "invoke" apply here too.
-
 ### Translating
 
 Running `asmble help translate`:
@@ -200,17 +180,16 @@ To manually build, clone the repository:
 
     git clone --recursive https://github.com/cretz/asmble
 
-The reason we use recursive is to clone the spec submodule we have embedded at `src/test/resources/spec`. Then, with
-[gradle](https://gradle.org/) installed, navigate to the cloned repository and create the gradle wrapper via
-`gradle wrapper`. Now the `gradlew` command is available.
+The reason we use recursive is to clone the spec submodule we have embedded at `src/test/resources/spec`. Unlike many
+Gradle projects, this project chooses not to embed the Gradle runtime library in the repository. To assemble the entire
+project with [Gradle](https://gradle.org/) installed and on the `PATH` (tested with 4.6), run:
 
-To build, run `./gradlew build`. This will run all tests which includes the test suite from the WebAssembly spec.
-Running `./gradlew assembleDist` builds the same zip and tar files uploaded to the releases area.
+    gradle assembleDist
 
 ### Library Notes
 
-The API documentation is not yet available at this early stage. But as an overview, here are some interesting classes
-and packages:
+The API documentation is not yet available at this early stage. But as an overview, here are some useful classes and
+packages:
 
 * `asmble.ast.Node` - All WebAssembly AST nodes as static inner classes.
 * `asmble.cli` - All code for the CLI.
@@ -220,17 +199,25 @@ and packages:
 * `FuncBuilder` - Where the bulk of the WASM-instruction-to-JVM-instruction translation happens.
 * `asmble.io` - Classes for translating to/from ast nodes, bytes (i.e. wasm), sexprs (i.e. wast), and strings.
 * `asmble.run.jvm` - Tools for running WASM code on the JVM. Specifically `ScriptContext` which helps with linking.
+* `asmble.run.jvm.interpret` - The interpreter that can run WASM all at once or allow it to be stepped one instruction
+  at a time.
+
+Note, some code is not complete yet (e.g. a linker and `javax.script` support) but beginnings of the code still appear
+in the repository.
 
 And for those reading code, here are some interesting algorithms:
 
 * `asmble.compile.jvm.RuntimeHelpers#bootstrapIndirect` (in Java, not Kotlin) - Manipulating arguments to essentially
   chain `MethodHandle` calls for an `invokedynamic` bootstrap. This is actually taken from the compiled Java class and
   injected as a synthetic method of the module class if needed.
+* `asmble.compile.jvm.msplit` (in Java, not Kotlin) - A rudimentary JVM method bytecode splitter for when method sizes
+  exceed the limit allowed by the JVM (embedded from [another project](https://github.com/cretz/msplit)).
 * `asmble.compile.jvm.InsnReworker#addEagerLocalInitializers` - Backwards navigation up the instruction list to make
   sure that a local is set before it is get.
 * `asmble.compile.jvm.InsnReworker#injectNeededStackVars` - Inject instructions at certain places to make sure we have
   certain items on the stack when we need them.
 * `asmble.io.ByteReader$InputStream` - A simple eof-peekable input stream reader.
+* `asmble.run.jvm.interpret.Interpreter` - Full WASM interpreter in a few hundred lines of Kotlin.
 
 ## Compilation Details
 
@@ -422,13 +409,8 @@ Android. I assume, then, that both runtime and compile-time code might run there
 
 **What about JVM to WASM?**
 
-I'll be watching the GC approach taken and then reevaluate options. Everyone is focused on targeting WASM with several
-languages but is missing the big problem: lack of a standard library. There is not a lot of interoperability between
-WASM compiled from Rust, C, Java, etc if e.g. they all have their own way of handling strings. Someone needs to build a
-definition of an importable set of modules that does all of these things, even if it's in WebIDL. I dunno, maybe the
-effort is already there, I haven't really looked.
-
-There is https://github.com/konsoletyper/teavm
+This is not an immediate goal of this project, at least not until the WASM GC proposal has been accepted. In the
+meantime, there is https://github.com/konsoletyper/teavm
 
 **So I can compile something in C via Emscripten and have it run on the JVM with this?**
 
@@ -447,5 +429,5 @@ Not yet, once source maps get standardized I may revisit.
 * Expose the advanced compilation options
 * Add "link" command that will build an entire JAR out of several WebAssembly files and glue code between them
 * Annotations to make it clear what imports are expected
-* Compile to JS and native with Kotlin
-* Add javax.script (which can give things like a free repl w/ jrunscript)
+* Compile some parts to JS and native with Kotlin
+* Add `javax.script` support (which can give things like a free repl w/ jrunscript)
