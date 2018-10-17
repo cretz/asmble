@@ -16,7 +16,7 @@ import java.nio.ByteOrder
 // This is not intended to be fast, rather clear and easy to read. Very little cached/memoized, lots of extra cycles.
 open class Interpreter {
 
-    fun execFunc(
+    open fun execFunc(
         ctx: Context,
         funcIndex: Int = ctx.mod.startFuncIndex ?: error("No start func index"),
         vararg funcArgs: Number
@@ -39,20 +39,21 @@ open class Interpreter {
             next(ctx, lastStep)
             lastStep = step(ctx)
         }
-        ctx.callStack.subList(startingCallStackSize + 1, ctx.callStack.size).clear()
+        ctx.callStack.subList(startingCallStackSize, ctx.callStack.size).clear()
         return lastStep.v
     }
 
-    fun step(ctx: Context): StepResult = ctx.currFuncCtx.run {
+    open fun step(ctx: Context): StepResult = ctx.currFuncCtx.run {
         // If the insn is out of bounds, it's an implicit return, otherwise just execute the insn
         if (insnIndex >= func.instructions.size) StepResult.Return(func.type.ret?.let { pop(it) })
         else invokeSingle(ctx)
     }
 
     // Errors with InterpretErr.EndReached if there is no next step to be had
-    fun next(ctx: Context, step: StepResult) {
+    open fun next(ctx: Context, step: StepResult) {
         ctx.logger.trace {
-            "NEXT: $step " +
+            val fnName = ctx.maybeCurrFuncCtx?.funcIndex?.let { ctx.mod.names?.funcNames?.get(it) ?: it.toString() }
+            "NEXT ON $fnName(${ctx.maybeCurrFuncCtx?.funcIndex}:${ctx.maybeCurrFuncCtx?.insnIndex}): $step " +
                 "[VAL STACK: ${ctx.maybeCurrFuncCtx?.valueStack}] " +
                 "[CALL STACK DEPTH: ${ctx.callStack.size}]"
         }
@@ -100,7 +101,7 @@ open class Interpreter {
             // Call, if import, invokes it and puts result on stack. If not, just pushes a new func context.
             is StepResult.Call -> ctx.funcAtIndex(step.funcIndex).let {
                 when (it) {
-                    // If import, call and just put on stack and advance insn  if came from insn
+                    // If import, call and just put on stack and advance insn if came from insn
                     is Either.Left ->
                         ctx.imports.invokeFunction(it.v.module, it.v.field, step.type, step.args).also {
                             // Make sure result type is accurate
@@ -110,7 +111,11 @@ open class Interpreter {
                             ctx.currFuncCtx.insnIndex++
                         }
                     // If inside the module, create new context to continue
-                    is Either.Right -> ctx.callStack += FuncContext(it.v).also { funcCtx ->
+                    is Either.Right -> ctx.callStack += FuncContext(step.funcIndex, it.v).also { funcCtx ->
+                        ctx.logger.trace {
+                            ">".repeat(ctx.callStack.size) + " " + ctx.mod.names?.funcNames?.get(funcCtx.funcIndex) +
+                                ":${funcCtx.funcIndex} - args: " + step.args
+                        }
                         // Set the args
                         step.args.forEachIndexed { index, arg -> funcCtx.locals[index] = arg  }
                     }
@@ -137,8 +142,8 @@ open class Interpreter {
         }
     }
 
-    fun invokeSingle(ctx: Context): StepResult = ctx.currFuncCtx.run {
-        // TODO: validation
+    open fun invokeSingle(ctx: Context): StepResult = ctx.currFuncCtx.run {
+        // TODO: validation?
         func.instructions[insnIndex].let { insn ->
             ctx.logger.trace { "INSN #$insnIndex: $insn [STACK: $valueStack]" }
             when (insn) {
@@ -585,6 +590,7 @@ open class Interpreter {
     }
 
     data class FuncContext(
+        val funcIndex: Int,
         val func: Node.Func,
         val valueStack: MutableList<Number> = mutableListOf(),
         val blockStack: MutableList<Block> = mutableListOf(),
@@ -624,7 +630,11 @@ open class Interpreter {
             // Find the next end/else
             var blockDepth = 0
             val index = func.instructions.drop(insnIndex + 1).indexOfFirst { insn ->
+                // Increase block depth if necessary
                 when (insn) { is Node.Instr.Block, is Node.Instr.Loop, is Node.Instr.If -> blockDepth++ }
+                // If we're at the end of ourself but not looking for end, short-circuit a failure
+                if (blockDepth == 0 && !end && insn is Node.Instr.End) return null
+                // Did we find an end or an else on ourself?
                 val found = blockDepth == 0 && ((end && insn is Node.Instr.End) || (!end && insn is Node.Instr.Else))
                 if (blockDepth > 0 && insn is Node.Instr.End) blockDepth--
                 found
@@ -632,7 +642,7 @@ open class Interpreter {
             return if (index == -1) null else index + insnIndex + 1
         }
         fun currentBlockEnd() = currentBlockEndOrElse(true)
-        fun currentBlockElse() = currentBlockEndOrElse(false)
+        fun currentBlockElse(): Int? = currentBlockEndOrElse(false)
 
         inline fun next(crossinline f: () -> Unit) = StepResult.Next.also { f() }
         inline fun <T, U> nextBinOp(second: T, first: U, crossinline f: (U, T) -> Any) = StepResult.Next.also {
