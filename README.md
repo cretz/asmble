@@ -184,7 +184,7 @@ The reason we use recursive is to clone the spec submodule we have embedded at `
 Gradle projects, this project chooses not to embed the Gradle runtime library in the repository. To assemble the entire
 project with [Gradle](https://gradle.org/) installed and on the `PATH` (tested with 4.6), run:
 
-    gradle assembleDist
+    gradle :compiler:assembleDist
 
 ### Library Notes
 
