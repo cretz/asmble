@@ -112,7 +112,7 @@ open class Interpreter {
                         }
                     // If inside the module, create new context to continue
                     is Either.Right -> ctx.callStack += FuncContext(step.funcIndex, it.v).also { funcCtx ->
-                        ctx.logger.trace {
+                        ctx.logger.debug {
                             ">".repeat(ctx.callStack.size) + " " + ctx.mod.names?.funcNames?.get(funcCtx.funcIndex) +
                                 ":${funcCtx.funcIndex} - args: " + step.args
                         }
@@ -409,6 +409,7 @@ open class Interpreter {
     data class Context(
         val mod: Node.Module,
         val logger: Logger = Logger.Print(Logger.Level.OFF),
+        val interpreter: Interpreter = Interpreter.Companion,
         val imports: Imports = Imports.None,
         val defaultMaxMemPages: Int = 1,
         val memByteBufferDirect: Boolean = true,
@@ -484,7 +485,7 @@ open class Interpreter {
             val type = funcTypeAtIndex(index).let {
                 MethodType.methodType(it.ret?.jclass ?: Void.TYPE, it.params.map { it.jclass })
             }
-            val origMh = MethodHandles.lookup().bind(Interpreter.Companion, "execFunc", MethodType.methodType(
+            val origMh = MethodHandles.lookup().bind(interpreter, "execFunc", MethodType.methodType(
                 Number::class.java, Context::class.java, Int::class.java, Array<Number>::class.java))
             return MethodHandles.insertArguments(origMh, 0, this, index).
                 asVarargsCollector(Array<Number>::class.java).asType(type)
