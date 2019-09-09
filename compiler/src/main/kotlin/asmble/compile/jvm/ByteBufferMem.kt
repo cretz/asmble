@@ -24,7 +24,7 @@ open class ByteBufferMem(val direct: Boolean = true) : Mem {
     override fun init(func: Func, initial: Int) = func.popExpecting(memType).addInsns(
         // Set the limit to initial
         (initial * Mem.PAGE_SIZE).const,
-        forceFnType<ByteBuffer.(Int) -> Buffer>(ByteBuffer::limit).invokeVirtual(),
+        forceFnType<ByteBuffer.(Int) -> ByteBuffer>(ByteBuffer::limit).invokeVirtual(),
         TypeInsnNode(Opcodes.CHECKCAST, ByteBuffer::class.ref.asmName),
         // Set it to use little endian
         ByteOrder::LITTLE_ENDIAN.getStatic(),

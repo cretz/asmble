@@ -35,7 +35,7 @@ class RunModule(
         getter to setter
     }
 
-    @SuppressWarnings("UNCHECKED_CAST")
+    @Suppress("UNCHECKED_CAST")
     override fun <T> exportedMemory(field: String, memClass: Class<T>) =
         ctx.exportIndex(field, Node.ExternalKind.MEMORY)?.let { index ->
             require(index == 0 && memClass == ByteBuffer::class.java)
