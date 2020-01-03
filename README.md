@@ -26,7 +26,7 @@ on module init:
 
 ```
 (module
-  (import "spectest" "print" (func $print (param i32)))
+  (import "spectest" "print_i32" (func $print (param i32)))
   (func $print70 (call $print (i32.const 70)))
   (start $print70)
 )
