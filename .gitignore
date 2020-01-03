@@ -1,13 +1,10 @@
 .classpath
 .project
 .settings
-/gradlew
-/gradlew.bat
 /.gradle
 /.idea
 /asmble.iml
 /build
-/gradle
 /compiler/bin
 /compiler/build
 /compiler/out
